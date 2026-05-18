@@ -82,7 +82,8 @@ function printHelp(): void {
   console.log(`pixelpipe — token-saving proxy for Claude Code
 
 Usage:
-  pixelpipe [options]
+  pixelpipe [options]                run the proxy
+  pixelpipe stats [--file <p>]       summarize ~/.pixelpipe/events.jsonl
 
 Options:
   -p, --port <N>          listen port (default 47821)
@@ -288,7 +289,16 @@ class FileTracker implements Tracker {
 // ---- main ----------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const opts = parseCli(process.argv.slice(2));
+  // Subcommand dispatch — before parseCli so flag parsing doesn't choke on
+  // `stats`'s own flags.
+  const argv = process.argv.slice(2);
+  if (argv[0] === 'stats') {
+    const { runStats } = await import('./stats.js');
+    const code = await runStats(argv.slice(1));
+    process.exit(code);
+  }
+
+  const opts = parseCli(argv);
   const transform: TransformOptions = {
     compress: opts.compress,
     compressTools: opts.compressTools,
