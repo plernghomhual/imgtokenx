@@ -44,6 +44,13 @@ export interface TrackEvent {
    *  cold-misses solves both `chars_per_token` (α) and `pixels_per_token` (β)
    *  for the live model. */
   outgoing_text_chars?: number;
+  /** Ground-truth pre-transform token count from Anthropic's
+   *  /v1/messages/count_tokens. Populated only when the host enabled the
+   *  measureSavings flag. Together with `actual_tokens_measured` this
+   *  gives exact saved_pct without any α/β estimation. */
+  baseline_tokens_measured?: number;
+  /** Ground-truth post-transform token count from count_tokens. */
+  actual_tokens_measured?: number;
   static_chars?: number;
   dynamic_chars?: number;
   dynamic_block_count?: number;
@@ -183,6 +190,12 @@ export function toTrackEvent(ev: ProxyEvent): TrackEvent {
     }
     if (info.outgoingTextChars !== undefined && info.outgoingTextChars > 0) {
       out.outgoing_text_chars = info.outgoingTextChars;
+    }
+    if (info.baselineTokensMeasured !== undefined && info.baselineTokensMeasured >= 0) {
+      out.baseline_tokens_measured = info.baselineTokensMeasured;
+    }
+    if (info.actualTokensMeasured !== undefined && info.actualTokensMeasured >= 0) {
+      out.actual_tokens_measured = info.actualTokensMeasured;
     }
     if (info.staticChars !== undefined) out.static_chars = info.staticChars;
     if (info.dynamicChars !== undefined) out.dynamic_chars = info.dynamicChars;

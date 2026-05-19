@@ -380,6 +380,73 @@ describe('DashboardState.fitCosts() — empirical α/β regression', () => {
       );
     });
 
+    it('ground-truth measurement path: count_tokens deltas drive saved_pct_measured exactly', async () => {
+      // Synthetic event with both baseline and actual token counts present
+      // (as if the proxy had called /v1/messages/count_tokens on both bodies).
+      // The dashboard should compute saved_pct_measured = (baseline - actual) /
+      // baseline exactly, with NO α/β estimation involved.
+      const measuredEv = (baseline: number, actual: number, cc: number): ProxyEvent => ({
+        method: 'POST',
+        path: '/v1/messages',
+        status: 200,
+        durationMs: 100,
+        info: {
+          compressed: true,
+          origChars: 100_000,
+          compressedChars: 50_000,
+          imageCount: 3,
+          imageBytes: 100_000,
+          imagePixels: 800_000,
+          outgoingTextChars: 50_000,
+          staticChars: 30_000,
+          dynamicChars: 200,
+          dynamicBlockCount: 1,
+          baselineTokensMeasured: baseline,
+          actualTokensMeasured: actual,
+        },
+        usage: {
+          input_tokens: 0,
+          output_tokens: 50,
+          cache_creation_input_tokens: cc,
+          cache_read_input_tokens: 0,
+        },
+      });
+
+      // Three events with exact 50% savings on tokens (baseline 80k → actual 40k).
+      // Each paid cc=40k tokens at 1.25× = 50k eff + output 50×5=250 ≈ 50_250 eff.
+      // Delta is 40k tokens × 1.25 (same cache mix) = 50k effective extra.
+      // baseline_measured per event ≈ 50_250 + 50_000 = 100_250.
+      // saved_pct_measured ≈ (100_250 - 50_250) / 100_250 ≈ 49.9%.
+      dash.update(measuredEv(80_000, 40_000, 40_000));
+      dash.update(measuredEv(80_000, 40_000, 40_000));
+      dash.update(measuredEv(80_000, 40_000, 40_000));
+
+      const stats = await dash.serveStats().json();
+      expect(stats.measured_events).toBe(3);
+      expect(stats.saved_pct_measured).toBeGreaterThan(45);
+      expect(stats.saved_pct_measured).toBeLessThan(55);
+      // Measured fields must be numbers, not null, when measurements exist.
+      expect(typeof stats.effective_cost_actual_measured).toBe('number');
+      expect(typeof stats.effective_cost_baseline_measured).toBe('number');
+      expect(typeof stats.saved_effective_tokens_measured).toBe('number');
+      // Identity check: saved = baseline - actual.
+      expect(stats.saved_effective_tokens_measured).toBeCloseTo(
+        stats.effective_cost_baseline_measured - stats.effective_cost_actual_measured,
+        0,
+      );
+    });
+
+    it('measured fields are null when no event carried count_tokens measurement', async () => {
+      // Use the regular ev() helper which never sets baselineTokensMeasured.
+      dash.update(ev({ textChars: 100_000, pixels: 800_000, input: 30_000, cacheCreate: 10_000, cacheRead: 0 }));
+      const stats = await dash.serveStats().json();
+      expect(stats.measured_events).toBe(0);
+      expect(stats.saved_pct_measured).toBeNull();
+      expect(stats.effective_cost_actual_measured).toBeNull();
+      expect(stats.effective_cost_baseline_measured).toBeNull();
+      expect(stats.saved_effective_tokens_measured).toBeNull();
+    });
+
     it('pricing_assumptions surfaces the rate used to compute saved_usd_estimated', async () => {
       // Sourced from docs.anthropic.com/en/docs/about-claude/pricing,
       // verified 2026-05-19. Locks in: input rate, output multiplier,

@@ -21,6 +21,15 @@ export interface ProxyConfig {
    *  /v1/messages POST. Static object form is used by the Workers host and
    *  tests that don't need dynamic state. */
   transform?: TransformOptions | (() => TransformOptions);
+  /** When true, the proxy fires a /v1/messages/count_tokens call on BOTH
+   *  the pre-transform body and the post-transform body for every
+   *  /v1/messages request, and attaches the exact tokenizer counts to
+   *  `info.baselineTokensMeasured` and `info.actualTokensMeasured`. The
+   *  dashboard's headline saved_pct then comes from real measurement
+   *  rather than the α/β regression. count_tokens is free (Anthropic
+   *  doesn't bill it) but adds two parallel HTTP roundtrips per request,
+   *  so this is opt-in. Default false. */
+  measureSavings?: boolean;
   /** Called after every request — useful for logging / metrics in the host. */
   onRequest?: (event: ProxyEvent) => void | Promise<void>;
 }
@@ -261,6 +270,36 @@ function filterHeaders(src: Headers, strip: Set<string>): Headers {
   return out;
 }
 
+/** Ask the upstream /v1/messages/count_tokens endpoint to tokenize a body
+ *  using the same auth + headers we'd send to /v1/messages. Returns the
+ *  exact input_tokens count or null on any failure (4xx, 5xx, network
+ *  error, missing field). count_tokens is documented as free — Anthropic
+ *  does not bill input tokens for it — so we use it to measure ground-
+ *  truth pre/post-transform sizes without estimation.
+ *
+ *  Failure is never fatal: when this returns null the caller skips the
+ *  measurement and the dashboard falls back to the regression estimate. */
+async function countTokensUpstream(
+  upstream: string,
+  body: BodyInit,
+  headers: Headers,
+): Promise<number | null> {
+  try {
+    const res = await fetch(upstream + '/v1/messages/count_tokens', {
+      method: 'POST',
+      headers,
+      body,
+      ...(body instanceof ReadableStream ? { duplex: 'half' } : {}),
+    } as RequestInit);
+    if (!res.ok) return null;
+    const text = await res.text();
+    const json = JSON.parse(text) as { input_tokens?: unknown };
+    return typeof json.input_tokens === 'number' ? json.input_tokens : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Build the proxy fetch handler bound to a config. */
 export function createProxy(config: ProxyConfig = {}) {
   const upstream = (config.upstream ?? DEFAULT_UPSTREAM).replace(/\/+$/, '');
@@ -299,6 +338,20 @@ export function createProxy(config: ProxyConfig = {}) {
             // gzip failure is non-fatal — drop the body sample, keep the rest.
           }
         }
+        // If count_tokens measurement was kicked off in parallel, await it
+        // here so the resulting numbers land on `info` BEFORE the host's
+        // onRequest fires (which is what persists the event). null results
+        // (measurement failed) are silently dropped — the dashboard falls
+        // back to the α-regression estimate when these fields are absent.
+        if (measurePromise && info) {
+          try {
+            const m = await measurePromise;
+            if (m.baseline !== null) info.baselineTokensMeasured = m.baseline;
+            if (m.actual !== null) info.actualTokensMeasured = m.actual;
+          } catch {
+            // measurement failed — drop, keep the rest of the event intact.
+          }
+        }
         await config.onRequest?.({
           method: req.method,
           path: url.pathname,
@@ -322,6 +375,16 @@ export function createProxy(config: ProxyConfig = {}) {
     let bodyOut: BodyInit | null = null;
     let info: TransformInfo | undefined;
 
+    // Ground-truth token-count measurement (opt-in via config.measureSavings).
+    // When enabled, we fire /v1/messages/count_tokens on the pre-transform
+    // and post-transform bodies in parallel with the main upstream forward.
+    // Results land on info.{baselineTokensMeasured, actualTokensMeasured}
+    // and the dashboard prefers them over the α-regression estimate.
+    let measurePromise: Promise<{
+      baseline: number | null;
+      actual: number | null;
+    }> | undefined;
+
     if (isMessages) {
       const bodyIn = new Uint8Array(await req.arrayBuffer());
       try {
@@ -341,6 +404,19 @@ export function createProxy(config: ProxyConfig = {}) {
         reqBodyBytes = r.body;
         if (r.body.byteLength > 0) {
           reqBodySha8 = await sha8Bytes(r.body);
+        }
+
+        // Kick off the two count_tokens probes BEFORE forwarding /v1/messages
+        // so they run in parallel with the main request. Headers are filtered
+        // exactly like the main request — same auth, same model, same anthropic-
+        // version. Both calls are no-ops if measureSavings is disabled.
+        if (config.measureSavings) {
+          const ctHeaders = filterHeaders(req.headers, STRIP_REQ_HEADERS);
+          if (config.apiKey) ctHeaders.set('x-api-key', config.apiKey);
+          measurePromise = Promise.all([
+            countTokensUpstream(upstream, bodyIn, ctHeaders),
+            countTokensUpstream(upstream, r.body as unknown as BodyInit, ctHeaders),
+          ]).then(([baseline, actual]) => ({ baseline, actual }));
         }
       } catch (e) {
         fire(502, undefined, `transform_error: ${(e as Error).message}`);
