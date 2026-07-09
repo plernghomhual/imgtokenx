@@ -636,6 +636,13 @@ export function createProxy(config: ProxyConfig = {}) {
     const url = new URL(req.url);
     const path = url.pathname + url.search;
 
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
+      return new Response(req.method === 'HEAD' ? null : JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     // reqBodyBytes: kept for lazy gzip on 4xx. reqBodySha8: computed eagerly for correlation.
     let reqBodyBytes: Uint8Array | undefined;
     let reqBodySha8: string | undefined;

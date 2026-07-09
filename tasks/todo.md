@@ -146,7 +146,7 @@ Plan: `/Users/plernghomhual/.claude/plans/jaunty-whistling-shannon.md`
 - [x] Phase 1: lossless-by-default (`losslessExact` on), widen exact-risk detectors, recovery MCP server + `pxpipe mcp`, default `emitRecoverable`/`PXPIPE_RECOVERABLE_DIR`, banner mentions recovery tool. Commit `65a85a1`.
 - [x] Phase 2a (miner-xhigh): per-model reader-capacity profiles (`reader-profiles.ts`), density selection threaded through transform.ts + history.ts, safe default (text passthrough) for unknown/uncalibrated models, `applicability.ts` GPT-vs-Anthropic split documented. Commit `2268cdd`.
 - [x] Phase 2b: calibration harness (`eval/reader-capacity/`, live-API opt-in sweep tool). See Final Review below.
-- [ ] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`.
+- [x] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`. See Final Review below.
 - [ ] Phase 4: compat/lossless/reader-profile tests, doctor self-check.
 - [ ] Full verification: typecheck, build, test, install dry-run, final review entry.
 
@@ -218,3 +218,35 @@ Remaining risks / next steps:
 - Live calibration was intentionally not run because this phase must not use a real `ANTHROPIC_API_KEY`; dry-run proves rendering, token accounting, and CLI parsing only.
 - The live scorer intentionally keeps the `eval/opus-density/` Anthropic Messages call path; non-Anthropic model IDs are accepted for dry-run/accounting but require a provider caller extension before live scoring.
 - Phase 3 (launchd/wrappers) and Phase 4 (compat hardening) remain unstarted and still require explicit confirmation before touching user shell/launchd state.
+
+## Final Review - 2026-07-09 (Phase 3 — auto-start install/wrappers)
+
+Files changed:
+- `src/install.ts` (new) — pure launchd/env/MCP artifact generation plus `runInstall`/`runUninstall` with `--dry-run`, `--skip-mcp`, idempotent zshrc block handling, launchctl bootstrap/kickstart, Claude/Codex MCP CLI registration, and OpenCode local MCP config merge.
+- `src/node.ts` — added `pxpipe install` / `pxpipe uninstall` subcommands, help text, and package-root detection so generated ProgramArguments point at this checkout's `bin/cli.js` even when invoked from another directory.
+- `src/core/proxy.ts` — added local `GET`/`HEAD /healthz` JSON response before upstream routing.
+- `tests/install.test.ts` (new) — validates launchd plist, shell wrappers, zshrc idempotency, CLI port validation, and MCP registration artifacts.
+- `tests/compatibility-smoke.test.ts` — asserts `/healthz` returns locally and makes no upstream fetch.
+- `README.md` — documents `pxpipe install --dry-run`, install/uninstall, wrapper health-check behavior, and `PXPIPE_DISABLE=1`.
+- `tasks/todo.md` — Phase 3 status and this review entry.
+
+Behavior changed:
+- New install CLI can preview or install a macOS LaunchAgent at `~/Library/LaunchAgents/com.pxpipe.proxy.plist`, generated wrapper file at `~/.pxpipe/env.sh`, and one marked source block in `~/.zshrc`.
+- Generated wrappers health-check `/healthz`, kickstart launchd or start a fallback local proxy process, then run `claude`, `codex`, or `opencode` with the intended local base URL; `PXPIPE_DISABLE=1` bypasses wrappers.
+- `pxpipe uninstall` removes the launchd/env/zshrc wiring and MCP registrations.
+- `/healthz` now returns `{"ok":true}` without touching Anthropic/OpenAI upstreams.
+
+Verification performed:
+- `npm run typecheck`: exit 0 (`tsc --noEmit`; npm printed existing unknown-project-config warnings).
+- `npm test -- tests/install.test.ts tests/compatibility-smoke.test.ts`: exit 0; 2 files, 11 tests passed.
+- `npm run build`: exit 0; emitted dist, bundled CLI, version smoke printed `0.8.0`.
+- `npm test`: exit 0; 39 files, 692 tests passed.
+- `git diff --check`: exit 0.
+- `node /Users/plernghomhual/Documents/pxpipe-exact/bin/cli.js install --dry-run --skip-mcp` from `/private/tmp`: exit 0; previewed plist/env/zshrc using `/Users/plernghomhual/Documents/pxpipe-exact/bin/cli.js`; no files/config changed.
+- `node --import /Users/plernghomhual/Documents/pxpipe-exact/node_modules/tsx/dist/loader.mjs /Users/plernghomhual/Documents/pxpipe-exact/src/node.ts install --dry-run` from `/private/tmp`: exit 0; previewed MCP commands/config and proved source CLI package-root detection outside the repo.
+- Temporary localhost probe of built CLI with `PORT=48721`, `HOME=<tmp>`, `PXPIPE_RECOVERABLE_DIR=off`, `PXPIPE_LOG=<tmp>/events.jsonl`: exit 0; `curl http://127.0.0.1:48721/healthz` returned `{"ok":true}`. Initial sandboxed bind failed with `listen EPERM`, then the same probe passed with approved localhost-bind escalation.
+
+Remaining risks / next steps:
+- A real `pxpipe install` was intentionally not executed in this pass; no live `~/.zshrc`, LaunchAgent, or MCP client config was changed.
+- OpenCode base-URL routing is implemented through the generated wrapper's `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` provider-prefixed environment. Its local MCP registration is written by config merge because local `opencode mcp add --help` does not expose command-argument syntax.
+- Phase 4 (compat hardening + doctor/self-check) remains unstarted.

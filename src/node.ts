@@ -11,8 +11,10 @@ import { once } from 'node:events';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createProxy, parseGatewayHeaders, resolveUpstreams, type ProxyConfig } from './core/proxy.js';
+import { parseInstallArgs, runInstall, runUninstall } from './install.js';
 import {
   parseExportArgv,
   runExportCore,
@@ -132,6 +134,8 @@ function printHelp(): void {
 
 Usage:
   pxpipe                run the proxy (no flags)
+  pxpipe install        install launchd auto-start + shell wrappers
+  pxpipe uninstall      remove launchd auto-start + shell wrappers
   pxpipe export [...]   render files/diff to PNG pages + cost report (see pxpipe export --help)
   pxpipe recover rec_*  print exact source text from PXPIPE_RECOVERABLE_DIR
 
@@ -141,6 +145,8 @@ and history; tracks events to disk; and measures real saved_pct via
 
 Stats, sessions, and cleanup tools live in the dashboard at
   http://127.0.0.1:<port>/  (default port 47821)
+Health check:
+  http://127.0.0.1:<port>/healthz
 
 Flags:
   -h, --help              show this help
@@ -196,6 +202,10 @@ declare const __PXPIPE_VERSION__: string | undefined;
 function printVersion(): void {
   const injected = typeof __PXPIPE_VERSION__ === 'string' ? __PXPIPE_VERSION__ : undefined;
   console.log(injected ?? process.env.npm_package_version ?? 'unknown');
+}
+
+function packageRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
 
 // ---- node:http <-> Web Request/Response bridge ---------------------------
@@ -961,6 +971,18 @@ async function main(): Promise<void> {
   if (argv[0] === 'mcp') {
     const { runMcpServer } = await import('./mcp.js');
     await runMcpServer();
+    return;
+  }
+  if (argv[0] === 'install') {
+    const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
+    const { actions } = runInstall(opts);
+    for (const a of actions) console.log(`[pxpipe install] ${a}`);
+    return;
+  }
+  if (argv[0] === 'uninstall') {
+    const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
+    const { actions } = runUninstall(opts);
+    for (const a of actions) console.log(`[pxpipe uninstall] ${a}`);
     return;
   }
   // Stats / sessions / cleanup tools live in the dashboard.

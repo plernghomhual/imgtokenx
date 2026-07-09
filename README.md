@@ -61,6 +61,19 @@ npx pxpipe-proxy recover rec_1234abcd
 PXPIPE_RECOVERABLE_DIR=/private/pxpipe-recovery npx pxpipe-proxy
 ```
 
+For local auto-start, install the launchd agent and shell wrappers:
+
+```bash
+pxpipe install --dry-run  # preview plist, ~/.pxpipe/env.sh, MCP registrations
+pxpipe install            # writes launchd + ~/.zshrc source block
+pxpipe uninstall          # removes the launchd/env/zshrc wiring
+```
+
+The generated wrappers health-check <http://127.0.0.1:47821/healthz>, kickstart
+launchd or start a local fallback process, then run `claude`, `codex`, or
+`opencode` with the right base URL. `PXPIPE_DISABLE=1 <tool>` bypasses the
+wrapper and runs the original CLI unchanged.
+
 Dashboard at <http://127.0.0.1:47821/>: tokens saved, every text→image
 conversion side by side, kill switch, live model chips. Responses stream
 normally — pxpipe compresses the *request* only, never the model's output.

@@ -24,6 +24,19 @@ function stubFetch(calls: string[]) {
 }
 
 describe('client compatibility smoke matrix', () => {
+  it('serves /healthz locally without touching an upstream', async () => {
+    const calls: string[] = [];
+    stubFetch(calls);
+
+    const res = await createProxy({ upstream: 'http://anthropic.test' })(
+      new Request('http://localhost/healthz'),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(calls).toEqual([]);
+  });
+
   it.each([
     {
       name: 'Claude Code Anthropic',
