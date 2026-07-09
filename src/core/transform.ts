@@ -156,7 +156,7 @@ const DEFAULTS: Required<TransformOptions> = {
 };
 
 export const EXACT_RECALL_INSTRUCTION =
-  ' For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels.';
+  ' For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels. If a rec_* id is shown, call the pxpipe_recover MCP tool with that id to get the exact source text.';
 
 // --- per-block break-even check ---
 //
@@ -460,7 +460,7 @@ export function shouldKeepLosslessExact(
   opts: { losslessExact?: boolean; emitRecoverable?: boolean },
   text: string,
 ): boolean {
-  if (!opts.losslessExact || opts.emitRecoverable || !text) return false;
+  if (!opts.losslessExact || !text) return false;
   const factSheet = factSheetTextComplete(text, DENSE_CONTENT_CHARS_PER_IMAGE);
   if (!factSheet) return false;
   recordFactSheetTelemetry(info, factSheet);
@@ -858,7 +858,7 @@ export async function recordRecoverable(
 }
 
 export function recoverableRefText(ref: RecoverableBlock): string {
-  return `[Recoverable exact source: ${ref.id} kind=${ref.kind} chars=${ref.text.length} images=${ref.imageCount}. For byte-exact wording, use this id from the pxpipe recovery store instead of transcribing image pixels.]`;
+  return `[Recoverable exact source: ${ref.id} kind=${ref.kind} chars=${ref.text.length} images=${ref.imageCount}. For byte-exact wording, call the pxpipe_recover MCP tool with rec_id="${ref.id}" instead of transcribing image pixels.]`;
 }
 
 function exactSidecarText(info: TransformInfo, factSheet: string, ref?: RecoverableBlock): string {

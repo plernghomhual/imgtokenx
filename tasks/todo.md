@@ -142,7 +142,7 @@ Remaining risks:
 
 Plan: `/Users/plernghomhual/.claude/plans/jaunty-whistling-shannon.md`
 
-- [ ] Phase 0: commit pending exactness pass as checkpoint (verify green first).
+- [x] Phase 0: commit pending exactness pass as checkpoint (verify green first). Commit `142e964`.
 - [ ] Phase 1: lossless-by-default (`losslessExact` on), widen exact-risk detectors, recovery MCP server + `pxpipe mcp`, default `emitRecoverable`/`PXPIPE_RECOVERABLE_DIR`, banner mentions recovery tool.
 - [ ] Phase 2: per-model reader-capacity profiles (`reader-profiles.ts`), density selection in transform, safe default for unknown models, calibration harness stub.
 - [ ] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`.

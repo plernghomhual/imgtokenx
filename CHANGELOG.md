@@ -4,6 +4,35 @@ All notable changes to pxpipe are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features /
 behavioral changes, patch = fixes).
 
+## Unreleased
+
+### Security / Correctness
+- **Fixed: lossless-exact and recovery-sidecar emission were wrongly mutually
+  exclusive.** `shouldKeepLosslessExact` disabled lossless-exact whenever
+  `emitRecoverable` was also on, so exact-risk blocks got imaged instead of
+  kept as text — defeating the primary guard. The two now compose:
+  lossless-exact is the primary guard (known exact-risk content never gets
+  imaged), recovery sidecars are a backstop for whatever else does.
+- **Lossless-exact and recovery sidecars are now ON by default**, no env
+  vars required. `PXPIPE_LOSSLESS_EXACT` defaults on; set it to `0`/`false`/
+  `off` to disable. `PXPIPE_RECOVERABLE_DIR` now defaults to
+  `~/.pxpipe/recovery` (mode `0700`) when unset; set it to `off`/`0`/`false`
+  to disable. The Cloudflare Worker build gets the same lossless-exact
+  default via `LOSSLESS_EXACT` (no recovery sidecar there — Workers has no
+  writable filesystem). `pxpipe recover` resolves the same default dir.
+- **Widened exact-risk detection** in the fact-sheet extractor: URL query
+  strings (`?key=value...`), long base64/JWT-like runs (incl. dot-separated
+  3-part JWTs), and semver/version pins with a range operator prefix
+  (`^2.0.0-beta.1`, `~1.4.2`) are now recognized as exact-risk and kept
+  verbatim instead of being gist-read from pixels.
+- **New `pxpipe mcp` command**: a stdio MCP server exposing a
+  `pxpipe_recover` tool. A model that sees a `rec_*` id in the exact-risk
+  render banner can call the tool directly with that id to get the verbatim
+  original source, instead of guessing it from image pixels. Reuses the
+  same lookup logic as the `pxpipe recover` CLI (`recoverById`).
+- Exact-risk render banners now mention the `pxpipe_recover` MCP tool by
+  name alongside the existing fact-sheet/recovery-ref guidance.
+
 ## 0.8.0 — 2026-07-03
 
 ### Security

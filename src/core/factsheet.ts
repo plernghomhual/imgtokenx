@@ -21,11 +21,24 @@ const PATTERNS: readonly RegExp[] = [
   /"[^"\s]*(?:api[_-]?key|token|secret|password)[^"\s]*":"[^"]{6,}"/gi, // minified JSON secret/value fields
   /["'](?=[^"'\s]{6,120}["'])(?=[^"'\s]*(?:[A-Z][a-z]+[A-Z]|[A-Za-z]\d|\d[A-Za-z]|[_/.-]))[^"'\s]+["']/g, // quoted exact-risk strings
   /\bhttps?:\/\/[^\s)"'<>]+/g, // URLs
+  // Query string (e.g. `?token=...&sig=...`), captured independently of any URL/path
+  // prefix — a relative path base may be low-risk but its query params are exact-risk.
+  /\?[A-Za-z0-9_.+%-]+=[^\s"'<>&]*(?:&[A-Za-z0-9_.+%-]+=[^\s"'<>&]*)*/g,
   /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, // UUID
   /(?:[\w@~+-]+)?(?:\/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b/g, // path with a file extension (multi-dot ok: .test.ts)
   /\/[\w.@+-]+(?:\/[\w.@+-]+)+\/?/g, // dir path (>=2 segments)
   /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g, // git sha / long hex (must contain a digit)
   /\b(?=[A-Za-z0-9_-]{12,120}\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_-]{10,118}[A-Za-z0-9]\b/g, // opaque mixed ids / tokens
+  // 3-part dot-separated JWT (base64url header.payload.signature) — must round-trip
+  // exactly, never gist-read.
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  // Long base64-alphabet run (>=20 chars, mixed letters+digits) that isn't dot-separated —
+  // API tokens / encoded blobs. Same digit+letter-lookahead shape as the opaque-id pattern
+  // above, just base64's charset, so it stays bounded and ReDoS-safe.
+  /\b(?=[A-Za-z0-9+/]{20,120}\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9+/]{18,118}[A-Za-z0-9]={0,2}/g,
+  // Semver / version pin with a range operator prefix (^2.0.0-beta.1, ~1.4.2) — the
+  // operator changes install semantics, so it must be kept, not just the bare digits.
+  /(?:^|[^\w.])([\^~]v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?)\b/g,
   /\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b/g, // version string
   /(?:^|[^\w-])(--?[A-Za-z][\w-]+)/g, // CLI flag (token in capture group 1)
   /\b\d[\d,_]{3,}\b/g, // large / separated number
@@ -64,6 +77,10 @@ const SHAPE_SECRET_ASSIGNMENT = /^[A-Z][A-Z0-9_]{2,}=.+/;
 const SHAPE_JSON_SECRET = /^"[^"]*(?:api[_-]?key|token|secret|password)[^"]*":"[^"]{6,}"$/i;
 const SHAPE_OPAQUE = /^(?=[A-Za-z0-9_-]{12,120}\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_-]{10,118}[A-Za-z0-9]$/;
 const SHAPE_CAMEL = /^[$A-Za-z_][A-Za-z0-9_$]*(?:[a-z0-9][A-Z][A-Za-z0-9_$]*){2,}$/;
+const SHAPE_QUERY = /^\?[^\s]+=.+/; // URL query string (?key=value...)
+const SHAPE_JWT = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/; // dot-separated JWT
+const SHAPE_BASE64 = /^(?=[A-Za-z0-9+/]{20,120}\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9+/]{18,118}[A-Za-z0-9]={0,2}$/;
+const SHAPE_VERSION_PIN = /^[\^~]v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?$/; // ^2.0.0-beta.1 / ~1.4.2
 const WORDISH = /[\w$]/;
 
 /** Lower tier = higher keep-priority. Pure function of the token → deterministic. */
@@ -77,6 +94,10 @@ function priorityTier(tok: string): 0 | 1 | 2 {
     SHAPE_NUM.test(tok) ||
     SHAPE_SECRET_ASSIGNMENT.test(tok) ||
     SHAPE_JSON_SECRET.test(tok) ||
+    SHAPE_QUERY.test(tok) ||
+    SHAPE_JWT.test(tok) ||
+    SHAPE_VERSION_PIN.test(tok) ||
+    (SHAPE_BASE64.test(tok) && !SHAPE_CAMEL.test(tok)) ||
     (SHAPE_OPAQUE.test(tok) && !SHAPE_CAMEL.test(tok))
   ) {
     return 0;

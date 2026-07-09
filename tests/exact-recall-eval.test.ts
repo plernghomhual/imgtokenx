@@ -14,6 +14,10 @@ const EXACT_FIXTURES = [
   'RequestTraceIDAlphaBetaGamma',
   '"ExactRecall-String_9271"',
   'EXAMPLE_SETTING=EXAMPLE_VALUE_123456',
+  '?token=NeedleQueryToken_8841',
+  'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJOZWVkbGVKV1Q5MjcxIn0.c2lnbmF0dXJlLW5lZWRsZS05Mjcx',
+  'TnJlZWRsZUJhc2U2NFRva2VuOTI3MQ==',
+  '^2.4.7-rc.1',
 ] as const;
 
 function makeReq(toolResult: string): Uint8Array {
@@ -98,7 +102,7 @@ describe('exact recall eval fixtures', () => {
     expect(info.passthroughReasons?.lossless_exact ?? 0).toBeGreaterThan(0);
   });
 
-  it('losslessExact still allows imaging when recoverable refs are enabled', async () => {
+  it('regression: losslessExact and emitRecoverable compose — an exact-risk block stays native text and never needs recovery, even with both flags on', async () => {
     const toolResult = 'noise '.repeat(60_000) + '\n' + EXACT_FIXTURES.join('\n');
     const { body, info } = await transformRequest(makeReq(toolResult), {
       charsPerToken: 2,
@@ -109,10 +113,17 @@ describe('exact recall eval fixtures', () => {
       multiCol: 1,
     });
 
-    const out = dec.decode(body);
-    expect(info.toolResultImgs ?? 0).toBeGreaterThan(0);
-    expect(info.recoverableRefs ?? 0).toBeGreaterThan(0);
-    expect(info.losslessExactKept ?? 0).toBe(0);
-    expect(out).toContain('Recoverable exact source: rec_');
+    const parsed = JSON.parse(dec.decode(body));
+    const toolResults = collectTextValues(parsed.messages);
+    // Lossless-exact is the primary guard: an exact-risk block must stay as
+    // verbatim text and never get imaged, regardless of emitRecoverable also
+    // being on. Recovery sidecars are a backstop for whatever DOES get
+    // imaged, not a reason to disable the primary guard.
+    expect(toolResults).toContain(toolResult);
+    expect(info.losslessExactKept ?? 0).toBeGreaterThan(0);
+    expect(info.toolResultImgs ?? 0).toBe(0);
+    // It never needed recovery in the first place — no tool_result-kind
+    // recoverable entry should exist for this block.
+    expect(info.recoverable?.some((r) => r.kind === 'tool_result')).not.toBe(true);
   });
 });

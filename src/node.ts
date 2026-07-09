@@ -869,31 +869,37 @@ async function runExport(argv: string[]): Promise<void> {
   }
 }
 
-function runRecover(argv: string[]): void {
-  const id = argv[0]?.trim();
-  if (argv.includes('-h') || argv.includes('--help')) {
-    console.log(`pxpipe recover — print exact source text for a rec_* id
+/** Default recovery sidecar directory when PXPIPE_RECOVERABLE_DIR is unset.
+ *  Exported so the `recover` CLI and src/mcp.ts resolve the same default the
+ *  live proxy writes sidecars to (see main() below). */
+export function defaultRecoverableDir(): string {
+  return path.join(os.homedir(), '.pxpipe', 'recovery');
+}
 
-Usage:
-  PXPIPE_RECOVERABLE_DIR=/private/dir pxpipe recover rec_1234abcd
-`);
-    process.exit(0);
-  }
+/** Resolve the recovery sidecar dir from PXPIPE_RECOVERABLE_DIR: honors the
+ *  off/0/false/no opt-out, falls back to `defaultRecoverableDir()` when
+ *  unset. Returns `undefined` when recovery is disabled. Does NOT create the
+ *  directory — callers that write to it must mkdir first. */
+export function resolveRecoverableDir(): string | undefined {
+  const env = process.env.PXPIPE_RECOVERABLE_DIR?.trim();
+  if (/^(0|false|off|no)$/i.test(env ?? '')) return undefined;
+  return env || defaultRecoverableDir();
+}
+
+/** Look up the newest recovery source for `id` under `dir` and return its
+ *  verbatim contents. Core lookup logic shared by the `pxpipe recover` CLI
+ *  and the `pxpipe_recover` MCP tool (src/mcp.ts) — protocol/CLI framing
+ *  stays out of this function so both can unit-test the same code path.
+ *  Throws a plain `Error` with a human-readable message on any failure. */
+export function recoverById(dir: string, id: string): string {
   if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
-    console.error('[pxpipe recover] expected a recovery id like rec_1234abcd');
-    process.exit(2);
-  }
-  const dir = process.env.PXPIPE_RECOVERABLE_DIR?.trim();
-  if (!dir) {
-    console.error('[pxpipe recover] PXPIPE_RECOVERABLE_DIR is not set');
-    process.exit(2);
+    throw new Error('expected a recovery id like rec_1234abcd');
   }
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
   } catch (err) {
-    console.error(`[pxpipe recover] cannot read PXPIPE_RECOVERABLE_DIR: ${(err as Error).message}`);
-    process.exit(1);
+    throw new Error(`cannot read recovery dir: ${(err as Error).message}`);
   }
   const matches = entries
     .filter((name) => name.endsWith('.txt') && name.includes(`${id}_`))
@@ -905,10 +911,39 @@ Usage:
     .sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
   const match = matches[matches.length - 1];
   if (!match) {
-    console.error(`[pxpipe recover] no recovery source found for ${id}`);
+    throw new Error(`no recovery source found for ${id}`);
+  }
+  return fs.readFileSync(match.file, 'utf8');
+}
+
+function runRecover(argv: string[]): void {
+  const id = argv[0]?.trim();
+  if (argv.includes('-h') || argv.includes('--help')) {
+    console.log(`pxpipe recover — print exact source text for a rec_* id
+
+Usage:
+  pxpipe recover rec_1234abcd
+
+Reads from PXPIPE_RECOVERABLE_DIR, defaulting to ~/.pxpipe/recovery when
+unset. Set PXPIPE_RECOVERABLE_DIR=off to confirm recovery is disabled.
+`);
+    process.exit(0);
+  }
+  if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
+    console.error('[pxpipe recover] expected a recovery id like rec_1234abcd');
+    process.exit(2);
+  }
+  const dir = resolveRecoverableDir();
+  if (!dir) {
+    console.error('[pxpipe recover] PXPIPE_RECOVERABLE_DIR is disabled (set to off/0/false/no)');
+    process.exit(2);
+  }
+  try {
+    process.stdout.write(recoverById(dir, id));
+  } catch (err) {
+    console.error(`[pxpipe recover] ${(err as Error).message}`);
     process.exit(1);
   }
-  process.stdout.write(fs.readFileSync(match.file, 'utf8'));
 }
 
 // ---- main ----------------------------------------------------------------
@@ -923,6 +958,11 @@ async function main(): Promise<void> {
     runRecover(argv.slice(1));
     return;
   }
+  if (argv[0] === 'mcp') {
+    const { runMcpServer } = await import('./mcp.js');
+    await runMcpServer();
+    return;
+  }
   // Stats / sessions / cleanup tools live in the dashboard.
   const opts = parseCli(argv);
   // A/B harness passthrough switch (see the `transform` callback below).
@@ -930,9 +970,13 @@ async function main(): Promise<void> {
   if (forcePassthrough) {
     console.log('[pxpipe] PXPIPE_DISABLE set — passthrough mode (compress=false), still logging usage + baselines');
   }
-  const losslessExact = /^(1|true|yes|on)$/i.test(process.env.PXPIPE_LOSSLESS_EXACT ?? '');
-  if (losslessExact) {
-    console.log('[pxpipe] PXPIPE_LOSSLESS_EXACT set — exact-risk blocks stay text unless recovery dumping is enabled');
+  // Default-on: exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay
+  // native text instead of being imaged, so byte-exact content can never be
+  // silently lost to pixel misreads. Opt out with PXPIPE_LOSSLESS_EXACT=0.
+  const losslessExactEnv = process.env.PXPIPE_LOSSLESS_EXACT?.trim();
+  const losslessExact = !/^(0|false|off|no)$/i.test(losslessExactEnv ?? '');
+  if (losslessExactEnv !== undefined && !losslessExact) {
+    console.log('[pxpipe] PXPIPE_LOSSLESS_EXACT disabled — exact-risk blocks may be imaged like anything else');
   }
   // Debug aid: when PXPIPE_DUMP_DIR is set, persist every rendered PNG this
   // process emits, so you can eyeball exactly what the model received (OCR /
@@ -950,16 +994,23 @@ async function main(): Promise<void> {
       imageDumpDir = undefined;
     }
   }
-  let recoverableDir: string | undefined = process.env.PXPIPE_RECOVERABLE_DIR?.trim() || undefined;
+  // Default-on backstop: whatever content DOES get imaged (gist-safe text,
+  // or anything the exact-risk detector misses) gets its verbatim source
+  // dumped to a recovery sidecar, keyed by the rec_* id shown in the render
+  // banner, so a model that needs the exact bytes can ask for them instead
+  // of guessing from pixels. Opt out with PXPIPE_RECOVERABLE_DIR=off.
+  let recoverableDir: string | undefined = resolveRecoverableDir();
   let recoverableSeq = 0;
   if (recoverableDir) {
     try {
-      fs.mkdirSync(recoverableDir, { recursive: true });
-      console.log(`[pxpipe] PXPIPE_RECOVERABLE_DIR set — writing exact recovery sources to ${recoverableDir}`);
+      fs.mkdirSync(recoverableDir, { recursive: true, mode: 0o700 });
+      console.log(`[pxpipe] writing exact recovery sources to ${recoverableDir} (default-on; set PXPIPE_RECOVERABLE_DIR=off to disable)`);
     } catch (err) {
-      console.warn(`[pxpipe] PXPIPE_RECOVERABLE_DIR unusable (${(err as Error).message}) — recovery dumping disabled`);
+      console.warn(`[pxpipe] recovery dir unusable (${(err as Error).message}) — recovery dumping disabled`);
       recoverableDir = undefined;
     }
+  } else if (/^(0|false|off|no)$/i.test(process.env.PXPIPE_RECOVERABLE_DIR?.trim() ?? '')) {
+    console.log('[pxpipe] PXPIPE_RECOVERABLE_DIR disabled — recovery sidecars will not be written');
   }
   // Transform options pass through empty — the proxy uses the DEFAULTS
   // baked into transform.ts. There are no behavior toggles: system slab,

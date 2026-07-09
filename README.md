@@ -55,9 +55,10 @@ OPENAI_BASE_URL=http://127.0.0.1:47821/v1 codex
 # Anthropic base: http://127.0.0.1:47821/anthropic
 # OpenAI base:    http://127.0.0.1:47821/openai
 
-# Optional exact-source recovery
+# Lossless-exact + recovery sidecars are ON by default — no setup needed.
+# Recovery sources land in ~/.pxpipe/recovery unless you override the dir:
+npx pxpipe-proxy recover rec_1234abcd
 PXPIPE_RECOVERABLE_DIR=/private/pxpipe-recovery npx pxpipe-proxy
-PXPIPE_RECOVERABLE_DIR=/private/pxpipe-recovery npx pxpipe-proxy recover rec_1234abcd
 ```
 
 Dashboard at <http://127.0.0.1:47821/>: tokens saved, every text→image
@@ -68,16 +69,22 @@ are imaged.
 
 ## The honest part
 
-- **Images are lossy.** Exact 12-char hex strings in dense imaged content:
-  **13/15** on Fable 5, **0/15** on Opus — and misses are *silent
-  confabulations*, not errors. pxpipe now emits text sidecars for extracted
-  exact-risk values. For byte-exact source recovery, run the Node proxy with
-  `PXPIPE_RECOVERABLE_DIR=/path/to/private/dir`; transformed requests include
-  `rec_*` ids and the exact original text is written locally. Run
-  `pxpipe recover rec_1234abcd` with the same `PXPIPE_RECOVERABLE_DIR` to
-  print the local source. If you cannot keep recovery files, set
-  `PXPIPE_LOSSLESS_EXACT=1` to leave exact-risk blocks as text instead of
-  imaging them.
+- **Images are lossy — so exactness guards are ON by default.** Exact
+  12-char hex strings in dense imaged content: **13/15** on Fable 5, **0/15**
+  on Opus — and misses are *silent confabulations*, not errors. Two defaults
+  now compose to make silent exact-content loss structurally hard:
+  1. **Lossless-exact** (primary guard): blocks containing IDs, hashes,
+     UUIDs, secrets, paths, URLs with query strings, JWTs/base64 tokens,
+     version pins, and similar exact-risk shapes stay native text instead of
+     being imaged — they're never at risk in the first place. Opt out with
+     `PXPIPE_LOSSLESS_EXACT=0`.
+  2. **Recovery sidecars** (backstop): whatever content still *does* get
+     imaged gets its verbatim source written to `~/.pxpipe/recovery`
+     (override with `PXPIPE_RECOVERABLE_DIR=/path/to/dir`), keyed by a
+     `rec_*` id shown next to the image. Recover it via
+     `pxpipe recover rec_1234abcd`, or — for a model mid-conversation — the
+     bundled `pxpipe mcp` MCP server exposes a `pxpipe_recover` tool it can
+     call directly with that id. Opt out with `PXPIPE_RECOVERABLE_DIR=off`.
 - **Escape hatch:** subagents on non-allowlisted models pass through as
   text — route byte-exact work there
   (`CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-4-6`, or `model: sonnet` in

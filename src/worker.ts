@@ -35,6 +35,9 @@ export interface Env {
   /** R2 multi-column packing — default 1 (off). 2 squeezes ~2× source rows
    *  per image; OCR-verify before flipping in production. */
   MULTI_COL?: string;
+  /** Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
+   *  instead of being imaged. Default-on; set "0"/"false" to disable. */
+  LOSSLESS_EXACT?: string;
   /** When "0" / "false", disable per-request event JSON logs. Default-on.
    *  Cloudflare ingests console.log as Workers Logs; pipe via Logpush to
    *  R2/S3 for the same JSONL shape Node writes to disk. */
@@ -112,6 +115,12 @@ export default {
       // R2 multi-column ON (2 cols) — single-col drops below break-even on
       // real tool-doc slabs. Override via MULTI_COL=1 if OCR misreads layout.
       multiCol: env.MULTI_COL ? Math.max(1, Number(env.MULTI_COL) | 0) : 2,
+      // Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
+      // instead of being imaged — default-on. No recovery sidecar here:
+      // Workers has no writable filesystem for the rec_* dump, so this is
+      // the only exactness guard on this deploy target. Override with
+      // LOSSLESS_EXACT=0/false to disable.
+      losslessExact: truthy(env.LOSSLESS_EXACT, true),
     };
     const trackingOn = truthy(env.PXPIPE_TRACK, true);
     // Workers Logs ingests stdout as separate log lines. Emit one JSON line
