@@ -278,3 +278,15 @@ Verification performed:
 
 Remaining risks / next steps:
 - A real `pxpipe doctor` against the user's live LaunchAgent/MCP state was intentionally not run because no real `pxpipe install` has been executed in this plan.
+
+## Live Installation Verification - 2026-07-09
+
+Performed after explicit user approval:
+- `node bin/cli.js install` completed. The first bootstrap attempt was blocked at the sandbox boundary (`launchctl bootstrap ...` error 5); retrying the same approved installer with OS-level launchd permission completed the LaunchAgent and all MCP registrations.
+- `node bin/cli.js doctor` with local-network permission passed every check: plist, shell env, zshrc source block, `/healthz`, launchd service, and Claude/Codex/OpenCode `pxpipe-recover` registrations.
+- `launchctl print gui/501/com.pxpipe.proxy` reported `state = running`, and `lsof -nP -iTCP:47821 -sTCP:LISTEN` confirmed the Node process listening on `127.0.0.1:47821`.
+- A fresh interactive shell resolved `claude`, `codex`, and `opencode` as functions. `zsh -ic 'PXPIPE_DISABLE=1 claude --version'` exited 0 and printed Claude Code `2.1.205`, confirming the kill-switch bypass.
+- `npm test` exited 0: 39 files and 698 tests passed.
+
+Remaining risks:
+- No authenticated Anthropic/OpenAI request was sent through a harness during this local install validation, so live upstream credentials and provider behavior remain intentionally unexercised.
