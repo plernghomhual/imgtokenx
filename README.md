@@ -66,6 +66,7 @@ For local auto-start, install the launchd agent and shell wrappers:
 ```bash
 pxpipe install --dry-run  # preview plist, ~/.pxpipe/env.sh, MCP registrations
 pxpipe install            # writes launchd + ~/.zshrc source block
+pxpipe doctor             # checks launchd/env/zshrc/healthz/MCP wiring
 pxpipe uninstall          # removes the launchd/env/zshrc wiring
 ```
 

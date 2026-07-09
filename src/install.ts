@@ -43,6 +43,24 @@ export interface InstallResult {
   actions: string[];
 }
 
+export type DoctorStatus = 'pass' | 'fail' | 'warn';
+
+export interface DoctorCheck {
+  name: string;
+  status: DoctorStatus;
+  detail: string;
+}
+
+export interface DoctorResult {
+  plan: InstallPlan;
+  checks: DoctorCheck[];
+}
+
+interface DoctorDeps {
+  fetch?: typeof fetch;
+  spawnSync?: typeof spawnSync;
+}
+
 function q(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -312,6 +330,77 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
   return { plan, actions };
 }
 
+function status(name: string, ok: boolean, pass: string, fail: string): DoctorCheck {
+  return { name, status: ok ? 'pass' : 'fail', detail: ok ? pass : fail };
+}
+
+function spawnCheck(name: string, cmd: string, args: string[], deps: DoctorDeps): DoctorCheck {
+  const sp = deps.spawnSync ?? spawnSync;
+  const r = sp(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
+    return { name, status: 'warn', detail: `${cmd} not found` };
+  }
+  if (r.status === 0) return { name, status: 'pass', detail: `${cmd} ${args.join(' ')}` };
+  const msg = String(r.stderr || r.stdout || '').trim();
+  return { name, status: 'fail', detail: msg || `${cmd} ${args.join(' ')} exited ${r.status}` };
+}
+
+async function healthCheck(plan: InstallPlan, deps: DoctorDeps): Promise<DoctorCheck> {
+  const f = deps.fetch ?? fetch;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 1500);
+  try {
+    const res = await f(`${plan.baseUrl}/healthz`, { signal: ac.signal });
+    return status('healthz', res.ok, `${plan.baseUrl}/healthz`, `HTTP ${res.status} from ${plan.baseUrl}/healthz`);
+  } catch (err) {
+    return { name: 'healthz', status: 'fail', detail: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function runDoctor(opts: InstallOptions = {}, deps: DoctorDeps = {}): Promise<DoctorResult> {
+  const plan = buildInstallPlan(opts);
+  const checks: DoctorCheck[] = [];
+  checks.push(status('launchd plist', fs.existsSync(plan.launchAgentPath), plan.launchAgentPath, `missing ${plan.launchAgentPath}`));
+  checks.push(status('shell env', fs.existsSync(plan.envPath), plan.envPath, `missing ${plan.envPath}`));
+  const zshrc = fs.existsSync(plan.zshrcPath) ? fs.readFileSync(plan.zshrcPath, 'utf8') : '';
+  checks.push(status('zshrc source block', zshrc.includes(plan.zshrcBlock), plan.zshrcPath, `missing pxpipe source block in ${plan.zshrcPath}`));
+  checks.push(await healthCheck(plan, deps));
+
+  const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+  checks.push(spawnCheck('launchd service', 'launchctl', ['print', `${domain}/${LAUNCHD_LABEL}`], deps));
+  if (!opts.skipMcp) {
+    checks.push(spawnCheck('Claude MCP', 'claude', ['mcp', 'get', MCP_SERVER_NAME], deps));
+    checks.push(spawnCheck('Codex MCP', 'codex', ['mcp', 'get', MCP_SERVER_NAME], deps));
+    const cfgPath = path.join(plan.home, '.config', 'opencode', 'opencode.json');
+    let opencodeOk = false;
+    if (fs.existsSync(cfgPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as { mcp?: Record<string, unknown> };
+        const entry = cfg.mcp?.[MCP_SERVER_NAME] as { command?: unknown } | undefined;
+        opencodeOk = Array.isArray(entry?.command)
+          && entry.command[0] === plan.nodePath
+          && entry.command[1] === plan.cliPath
+          && entry.command[2] === 'mcp';
+      } catch {
+        opencodeOk = false;
+      }
+    }
+    checks.push(status('OpenCode MCP', opencodeOk, cfgPath, `missing ${MCP_SERVER_NAME} in ${cfgPath}`));
+  }
+  return { plan, checks };
+}
+
+export function doctorExitCode(result: DoctorResult): number {
+  return result.checks.some((c) => c.status === 'fail') ? 1 : 0;
+}
+
+export function formatDoctor(result: DoctorResult): string {
+  const mark = { pass: 'PASS', fail: 'FAIL', warn: 'WARN' } satisfies Record<DoctorStatus, string>;
+  return result.checks.map((c) => `${mark[c.status]} ${c.name}: ${c.detail}`).join('\n') + '\n';
+}
+
 export function parseInstallArgs(argv: string[]): InstallOptions {
   const opts: InstallOptions = {};
   for (const a of argv) {
@@ -325,7 +414,7 @@ export function parseInstallArgs(argv: string[]): InstallOptions {
       opts.port = port;
     }
     else if (a === '-h' || a === '--help') {
-      console.log('Usage: pxpipe install|uninstall [--dry-run] [--skip-mcp] [--port=47821]');
+      console.log('Usage: pxpipe install|uninstall|doctor [--dry-run] [--skip-mcp] [--port=47821]');
       process.exit(0);
     } else {
       throw new Error(`unknown install option: ${a}`);

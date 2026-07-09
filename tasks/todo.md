@@ -147,8 +147,8 @@ Plan: `/Users/plernghomhual/.claude/plans/jaunty-whistling-shannon.md`
 - [x] Phase 2a (miner-xhigh): per-model reader-capacity profiles (`reader-profiles.ts`), density selection threaded through transform.ts + history.ts, safe default (text passthrough) for unknown/uncalibrated models, `applicability.ts` GPT-vs-Anthropic split documented. Commit `2268cdd`.
 - [x] Phase 2b: calibration harness (`eval/reader-capacity/`, live-API opt-in sweep tool). See Final Review below.
 - [x] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`. See Final Review below.
-- [ ] Phase 4: compat/lossless/reader-profile tests, doctor self-check.
-- [ ] Full verification: typecheck, build, test, install dry-run, final review entry.
+- [x] Phase 4: compat/lossless/reader-profile tests, doctor self-check. See Final Review below.
+- [x] Full verification: typecheck, build, test, install dry-run, final review entry.
 
 ## Final Review - 2026-07-09 (Phase 2a — per-model reader profiles)
 
@@ -249,4 +249,32 @@ Verification performed:
 Remaining risks / next steps:
 - A real `pxpipe install` was intentionally not executed in this pass; no live `~/.zshrc`, LaunchAgent, or MCP client config was changed.
 - OpenCode base-URL routing is implemented through the generated wrapper's `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` provider-prefixed environment. Its local MCP registration is written by config merge because local `opencode mcp add --help` does not expose command-argument syntax.
-- Phase 4 (compat hardening + doctor/self-check) remains unstarted.
+- At Phase 3 completion, Phase 4 (compat hardening + doctor/self-check) remained unstarted; see the Phase 4 review below for current status.
+
+## Final Review - 2026-07-09 (Phase 4 — compat hardening + doctor)
+
+Files changed:
+- `src/install.ts` — added non-mutating `runDoctor`, `formatDoctor`, and `doctorExitCode` helpers checking LaunchAgent/env/zshrc, `/healthz`, launchd service state, Claude/Codex MCP registration, and OpenCode MCP config.
+- `src/node.ts` — added `pxpipe doctor` CLI subcommand and help text.
+- `tests/install.test.ts` — added mocked doctor self-check coverage for daemon/env/MCP wiring without touching live state.
+- `tests/compatibility-smoke.test.ts` — extended client matrix to assert Claude root, Codex `/v1`, OpenCode `/anthropic` and `/openai`, and Cloudflare gateway routing plus strong-model image insertion vs weak/unknown-model passthrough.
+- `README.md` — documented `pxpipe doctor`.
+- `tasks/todo.md` — Phase 4 status and this review entry.
+
+Behavior changed:
+- New `pxpipe doctor` command reports `PASS`/`FAIL`/`WARN` checks and exits nonzero if any check fails.
+- No production compression, lossless, reader-profile, or model-gating behavior changed; Phase 4 adds self-check tooling and stronger compatibility tests.
+- No live `~/.zshrc`, launchd, or MCP client configuration was changed.
+
+Verification performed:
+- `npm run typecheck`: exit 0 (`tsc --noEmit`; npm printed existing unknown-project-config warnings).
+- `npm test -- tests/install.test.ts tests/compatibility-smoke.test.ts tests/reader-profiles.test.ts tests/mcp-recover.test.ts tests/exact-recall-eval.test.ts`: exit 0; 5 files, 37 tests passed.
+- `npm run build`: exit 0; emitted dist, bundled CLI, version smoke printed `0.8.0`.
+- `npm test`: exit 0; 39 files, 698 tests passed.
+- `git diff --check`: exit 0.
+- `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs --dry-run --out /tmp/pxpipe-reader-capacity-phase4-dry-run.json`: exit 0; rendered 5x8/7x10/9x12 at 280/504/728 image tokens vs 1335 text tokens (79%/62%/45% saved); made no model calls.
+- `node bin/cli.js doctor --help`: exit 0; printed `Usage: pxpipe install|uninstall|doctor [--dry-run] [--skip-mcp] [--port=47821]`.
+- `node bin/cli.js install --dry-run --skip-mcp`: exit 0; printed no-write install preview; no files or live config changed.
+
+Remaining risks / next steps:
+- A real `pxpipe doctor` against the user's live LaunchAgent/MCP state was intentionally not run because no real `pxpipe install` has been executed in this plan.

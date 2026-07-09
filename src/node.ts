@@ -14,7 +14,7 @@ import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createProxy, parseGatewayHeaders, resolveUpstreams, type ProxyConfig } from './core/proxy.js';
-import { parseInstallArgs, runInstall, runUninstall } from './install.js';
+import { doctorExitCode, formatDoctor, parseInstallArgs, runDoctor, runInstall, runUninstall } from './install.js';
 import {
   parseExportArgv,
   runExportCore,
@@ -136,6 +136,7 @@ Usage:
   pxpipe                run the proxy (no flags)
   pxpipe install        install launchd auto-start + shell wrappers
   pxpipe uninstall      remove launchd auto-start + shell wrappers
+  pxpipe doctor         check launchd, wrappers, healthz, and MCP wiring
   pxpipe export [...]   render files/diff to PNG pages + cost report (see pxpipe export --help)
   pxpipe recover rec_*  print exact source text from PXPIPE_RECOVERABLE_DIR
 
@@ -983,6 +984,14 @@ async function main(): Promise<void> {
     const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
     const { actions } = runUninstall(opts);
     for (const a of actions) console.log(`[pxpipe uninstall] ${a}`);
+    return;
+  }
+  if (argv[0] === 'doctor') {
+    const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
+    const result = await runDoctor(opts);
+    process.stdout.write(formatDoctor(result));
+    const code = doctorExitCode(result);
+    if (code !== 0) process.exit(code);
     return;
   }
   // Stats / sessions / cleanup tools live in the dashboard.

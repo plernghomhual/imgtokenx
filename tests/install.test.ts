@@ -5,9 +5,15 @@ import {
   applyZshrcInstall,
   applyZshrcUninstall,
   buildInstallPlan,
+  doctorExitCode,
+  formatDoctor,
   parseInstallArgs,
+  runDoctor,
   renderShellEnv,
 } from '../src/install.js';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 describe('install artifacts', () => {
   it('renders a launchd plan with absolute node/cli paths and logs under ~/.pxpipe', () => {
@@ -78,5 +84,40 @@ describe('install artifacts', () => {
     expect(parseInstallArgs(['--dry-run', '--port=48721'])).toEqual({ dryRun: true, port: 48721 });
     expect(() => parseInstallArgs(['--port=0'])).toThrow(/invalid --port/);
     expect(() => parseInstallArgs(['--port=nope'])).toThrow(/invalid --port/);
+  });
+
+  it('doctor verifies installed files, health, launchd, and MCP wiring without mutating state', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pxpipe-doctor-'));
+    try {
+      const plan = buildInstallPlan({ home, repoRoot: '/repo/pxpipe', nodePath: '/node' });
+      fs.mkdirSync(path.dirname(plan.launchAgentPath), { recursive: true });
+      fs.mkdirSync(path.dirname(plan.envPath), { recursive: true });
+      fs.mkdirSync(path.join(home, '.config', 'opencode'), { recursive: true });
+      fs.writeFileSync(plan.launchAgentPath, plan.plist);
+      fs.writeFileSync(plan.envPath, plan.envSh);
+      fs.writeFileSync(plan.zshrcPath, applyZshrcInstall('', plan.zshrcBlock));
+      fs.writeFileSync(
+        path.join(home, '.config', 'opencode', 'opencode.json'),
+        JSON.stringify({ mcp: { [MCP_SERVER_NAME]: plan.opencodeMcp } }),
+      );
+
+      const result = await runDoctor(
+        { home, repoRoot: '/repo/pxpipe', nodePath: '/node' },
+        {
+          fetch: (async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch,
+          spawnSync: ((cmd: string) => ({
+            status: ['launchctl', 'claude', 'codex'].includes(cmd) ? 0 : 1,
+            stdout: '',
+            stderr: '',
+          })) as any,
+        },
+      );
+
+      expect(result.checks.map((c) => c.status)).toEqual(result.checks.map(() => 'pass'));
+      expect(doctorExitCode(result)).toBe(0);
+      expect(formatDoctor(result)).toContain('PASS healthz');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
