@@ -562,7 +562,7 @@ describe('transformRequest history compression (always-on)', () => {
   function mkBody(messages: Message[], systemText: string) {
     return new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: systemText,
         messages,
       }),
@@ -604,7 +604,7 @@ describe('transformRequest history compression (always-on)', () => {
     // relocates onto the slab image — lets us assert the marker survives.
     const markedBody = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: [{ type: 'text', text: bigPlain(80_000), cache_control: { type: 'ephemeral' } }],
         messages: msgs,
       }),
@@ -758,7 +758,7 @@ describe('transformRequest history compression (always-on)', () => {
     // caller marker to relocate.
     const marked = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: [{ type: 'text', text: bigPlain(80_000), cache_control: { type: 'ephemeral' } }],
         messages: msgs,
       }),

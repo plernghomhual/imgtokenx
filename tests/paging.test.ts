@@ -324,7 +324,7 @@ describe('truncateForBudget', () => {
 function makeReq(toolResultText: string) {
   return new TextEncoder().encode(
     JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       // Force compression to fire: need a system slab past the per-block
       // break-even (≥10k chars) so the main static-slab compression runs
       // and `info.compressed` flips to true. Smaller slabs no-op out via
@@ -420,7 +420,7 @@ describe('paging end-to-end (transformRequest)', () => {
     // Two big tool_results in one request.
     const req = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: 'x'.repeat(80_000),
         messages: [
           {
@@ -451,7 +451,7 @@ describe('paging end-to-end (transformRequest)', () => {
     // Array shape: tool_result content is [{type: 'text', text: ...}]
     const req = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: 'x'.repeat(80_000),
         messages: [
           {

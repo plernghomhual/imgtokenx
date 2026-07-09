@@ -143,8 +143,53 @@ Remaining risks:
 Plan: `/Users/plernghomhual/.claude/plans/jaunty-whistling-shannon.md`
 
 - [x] Phase 0: commit pending exactness pass as checkpoint (verify green first). Commit `142e964`.
-- [ ] Phase 1: lossless-by-default (`losslessExact` on), widen exact-risk detectors, recovery MCP server + `pxpipe mcp`, default `emitRecoverable`/`PXPIPE_RECOVERABLE_DIR`, banner mentions recovery tool.
-- [ ] Phase 2: per-model reader-capacity profiles (`reader-profiles.ts`), density selection in transform, safe default for unknown models, calibration harness stub.
+- [x] Phase 1: lossless-by-default (`losslessExact` on), widen exact-risk detectors, recovery MCP server + `pxpipe mcp`, default `emitRecoverable`/`PXPIPE_RECOVERABLE_DIR`, banner mentions recovery tool. Commit `65a85a1`.
+- [x] Phase 2a (miner-xhigh): per-model reader-capacity profiles (`reader-profiles.ts`), density selection threaded through transform.ts + history.ts, safe default (text passthrough) for unknown/uncalibrated models, `applicability.ts` GPT-vs-Anthropic split documented. Commit pending.
+- [ ] Phase 2b: calibration harness (`eval/reader-capacity/`, live-API opt-in sweep tool) — deferred, not part of this delegate's scope; see Final Review below.
 - [ ] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`.
 - [ ] Phase 4: compat/lossless/reader-profile tests, doctor self-check.
 - [ ] Full verification: typecheck, build, test, install dry-run, final review entry.
+
+## Final Review - 2026-07-09 (Phase 2a — per-model reader profiles)
+
+Files changed:
+- `src/core/reader-profiles.ts` (new) — `ReaderProfile`, `DEFAULT_READER_PROFILE` (safeToImage:false), `BUILTIN_RULES` (claude-fable-5, gpt-5.6 → no bonus; claude-opus-4-* → cellWBonus:15/cellHBonus:24 per FINDINGS.md 2026-06-16 sweep), `PXPIPE_READER_PROFILES` env override, `resolveReaderProfile`.
+- `src/core/render.ts` — added `cellDims(style)` helper.
+- `src/core/applicability.ts` — comment rewrite explaining the GPT-vs-Anthropic split (GPT still allowlist-gated; Claude default now gated by reader-profiles.ts).
+- `src/core/transform.ts` — single centralized gate right after `JSON.parse`: unsafe/uncalibrated model → `reader_profile_unsafe` passthrough (zero images, original body, `outgoingTextChars` still recorded for telemetry). Threaded `RenderStyle`/`cellW`/`cellH` through every gate and render call (`singleColWidthPx`, `multiColWidthPx`, `imageTokensForRows`, `imageTokensCost`, `denseGateGeometry`, `linesPerImageFor`/`maxCharsPerImage`, `evalCompressionProfitability`, `isCompressionProfitable(Amortized)`, `textToImageBlocks`, slab/reminder/tool_result render calls, both `historyProfitable` closures). `renderTextToPngsMultiCol` deliberately left un-threaded (no `RenderStyle` param exists) with comments at each call site explaining the scope limit.
+- `src/core/history.ts` — `HistoryCollapseOptions.style: RenderStyle` (new field, default `DENSE_RENDER_STYLE`), threaded into `collapseHistory`'s own independent render call so history-collapsed images also respect the per-model cell bonus (this path doesn't go through `textToImageBlocks` at all).
+- `tests/render.test.ts`, `tests/history.test.ts`, `tests/paging.test.ts`, `tests/exact-sidecar.test.ts`, `tests/keep-sharp.test.ts`, `tests/recoverable.test.ts` — placeholder `model: 'claude'` / `'claude-3-5-sonnet'` fixtures switched to `'claude-fable-5'` (a calibrated, zero-bonus profile, numerically identical to the prior hardcoded defaults) since `transformRequest` now gates imaging by model.
+
+Behavior changed:
+- `transformRequest` no longer images content for any model outside `reader-profiles.ts`'s `BUILTIN_RULES` (claude-fable-5, gpt-5.6, claude-opus-4-*) or an explicit `PXPIPE_READER_PROFILES` override — those get full text passthrough, reason `reader_profile_unsafe`.
+- Opus 4.x requests now render at a 20×32 cell (cellWBonus:15, cellHBonus:24) instead of the production 5×8 cell, everywhere imaging can happen (slab, reminders, tool_results, history-collapse), matching the FINDINGS.md 2026-06-16 sweep's 100%-exact-read density.
+- `TransformInfo.passthroughReasons` gained `reader_profile_unsafe`.
+
+Verification performed:
+- `npm run typecheck`: exit 0.
+- `npm test`: 37 files, 676 tests, all passed (was 6 files / 47-54 failing before the two fixes below).
+- `npm run build`: exit 0, version smoke `0.8.0`.
+- `git diff --check`: exit 0.
+
+Bugs found and fixed during verification (not part of the original brief, found by running the full suite rather than trusting the diff):
+1. The new reader-profile gate returned early before `info.outgoingTextChars = countOutgoingTextChars(req)` ran, silently zeroing the token-accounting denominator for any passthrough caused by an unsafe/uncalibrated model. Fixed by computing it in the early-return branch too (mirrors what every other exit path in `transformRequest` already does).
+2. Six test files used `claude` / `claude-3-5-sonnet` as a generic placeholder `model` value (documented in `keep-sharp.test.ts`/`recoverable.test.ts` as "the library wrapper gates on supported models... the [raw transform] path transforms any model" — a design assumption Phase 2 deliberately overturns). Confirmed via grep that no assertion depended on the literal model string, then switched the placeholders to `claude-fable-5` (a calibrated, zero-bonus profile — no numeric behavior change for those tests beyond making imaging reachable again).
+
+## Auditor pass - 2026-07-09 (post-delegate review)
+
+A second independent pass over the Phase 2a diff (not the delegate's own self-review above) found one more real bug and one real coverage gap:
+
+3. **`src/core/applicability.ts` was dead-code'd against its own comment.** The delegate's module comment already claimed a "GPT-vs-Anthropic split" (GPT stays allowlist-gated; Claude defaults open, reader-profiles.ts gates safety instead) — but `isPxpipeSupportedModel`/`DEFAULT_MODEL_BASES` were never actually changed to match. With the old code, the *default* (unset `PXPIPE_MODELS`) scope was still `['claude-fable-5', 'gpt-5.6']` only, so `isPxpipeSupportedModel('claude-opus-4-8')` returned `false` by default and `shouldTransformAnthropicMessages` rejected Opus at `unsupported_model` *before* `transformRequest`/`reader-profiles.ts` ever ran. This made the brand-new Opus reader-profile entry (`cellWBonus:15, cellHBonus:24`) unreachable in production — Opus would never even reach the gate this whole phase exists to add. Fixed `isPxpipeSupportedModel` to be open-by-default (only `hasExplicitOverride()` narrows it), matching what the comment already said and what `reader-profiles.ts` now assumes. `isPxpipeSupportedGptModel` correctly left allowlist-gated (GPT has no reader-profile system).
+4. `tests/public-api.test.ts` had 6 assertions hard-coded to the old default-2-model behavior (`isPxpipeSupportedModel('claude-opus-4-8')` expected `false`, etc.) — these were silently masking bug #3 by asserting the broken behavior was correct. Updated to assert the intended open-by-default behavior instead (Opus/unknown Claude models eligible by default; `PXPIPE_MODELS`/dashboard override still narrows explicitly; GPT allowlist unchanged).
+5. **Added `tests/reader-profiles.test.ts`** (new, 10 tests) — `reader-profiles.ts` had zero test coverage despite being the safety-critical module the whole phase is about. Covers: built-in table resolution (Fable/gpt-5.6 zero-bonus, Opus 4.x 20×32 bonus, prefix/variant-tag matching, no false-match on `claude-fable-50`), unknown-model conservative default, `PXPIPE_READER_PROFILES` env override (longest-prefix-wins, partial-field fallback, malformed-JSON never throws), and two `transformRequest` integration tests: an uncalibrated model gets a byte-identical passthrough with `reason: 'reader_profile_unsafe'` and `passthroughReasons.reader_profile_unsafe === 1`, and Opus 4.8 actually renders wider images than Fable 5 for identical text (proves `cellWBonus` reaches the real PNG, not just the gate math).
+
+Verification performed (re-run after the auditor-pass fixes, from a clean state):
+- `npm run typecheck`: exit 0.
+- `npm test`: 38 files, 686 tests, all passed. (Two unrelated flakes — a GPT e2e test timeout and a proxy-usage 4xx-capture test — seen once under full-suite parallel load; both pass individually and passed on a clean re-run of the full suite, confirming resource-contention flakes, not regressions.)
+- `npm run build`: exit 0, version smoke `0.8.0`.
+- `git diff --check`: exit 0.
+
+Remaining risks / next steps:
+- Phase 2b (calibration harness, `eval/reader-capacity/`) is explicitly out of scope for this pass — it's a separate live-API opt-in sweep tool per the plan, not a numeric-correctness change to the render/gate path. Needs its own delegated task.
+- `renderTextToPngsMultiCol` still hardcodes `CELL_H`/no `RenderStyle` param — multi-col imaging for a bonus-cell model (e.g. Opus 4.x with `multiCol` set >1, an opt-in/off-by-default feature) will under-size glyphs relative to its calibrated profile, silently reverting to the unsafe 5×8 density. Documented at each call site; not fixed here per the brief's explicit scope limit. Should be closed before `multiCol` is recommended for any non-default-profile model.
+- Ready to commit as a single Phase 2a checkpoint.

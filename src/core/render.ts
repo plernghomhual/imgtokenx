@@ -93,6 +93,20 @@ export interface RenderStyle {
   colorByRole?: boolean;
 }
 
+/** Effective per-request cell pixel dimensions for a reader-profile-scaled render
+ *  (module-level CELL_W/CELL_H stay the fixed production default, used elsewhere;
+ *  this is the per-model-bonus variant transform.ts threads through the gate AND
+ *  the renderer so they never disagree — see reader-profiles.ts). */
+export function cellDims(style: Pick<RenderStyle, 'cellWBonus' | 'cellHBonus'>): {
+  cellW: number;
+  cellH: number;
+} {
+  return {
+    cellW: ATLAS_CELL_W + (style.cellWBonus ?? 0),
+    cellH: ATLAS_CELL_H + (style.cellHBonus ?? 0),
+  };
+}
+
 // --- column-aware wrapping -------------------------------------------------
 
 /** Visual width of a codepoint in cells (1 = Latin, 2 = East Asian Wide).

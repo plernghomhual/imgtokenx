@@ -32,10 +32,11 @@ const dec = new TextDecoder();
 /**
  * Build a request whose first user message carries `content` blocks and a
  * large static system slab (so compression machinery is definitely active).
- * `model` defaults to a sonnet alias (the proxy path transforms any model);
- * the library wrapper gates on supported models, so its test passes Fable.
+ * `model` defaults to Fable — a calibrated reader-profile model (see
+ * reader-profiles.ts) — because transformRequest itself now gates imaging by
+ * model, not just the public library wrapper's applicability check.
  */
-function makeReq(content: unknown[], model = 'claude-3-5-sonnet') {
+function makeReq(content: unknown[], model = 'claude-fable-5') {
   return enc.encode(
     JSON.stringify({
       model,

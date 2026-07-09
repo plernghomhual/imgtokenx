@@ -24,12 +24,21 @@ function baseModelId(model: string): string {
 /** Dashboard runtime override; null = fall back to PXPIPE_MODELS env / built-in default. In-memory only. */
 let runtimeModelBases: readonly string[] | null = null;
 
-/** Built-in default scope when PXPIPE_MODELS is unset: Fable 5 (Claude) plus
- *  GPT 5.6. GPT 5.5 and Opus 4.8 are intentionally off — same pipeline but
- *  measurably worse at reading imaged content (FINDINGS.md 2026-06-16: Opus 4.8
- *  ~2pp arithmetic, 6/15 dense-hex recall vs Fable's 100/100; GPT 5.5 likewise
- *  degrades on imaged history/context) — so silently imaging them is the wrong
- *  default. Both stay opt-in via the dashboard chips or PXPIPE_MODELS. */
+/** Built-in default scope, consulted in two different ways depending on family
+ *  (Phase 2 reader-profiles split, see isPxpipeSupportedModel below):
+ *
+ *  - GPT: still THE correctness gate. GPT models have no reader-capacity-profile
+ *    system yet (that only exists for Anthropic — see reader-profiles.ts /
+ *    transform.ts), so this fixed allowlist remains their only imaging-safety
+ *    backstop. GPT 5.5 is intentionally excluded — measurably worse at reading
+ *    imaged content (FINDINGS.md 2026-06-16 sweep) — so silently imaging it would
+ *    be the wrong default; opt in via the dashboard chips or PXPIPE_MODELS.
+ *  - Anthropic (Claude): now ONLY a fallback used when PXPIPE_MODELS is explicitly
+ *    set (back-compat) or the dashboard runtime override is active. It is NOT
+ *    consulted for the default (unset-env) case anymore — see
+ *    isPxpipeSupportedModel's comment for why Opus 4.8 no longer needs a mention
+ *    here (the FINDINGS.md 2026-06-16 sweep numbers now live in
+ *    reader-profiles.ts, which is the real correctness gate for Claude). */
 const DEFAULT_MODEL_BASES = ['claude-fable-5', 'gpt-5.6'];
 
 function falsey(v: string): boolean {
@@ -80,12 +89,32 @@ function isAllowed(model: string | null | undefined): boolean {
   return allowedModelBases().some((b) => base === b || base.startsWith(`${b}-`));
 }
 
-/** True when pxpipe may transform this Anthropic model. */
-export function isPxpipeSupportedModel(model: string | null | undefined): boolean {
-  return isAllowed(model);
+/** True when the operator has explicitly narrowed/disabled scope — via the dashboard
+ *  runtime override or a non-empty PXPIPE_MODELS — rather than leaving the built-in
+ *  default in place. Explicit overrides always win, for both families, unchanged from
+ *  pre-Phase-2 behavior. */
+function hasExplicitOverride(): boolean {
+  if (runtimeModelBases !== null) return true;
+  const raw = typeof process !== 'undefined' ? process.env?.PXPIPE_MODELS : undefined;
+  return raw !== undefined && raw.trim() !== '';
 }
 
-/** True when pxpipe may transform this GPT model. Shares the single PXPIPE_MODELS scope. */
+/** True when pxpipe may transform this Anthropic model. Without an explicit override,
+ *  EVERY Claude model is eligible by default — applicability no longer doubles as the
+ *  per-model imaging-safety gate for Anthropic. That job belongs to reader-profiles.ts
+ *  (consulted inside transform.ts), which defaults unmeasured models to text passthrough
+ *  instead of silently imaging them. This function only answers "should pxpipe touch
+ *  this request at all," which by default is yes unless the operator opted out. */
+export function isPxpipeSupportedModel(model: string | null | undefined): boolean {
+  if (typeof model !== 'string') return false;
+  if (hasExplicitOverride()) return isAllowed(model);
+  return true;
+}
+
+/** True when pxpipe may transform this GPT model. GPT has no reader-capacity-profile
+ *  system yet (see reader-profiles.ts's module comment), so this fixed allowlist
+ *  remains its only imaging-safety gate — unlike Claude, GPT is NOT unconditionally
+ *  eligible by default. Shares the single PXPIPE_MODELS scope for explicit overrides. */
 export function isPxpipeSupportedGptModel(model: string | null | undefined): boolean {
   return isAllowed(model);
 }

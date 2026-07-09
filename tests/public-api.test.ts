@@ -29,35 +29,33 @@ afterEach(() => {
 });
 
 describe('public library API', () => {
-  it('recognizes Fable 5 (with suffix aliases) as the default scope; Opus is OFF by default', () => {
+  it('is eligible for every Claude model by default — reader-profiles.ts gates imaging safety, not this', () => {
     expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
     expect(isPxpipeSupportedModel('claude-fable-5-high')).toBe(true);
-    // Opus 4.8 is OPT-IN, not in the default scope — same pipeline/render as
-    // Fable, but it reads imaged content at a tax (FINDINGS.md 2026-06-16), so
-    // the default doesn't silently compress the operator's main driver. Enable
-    // it via PXPIPE_MODELS or the dashboard "compress models" chips.
-    expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false);
-    // older Opus + other families are not in the default scope
-    expect(isPxpipeSupportedModel('claude-opus-4-7')).toBe(false);
-    expect(isPxpipeSupportedModel('claude-opus-4-6')).toBe(false);
-    expect(isPxpipeSupportedModel('claude-mythos-5')).toBe(false);
-    expect(isPxpipeSupportedModel('claude-fable-50')).toBe(false);
-    expect(isPxpipeSupportedModel('claude-sonnet-4-7')).toBe(false);
+    // Opus 4.8 (and any other Claude model) is eligible to enter transformRequest by
+    // default now — reader-profiles.ts decides at what density (or whether at all) to
+    // image its content, defaulting unmeasured models to text passthrough. This
+    // function only answers "should pxpipe touch the request," not "is it safe to image."
+    expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-opus-4-7')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-opus-4-6')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-mythos-5')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-fable-50')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-sonnet-4-7')).toBe(true);
     expect(isPxpipeSupportedModel(null)).toBe(false);
   });
 
-  it('strips bracketed variant tags like [1m] before matching', () => {
+  it('strips bracketed variant tags like [1m] before matching (still eligible by default)', () => {
     expect(isPxpipeSupportedModel('claude-fable-5[1m]')).toBe(true);
     expect(isPxpipeSupportedModel('claude-fable-5-high[1m]')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-opus-4-8[1m]')).toBe(false); // Opus opt-in, off by default
-    // a non-scoped base is still rejected even with a variant tag
-    expect(isPxpipeSupportedModel('claude-opus-4-7[1m]')).toBe(false);
+    expect(isPxpipeSupportedModel('claude-opus-4-8[1m]')).toBe(true);
+    expect(isPxpipeSupportedModel('claude-opus-4-7[1m]')).toBe(true);
   });
 
-  it('honors PXPIPE_MODELS to override the default scope', () => {
+  it('honors PXPIPE_MODELS to explicitly narrow the default scope', () => {
     const prev = process.env.PXPIPE_MODELS;
     try {
-      // narrow to Fable only
+      // narrow to Fable only — explicit override always wins, unlike the open default
       process.env.PXPIPE_MODELS = 'claude-fable-5';
       expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
       expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false);
@@ -65,6 +63,9 @@ describe('public library API', () => {
       process.env.PXPIPE_MODELS = 'claude-fable-5,claude-opus-4-7';
       expect(isPxpipeSupportedModel('claude-opus-4-7')).toBe(true);
       expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false); // not in this set
+      // explicit off kill-switch still works
+      process.env.PXPIPE_MODELS = 'off';
+      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.PXPIPE_MODELS;
       else process.env.PXPIPE_MODELS = prev;
@@ -73,17 +74,18 @@ describe('public library API', () => {
 
   it('honors the dashboard runtime override (setAllowedModelBases) over env/default', () => {
     try {
-      // override takes precedence over the env/default scope
+      // override takes precedence over the open default
       setAllowedModelBases(['claude-fable-5', 'claude-opus-4-8']);
       expect(getAllowedModelBases()).toEqual(['claude-fable-5', 'claude-opus-4-8']);
       expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true); // opted in at runtime
+      expect(isPxpipeSupportedModel('claude-sonnet-4-7')).toBe(false); // narrowed out
       // empty list = compress nothing
       setAllowedModelBases([]);
       expect(isPxpipeSupportedModel('claude-fable-5')).toBe(false);
-      // null clears the override → back to the Fable-only default
+      // null clears the override → back to the open default (every Claude model eligible)
       setAllowedModelBases(null);
       expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
-      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false);
+      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true);
     } finally {
       setAllowedModelBases(null); // never leak the override into other tests
     }
@@ -250,12 +252,20 @@ describe('public library API', () => {
   });
 
   it('wraps the transformer with model gating and cache ownership metadata', async () => {
+    // claude-sonnet-4-6 is eligible by default post-Phase-2 (applicability no longer
+    // gates Claude imaging safety — reader-profiles.ts does), so exercise the
+    // wrapper's `unsupported_model` gating path via an explicit PXPIPE_MODELS
+    // narrowing instead, which still gates unconditionally per family.
+    const prevModels = process.env.PXPIPE_MODELS;
+    process.env.PXPIPE_MODELS = 'claude-fable-5';
     const unsupported = enc.encode(JSON.stringify({
       model: 'claude-sonnet-4-6',
       system: 'x'.repeat(20_000),
       messages: [{ role: 'user', content: 'hello' }],
     }));
     const skipped = await transformAnthropicMessages({ body: unsupported, model: 'claude-sonnet-4-6' });
+    if (prevModels === undefined) delete process.env.PXPIPE_MODELS;
+    else process.env.PXPIPE_MODELS = prevModels;
     expect(skipped.applied).toBe(false);
     expect(skipped.reason).toBe('unsupported_model');
     expect(skipped.body).toBe(unsupported);

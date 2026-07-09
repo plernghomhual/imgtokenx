@@ -28,7 +28,9 @@ import { transformAnthropicMessages } from '../src/core/library.js';
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-function makeReq(content: unknown[], model = 'claude-3-5-sonnet') {
+// model defaults to Fable — a calibrated reader-profile model (see
+// reader-profiles.ts) — since transformRequest now gates imaging by model.
+function makeReq(content: unknown[], model = 'claude-fable-5') {
   return enc.encode(
     JSON.stringify({
       model,

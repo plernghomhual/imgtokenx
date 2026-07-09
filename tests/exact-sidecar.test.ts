@@ -7,7 +7,7 @@ const dec = new TextDecoder();
 function makeReq(toolResult: string): Uint8Array {
   return enc.encode(
     JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       system: 'x'.repeat(80_000),
       messages: [
         {

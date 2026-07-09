@@ -661,7 +661,7 @@ describe('renderer', () => {
 describe('transform', () => {
   it('is a no-op when below min-chars', async () => {
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'You are helpful.',
     });
@@ -674,7 +674,7 @@ describe('transform', () => {
   it('compresses large system fields into image blocks', async () => {
     const bigSystem = 'You are a helpful assistant. '.repeat(5000); // ~31.9k chars, well past 2-image break-even (20k)
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: bigSystem,
     });
@@ -699,7 +699,7 @@ describe('transform', () => {
 
   it('moves tool docs into the imaged Tool Reference and stubs originals', async () => {
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       // Sized so system + tool docs + banner fit inside the 65,536-char
       // info.imageSourceText diagnostic window (the reference renders after
@@ -748,7 +748,7 @@ describe('transform', () => {
   it('leaves native typed Anthropic tools untouched and out of Tool Reference', async () => {
     const nativeTool = { type: 'advisor_20260301', name: 'advisor' };
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'x'.repeat(30000),
       tools: [nativeTool],
@@ -771,7 +771,7 @@ describe('transform', () => {
     // validator, annotations (description/default/$schema) move into the
     // imaged reference where they cost image rates.
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       // Small enough that the reference lands inside the 65,536-char
       // info.imageSourceText window; large enough to clear the gates.
@@ -864,7 +864,7 @@ describe('transform', () => {
     // means there is nothing to stub or flag any more — what the caller sent is
     // exactly what Anthropic's validator sees.
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'x'.repeat(150000),
       tools: [
@@ -880,7 +880,7 @@ describe('transform', () => {
   it('leaves input_schema untouched when the original is missing', async () => {
     // If the tool ships without an input_schema, we should NOT invent one.
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'x'.repeat(150000),
       tools: [{ name: 'Bare', description: 'd' }],
@@ -1274,7 +1274,7 @@ describe('transform', () => {
   it('strips x-anthropic-billing-header line and keeps it as text', async () => {
     const sysText = 'x-anthropic-billing-header: cch=abc123\n' + 'real prompt text. '.repeat(2500);
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: sysText,
     });
@@ -1297,7 +1297,7 @@ describe('transform', () => {
     const sys = staticSlab + '\n' + envBlock;
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1345,7 +1345,7 @@ describe('transform', () => {
       '<context name="todoList">\n[ ] do thing\n</context>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1364,7 +1364,7 @@ describe('transform', () => {
     const cacheControl = { type: 'ephemeral' as const, ttl: '1h' as const };
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: [
           {
@@ -1403,7 +1403,7 @@ describe('transform', () => {
       '<git_status>\nOn branch main\nnothing to commit\n</git_status>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1422,7 +1422,7 @@ describe('transform', () => {
     const sys = 'claude.md\n'.repeat(400);
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1440,7 +1440,7 @@ describe('transform', () => {
     const mk = (sys: string) =>
       new TextEncoder().encode(
         JSON.stringify({
-          model: 'claude',
+          model: 'claude-fable-5',
           messages: [{ role: 'user', content: 'hi' }],
           system: sys,
         }),
@@ -1457,7 +1457,7 @@ describe('transform', () => {
   it('computes firstUserSha8 from the first user message', async () => {
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [
           { role: 'user', content: 'continue from HANDOFF?' },
           { role: 'assistant', content: 'sure' },
@@ -1478,7 +1478,7 @@ describe('transform', () => {
     const sys = 'x'.repeat(150000);
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1487,7 +1487,7 @@ describe('transform', () => {
     const b = await transformRequest(
       new TextEncoder().encode(
         JSON.stringify({
-          model: 'claude',
+          model: 'claude-fable-5',
           messages: [{ role: 'user', content: 'hi' }],
           system: sys,
         }),
@@ -1512,7 +1512,7 @@ describe('transform', () => {
       "<env>\nWorking directory: /tmp\n</env>";
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1531,7 +1531,7 @@ describe('transform', () => {
       '<env>\nWorking directory: /tmp\n</env>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1545,7 +1545,7 @@ describe('transform', () => {
     const sys = 'claude.md\n'.repeat(400) + '<env>\nWorking directory: /tmp\n</env>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1558,7 +1558,7 @@ describe('transform', () => {
     const sys = '<env>\nWorking directory: /tmp\n</env>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: sys,
       }),
@@ -1577,7 +1577,7 @@ describe('transform', () => {
     // rewrite text → image byte-stably and leave marker placement alone.
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }],
         system: 'x'.repeat(150000),
       }),
@@ -1598,7 +1598,7 @@ describe('transform', () => {
     const reminder = '<system-reminder>\n' + 'a long policy note. '.repeat(1550) + '\n</system-reminder>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -1636,7 +1636,7 @@ describe('transform', () => {
     const shortReminder = '<system-reminder>\nshort note\n</system-reminder>';
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -1662,7 +1662,7 @@ describe('transform', () => {
     const bigResult = 'output line. '.repeat(2400);
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -1696,7 +1696,7 @@ describe('transform', () => {
     const bigResult = 'error trace. '.repeat(1000); // 13k chars — past 10k break-even
     const body = new TextEncoder().encode(
       JSON.stringify({
-        model: 'claude',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -1740,7 +1740,7 @@ describe('transform', () => {
       '\n' + cpB.repeat(3) +   // 3  drops of U+1F604
       '\n' + cpC.repeat(1);    // 1  drop  of U+1F60A
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: sys,
     });
@@ -1765,7 +1765,7 @@ describe('transform', () => {
   it('omits droppedCodepointsTop entirely when no drops occur', async () => {
     // Pure ASCII; nothing the practical-profile atlas wouldn't cover.
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'x'.repeat(150000),
     });
@@ -1785,7 +1785,7 @@ describe('transform', () => {
       payload += String.fromCodePoint(0x1f300 + i).repeat(25 - i);
     }
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: payload,
     });
@@ -1892,7 +1892,7 @@ describe('transform', () => {
     }
     const slab = parts.join('\n').slice(0, target);
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: slab,
     });
@@ -1985,7 +1985,7 @@ describe('transform', () => {
     // 25000 chars of dense code/log content (charsPerToken≈2) → profitable.
     const longResult = 'x'.repeat(25000);
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [
         {
           role: 'user',
@@ -2010,7 +2010,7 @@ describe('transform', () => {
     // With charsPerToken=2 (dense code/log), this remains a clear image win.
     const reminder = '<system-reminder>' + 'x'.repeat(25000) + '</system-reminder>';
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [
         { role: 'user', content: [{ type: 'text', text: reminder }] },
       ],
@@ -2025,7 +2025,7 @@ describe('transform', () => {
     // 40k slab, no per-block reminders or tool_results. Only the static slab
     // gets imaged; nothing's gated by the per-block check.
     const req = JSON.stringify({
-      model: 'claude-3-5-sonnet',
+      model: 'claude-fable-5',
       messages: [{ role: 'user', content: 'hi' }],
       system: 'x'.repeat(150000),
     });
@@ -2054,7 +2054,7 @@ describe('transform', () => {
 
     it('baseline: system string + plain text user message', async () => {
       const n = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: 'You are helpful.', // 16 chars
         messages: [{ role: 'user', content: 'hello' }], // 5 chars
       });
@@ -2065,11 +2065,11 @@ describe('transform', () => {
       const schema = { type: 'object', properties: { path: { type: 'string' } } };
       const schemaLen = JSON.stringify(schema).length;
       const base = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }], // 2
       });
       const withTools = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [{ role: 'user', content: 'hi' }], // 2
         tools: [
           {
@@ -2087,7 +2087,7 @@ describe('transform', () => {
       const input = { command: 'ls -la', cwd: '/tmp' };
       const inputLen = JSON.stringify(input).length;
       const n = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: 'sys', // 3
         messages: [
           { role: 'user', content: 'run it' }, // 6
@@ -2106,7 +2106,7 @@ describe('transform', () => {
     it('counts tool_result inner text + tool_use_id (string and array forms)', async () => {
       // String form.
       const a = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -2124,7 +2124,7 @@ describe('transform', () => {
 
       // Array form: text block (counted) + image block (not counted).
       const b = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -2149,7 +2149,7 @@ describe('transform', () => {
 
     it('counts thinking blocks (extended thinking, Opus/Sonnet 4.x)', async () => {
       const n = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [
           { role: 'user', content: 'hi' }, // 2
           {
@@ -2166,7 +2166,7 @@ describe('transform', () => {
 
     it('skips image blocks and unknown block types (β·pixels handles those)', async () => {
       const n = await countFor({
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         messages: [
           {
             role: 'user',
@@ -2190,7 +2190,7 @@ describe('transform', () => {
       // strictly below the total JSON envelope length (which includes
       // structural keys/braces/quotes).
       const reqObj = {
-        model: 'claude-3-5-sonnet',
+        model: 'claude-fable-5',
         system: [{ type: 'text', text: 'A'.repeat(200) }],
         tools: [
           {

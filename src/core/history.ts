@@ -13,6 +13,7 @@
 
 import type { CacheControl, ContentBlock, ImageBlock, Message, TextBlock, ToolUseBlock, ToolResultBlock } from './types.js';
 import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_CONTENT_COLS, DENSE_RENDER_STYLE, neutralizeSentinel, reflow, renderTextToPngsWithCharLimit, roleSlotSegment, SLOT_MARK_ASSISTANT, SLOT_MARK_USER } from './render.js';
+import type { RenderStyle } from './render.js';
 import { factSheetTextComplete } from './factsheet.js';
 import { bytesToBase64 } from './png.js';
 
@@ -71,6 +72,13 @@ export interface HistoryCollapseOptions {
    *  identical — it just removes the blank-row waste. `collapsedChars` still
    *  reports the ORIGINAL transcript length. Default true. */
   reflow: boolean;
+  /** Per-model render style (reader-profiles.ts via transform.ts): cell-size bonus
+   *  applied to history-collapse images, same as the slab/reminder/tool_result
+   *  render paths, so a model's reader-capacity profile applies uniformly across
+   *  every imaging path, not just the ones that go through textToImageBlocks.
+   *  `colorByRole: true` is merged on top at the render call below — callers don't
+   *  need to (and shouldn't) set it themselves. Default DENSE_RENDER_STYLE. */
+  style: RenderStyle;
 }
 
 export const HISTORY_DEFAULTS: HistoryCollapseOptions = {
@@ -81,6 +89,7 @@ export const HISTORY_DEFAULTS: HistoryCollapseOptions = {
   freezeChunk: 10,
   protectedPrefix: 0,
   reflow: true,
+  style: DENSE_RENDER_STYLE,
 };
 
 /** Per-request telemetry surfaced back to TransformInfo. */
@@ -606,7 +615,7 @@ export async function collapseHistory(
       chunkRender,
       DENSE_CONTENT_COLS,
       DENSE_CONTENT_CHARS_PER_IMAGE,
-      { ...DENSE_RENDER_STYLE, colorByRole: true },
+      { ...o.style, colorByRole: true },
       undefined,
       chunkSlot,
     );
