@@ -34,10 +34,10 @@ import {
   DENSE_RENDER_STYLE,
   renderTextToPngsWithCharLimit,
 } from './render.js';
-import { factSheetText } from './factsheet.js';
+import { factSheetTextComplete } from './factsheet.js';
 import { stripSchemaDescriptions, schemaHasStructure } from './schema-strip.js';
 import { bytesToBase64 } from './png.js';
-import { collapseHistory, HISTORY_SYNTHETIC_INTRO } from './history.js';
+import { collapseHistory, HISTORY_SYNTHETIC_INTRO, HISTORY_SYNTHETIC_OUTRO } from './history.js';
 import type { GptHistoryOptions } from './openai-history.js';
 import { CACHE_CREATE_RATE, CACHE_READ_RATE } from './baseline.js';
 
@@ -57,7 +57,7 @@ export interface KeepSharpBlock {
 export interface RecoverableBlock {
   /** `rec_` + 8 hex SHA-256 over kind + toolUseId + original text. */
   readonly id: string;
-  readonly kind: 'reminder' | 'tool_result' | 'tool_result_part';
+  readonly kind: 'static_slab' | 'history' | 'reminder' | 'tool_result' | 'tool_result_part';
   readonly toolUseId?: string;
   /** Original text before compaction/reflow/paging — the bytes to restore. */
   readonly text: string;
@@ -121,6 +121,9 @@ export interface TransformOptions {
    *  for every block rendered to images. Off by default (entries inflate `info`;
    *  only a stateful harness can use them). */
   emitRecoverable?: boolean;
+  /** Strong exactness mode: when recovery sidecars are unavailable, keep any
+   *  block with extracted exact-risk identifiers as text instead of imaging it. */
+  losslessExact?: boolean;
 }
 
 const DEFAULTS: Required<TransformOptions> = {
@@ -134,8 +137,8 @@ const DEFAULTS: Required<TransformOptions> = {
   minToolResultChars: 6000,
   // system field rejects images (400 system.N.type: Input should be 'text') —
   // images always go into the first user message.
-  // 313 cols × 5 px + 8 px pad = 1573 px slab width (under 2000 px ceiling).
-  cols: 313,
+  // 312 cols × 5 px + 8 px pad = 1568 px slab width (Anthropic standard edge).
+  cols: DENSE_CONTENT_COLS,
   maxImagesPerToolResult: 10,
   charsPerToken: 4,
   historyAmortizationHorizon: 1,
@@ -146,18 +149,21 @@ const DEFAULTS: Required<TransformOptions> = {
   reflow: true,
   keepSharp: () => false,
   emitRecoverable: false,
+  losslessExact: false,
   // GPT-only knobs; the Anthropic transform ignores them but Required<> needs them.
   collapseHistory: true,
   gptHistory: {},
 };
 
+export const EXACT_RECALL_INSTRUCTION =
+  ' For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels.';
+
 // --- per-block break-even check ---
 //
-// Image token cost is computed from pixel area (Anthropic formula: w×h/750,
-// empirically accurate to ~5% on dense PNGs). Constants bias CONSERVATIVE:
-// CHARS_PER_TOKEN=4 under-estimates text savings; multi-col cost is linearly
-// scaled from single-col + 10% margin. Mispredictions leave money on the
-// table; they never generate net-loss images.
+// Image token cost is computed from Anthropic's 28px visual-patch grid.
+// Constants bias CONSERVATIVE: CHARS_PER_TOKEN=4 under-estimates text
+// savings and IMAGE_COST_SAFETY_MARGIN adds 10%. Mispredictions leave money
+// on the table; they never generate net-loss images.
 
 /** English ~4 chars per token average (conservative for code/JSON content). */
 const CHARS_PER_TOKEN = 4;
@@ -180,12 +186,8 @@ export const HISTORY_CHARS_PER_TOKEN = 2.0;
  *  of truth — src/core/export.ts imports this rather than redefining it. */
 export const REPORT_CHARS_PER_TOKEN = 3.7;
 
-/** Anthropic image-billing formula: `tokens ≈ width × height / 750`.
- *  https://docs.anthropic.com/en/docs/build-with-claude/vision#image-tokens
- *  Accurate to ~5% on dense glyph PNGs (N=14 empirical calibration). The renderer
- *  sizes height to content, so per-block images cost far less than full-canvas.
- *  Exported so the export pipeline can reuse the same constant rather than hardcoding. */
-export const ANTHROPIC_PIXELS_PER_TOKEN = 750;
+/** Anthropic bills one visual token per 28×28 px patch after tier downscaling. */
+export const ANTHROPIC_PATCH_PX = 28;
 /** Conservative 10% upward bias on Anthropic image token estimates — keeps the gate
  *  on the safe (pass-through) side when the true cost is near the break-even point.
  *  Exported so the export pipeline reuses the same value. */
@@ -232,8 +234,9 @@ function imageTokensForRows(
   const rowsInLast = Math.min(Math.max(1, linesInLast), rowsPerImage);
   const fullImageHeight = 2 * PAD_Y + rowsPerImage * CELL_H;
   const lastImageHeight = 2 * PAD_Y + rowsInLast * CELL_H;
-  const totalPixels = fullImages * widthPx * fullImageHeight + widthPx * lastImageHeight;
-  return Math.ceil((totalPixels / ANTHROPIC_PIXELS_PER_TOKEN) * IMAGE_COST_SAFETY_MARGIN);
+  const fullImageTokens = Math.ceil(widthPx / ANTHROPIC_PATCH_PX) * Math.ceil(fullImageHeight / ANTHROPIC_PATCH_PX);
+  const lastImageTokens = Math.ceil(widthPx / ANTHROPIC_PATCH_PX) * Math.ceil(lastImageHeight / ANTHROPIC_PATCH_PX);
+  return Math.ceil((fullImages * fullImageTokens + lastImageTokens) * IMAGE_COST_SAFETY_MARGIN);
 }
 
 /** Exact image-token cost for `text`. Uses `countVisualRows` and optionally
@@ -429,10 +432,42 @@ export function isCompressionProfitableAmortized(
 /** Increment a passthrough-reason counter on `info`. Lazily allocates `passthroughReasons`. */
 function bumpPassthrough(
   info: TransformInfo,
-  reason: 'below_threshold' | 'not_profitable' | 'kept_sharp',
+  reason: 'below_threshold' | 'not_profitable' | 'kept_sharp' | 'lossless_exact',
 ): void {
   if (!info.passthroughReasons) info.passthroughReasons = {};
   info.passthroughReasons[reason] = (info.passthroughReasons[reason] ?? 0) + 1;
+  if (reason === 'not_profitable') {
+    info.breakEvenMisses = (info.breakEvenMisses ?? 0) + 1;
+  }
+}
+
+function countFactSheetItems(factSheet: string): number {
+  if (!factSheet) return 0;
+  const start = factSheet.indexOf(': ');
+  const end = factSheet.endsWith(']') ? factSheet.length - 1 : factSheet.length;
+  const body = start >= 0 ? factSheet.slice(start + 2, end).trim() : '';
+  return body ? body.split(' · ').length : 0;
+}
+
+export function recordFactSheetTelemetry(info: TransformInfo, factSheet: string): void {
+  if (!factSheet) return;
+  info.factSheetItems = (info.factSheetItems ?? 0) + countFactSheetItems(factSheet);
+  info.factSheetChars = (info.factSheetChars ?? 0) + factSheet.length;
+}
+
+export function shouldKeepLosslessExact(
+  info: TransformInfo,
+  opts: { losslessExact?: boolean; emitRecoverable?: boolean },
+  text: string,
+): boolean {
+  if (!opts.losslessExact || opts.emitRecoverable || !text) return false;
+  const factSheet = factSheetTextComplete(text, DENSE_CONTENT_CHARS_PER_IMAGE);
+  if (!factSheet) return false;
+  recordFactSheetTelemetry(info, factSheet);
+  info.losslessExactKept = (info.losslessExactKept ?? 0) + 1;
+  info.losslessExactChars = (info.losslessExactChars ?? 0) + text.length;
+  bumpPassthrough(info, 'lossless_exact');
+  return true;
 }
 
 /** Invoke `keepSharp` defensively; a throw or non-`true` return means "image as usual". */
@@ -550,7 +585,22 @@ export interface TransformInfo {
   /** Top dropped codepoints by frequency (`U+HHHH` → count), at most 20 entries. */
   droppedCodepointsTop?: Record<string, number>;
   /** Why blocks passed through without compression. Only present when count > 0. */
-  passthroughReasons?: { below_threshold?: number; not_profitable?: number; kept_sharp?: number };
+  passthroughReasons?: {
+    below_threshold?: number;
+    not_profitable?: number;
+    kept_sharp?: number;
+    lossless_exact?: number;
+  };
+  /** Exact-risk fact-sheet telemetry for sidecars emitted beside rendered images. */
+  factSheetItems?: number;
+  factSheetChars?: number;
+  /** Count of `rec_*` recovery refs emitted in this request. */
+  recoverableRefs?: number;
+  /** Blocks/chars kept as native text by `losslessExact` because recovery was off. */
+  losslessExactKept?: number;
+  losslessExactChars?: number;
+  /** Blocks skipped because the break-even gate rejected image mode. */
+  breakEvenMisses?: number;
   /** Slab gate diagnostics — imageTokens, textTokens, burn terms, and verdict.
    *  Lets hosts measure flap-prevention efficacy and tune amortization horizon. */
   gateEval?: {
@@ -569,7 +619,7 @@ export interface TransformInfo {
   historyTextChars?: number;
   /** Blocks pinned as text by the caller's `keepSharp` predicate this request. */
   keptSharpBlocks?: number;
-  /** Imaged live-region blocks with original text + provenance, when `emitRecoverable`. */
+  /** Imaged blocks with original text + provenance, when `emitRecoverable`. */
   recoverable?: RecoverableBlock[];
   truncatedToolResults?: number;
   omittedChars?: number;
@@ -788,20 +838,46 @@ export async function sha8(text: string): Promise<string> {
 }
 
 /** Record a recovery entry when `emitRecoverable` is on. No-op (no hash cost) when off. */
-async function recordRecoverable(
+export async function recordRecoverable(
   info: TransformInfo,
   emit: boolean,
   entry: { kind: RecoverableBlock['kind']; toolUseId?: string; text: string; imageCount: number },
-): Promise<void> {
-  if (!emit) return;
+): Promise<RecoverableBlock | undefined> {
+  if (!emit) return undefined;
   const id = 'rec_' + (await sha8(`${entry.kind}\u0000${entry.toolUseId ?? ''}\u0000${entry.text}`));
-  (info.recoverable ??= []).push({
+  const block: RecoverableBlock = {
     id,
     kind: entry.kind,
     ...(entry.toolUseId !== undefined ? { toolUseId: entry.toolUseId } : {}),
     text: entry.text,
     imageCount: entry.imageCount,
-  });
+  };
+  (info.recoverable ??= []).push(block);
+  info.recoverableRefs = (info.recoverableRefs ?? 0) + 1;
+  return block;
+}
+
+export function recoverableRefText(ref: RecoverableBlock): string {
+  return `[Recoverable exact source: ${ref.id} kind=${ref.kind} chars=${ref.text.length} images=${ref.imageCount}. For byte-exact wording, use this id from the pxpipe recovery store instead of transcribing image pixels.]`;
+}
+
+function exactSidecarText(info: TransformInfo, factSheet: string, ref?: RecoverableBlock): string {
+  recordFactSheetTelemetry(info, factSheet);
+  return [factSheet, ref ? recoverableRefText(ref) : ''].filter(Boolean).join('\n');
+}
+
+function insertHistoryRecoveryRef(messages: Message[], ref: RecoverableBlock): void {
+  const note = recoverableRefText(ref);
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    const idx = msg.content.findIndex(
+      (b) => b.type === 'text' && (b as TextBlock).text === HISTORY_SYNTHETIC_OUTRO,
+    );
+    if (idx >= 0) {
+      msg.content.splice(idx, 0, { type: 'text', text: note });
+      return;
+    }
+  }
 }
 
 /** Hash the concatenated base64 of every image block on `messages[0]` (the synthetic
@@ -1042,6 +1118,11 @@ function renderToolDoc(t: ToolDef): string {
     parts.push('```json\n' + JSON.stringify(t.input_schema) + '\n```');
   }
   return parts.join('\n');
+}
+
+function isNativeAnthropicTool(t: ToolDef): boolean {
+  const type = (t as ToolDef & { type?: unknown }).type;
+  return typeof type === 'string' && type !== 'custom';
 }
 
 function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
@@ -1319,7 +1400,7 @@ export async function textToImageBlocks(
   const imgs =
     effectiveNumCols > 1
       ? await renderTextToPngsMultiCol(text, effectiveCols, effectiveNumCols)
-      // Single-col dense: shrink the 384-col base to content so the renderer matches the
+      // Single-col dense: shrink the 312-col base to content so the renderer matches the
       // gate (denseGateGeometry uses DENSE_CONTENT_COLS, priced via shrinkColsToContent).
       // Was hard-coded to DENSE_CONTENT_COLS, which threw away the shrink the gate assumed.
       : await renderTextToPngsWithCharLimit(text, shrinkColsToContent(text, DENSE_CONTENT_COLS), DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_RENDER_STYLE);
@@ -1383,7 +1464,8 @@ async function runHistoryCollapseAndFinalize(
     // 2026-05-23 showed three-turn sessions paying cache_create every
     // turn because the history gate ignored priorWarmImageTokens.
     const historyProfitable = (text: string, cols: number): boolean => {
-      // History always renders single-col at the dense 384-col / 240-row page
+      if (shouldKeepLosslessExact(info, o, text)) return false;
+      // History always renders single-col at the dense 312-col / 90-row page
       // (history.ts → renderTextToPngsWithCharLimit with DENSE_CONTENT_COLS /
       // DENSE_CONTENT_CHARS_PER_IMAGE), so gate at THAT geometry, not o.cols.
       const g = denseGateGeometry(cols, 1);
@@ -1420,6 +1502,14 @@ async function runHistoryCollapseAndFinalize(
       info.historyReason = 'collapsed';
       info.historyTextChars = histInfo.collapsedChars;
       info.historyImageSha = await historyImageSha8(newMessages);
+      const historyRecovery = histInfo.collapsedText
+        ? await recordRecoverable(info, o.emitRecoverable, {
+            kind: 'history',
+            text: histInfo.collapsedText,
+            imageCount: histInfo.collapsedImages,
+          })
+        : undefined;
+      if (historyRecovery) insertHistoryRecoveryRef(newMessages, historyRecovery);
       bumpBucket(info, 'history', histInfo.collapsedChars);
       collapsedFlag = true;
     } else if (histInfo.reason) {
@@ -1541,6 +1631,7 @@ export async function transformRequest(
   if (o.compressTools && Array.isArray(req.tools) && req.tools.length > 0) {
     const docs: string[] = [];
     toolsRewritten = req.tools.map((t) => {
+      if (isNativeAnthropicTool(t)) return t;
       docs.push(renderToolDoc(t));
       // tools[] keeps the annotation-STRIPPED schema: structure (type/properties/
       // required/enum/items) stays for Anthropic's tool-use validator — a bare
@@ -1592,7 +1683,7 @@ export async function transformRequest(
   // config, not a replayed/extracted prompt.
   const toolReferenceText = toolDocsText
     ? '=== TOOL REFERENCE ===\n' +
-      "pxpipe (this user's local proxy) moved the full tool documentation for this" +
+      "pxpipe (this user's local proxy) moved the custom-tool schema reference for this" +
       ' session here to reduce token cost. Each tool in the tools list carries a short' +
       ' stub description pointing here; the entry under the matching' +
       ' "## Tool: <name>" heading below is the complete description for that tool.\n\n' +
@@ -1608,6 +1699,16 @@ export async function transformRequest(
   info.origChars = combinedRaw.length;
   info.compressedChars = 0;
   if (combined) info.systemSha8 = await sha8(combined);
+
+  if (shouldKeepLosslessExact(info, o, combinedRaw)) {
+    info.reason = 'lossless_exact';
+    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints);
+    if (finalized.collapsed) {
+      info.compressed = true;
+      return { body: finalized.body, info };
+    }
+    return { body, info };
+  }
 
   if (combined.length < o.minCompressChars) {
     info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
@@ -1631,7 +1732,7 @@ export async function transformRequest(
     Math.max(1, (o.multiCol | 0) || 1),
     Math.max(1, maxFittingCols(o.cols)),
   );
-  // Gate geometry for dense single-col (tool_result/reminder) paths — 384-col/240-row.
+  // Gate geometry for dense single-col (tool_result/reminder) paths — 312-col/90-row.
   const denseGeo = denseGateGeometry(o.cols, numCols);
   // Use slab cpt (2.0) unless host pinned charsPerToken explicitly.
   const slabCpt = opts.charsPerToken !== undefined
@@ -1656,6 +1757,7 @@ export async function transformRequest(
     "pxpipe (this user's local proxy) rendered this session's configuration" +
     ' into the following images to reduce token cost. Read the pages carefully and follow them as' +
     ' your operating instructions for this session.' +
+    EXACT_RECALL_INSTRUCTION +
     columnNoteImg +
     reflowNoteImg +
     '\n====================== BEGIN RENDERED CONTEXT ======================\n';
@@ -1728,6 +1830,11 @@ export async function transformRequest(
     (info.imageDims ??= []).push(...images.map((i) => ({ width: i.width, height: i.height })));
     info.imageSourceText = combinedWithHeader.slice(0, 65_536);
   }
+  const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
+    kind: 'static_slab',
+    text: combinedRaw,
+    imageCount: imageBlocks.length,
+  });
 
   // 4. Splice images back into the request. OCR framing is baked into the image.
   //
@@ -1785,14 +1892,19 @@ export async function transformRequest(
             processedExisting.push(blk);
             continue;
           }
+          const reminderRaw = (blk as TextBlock).text;
           // Caller fidelity override: pin this block as text, skip imaging.
-          if (callerKeepsSharp(o.keepSharp, { kind: 'reminder', text: (blk as TextBlock).text })) {
+          if (callerKeepsSharp(o.keepSharp, { kind: 'reminder', text: reminderRaw })) {
             bumpPassthrough(info, 'kept_sharp');
             info.keptSharpBlocks = (info.keptSharpBlocks ?? 0) + 1;
             processedExisting.push(blk);
             continue;
           }
-          const textLen = (blk as TextBlock).text.length;
+          if (shouldKeepLosslessExact(info, o, reminderRaw)) {
+            processedExisting.push(blk);
+            continue;
+          }
+          const textLen = reminderRaw.length;
           if (textLen < o.minReminderChars) {
             // Below coarse threshold; can't possibly be profitable. Skip.
             bumpPassthrough(info, 'below_threshold');
@@ -1804,7 +1916,6 @@ export async function transformRequest(
           // width, so stripped trailing whitespace + collapsed blank-line
           // runs reduce real renderer cost without changing what the
           // model reads.
-          const reminderRaw = (blk as TextBlock).text;
           const reminderText = maybeReflow(compactSlabWhitespace(reminderRaw), o.reflow);
           if (!isCompressionProfitable(reminderText, denseGeo.cols, undefined, numCols, o.charsPerToken, 0, 0, true, denseGeo.maxChars)) {
             bumpPassthrough(info, 'not_profitable');
@@ -1825,15 +1936,19 @@ export async function transformRequest(
             processedExisting.push(out as ImageBlock);
             info.imageBytes += approxBlockBytes(img);
           }
-          const reminderFactSheet = factSheetText(reminderRaw);
-          if (reminderFactSheet) processedExisting.push({ type: 'text', text: reminderFactSheet });
-          info.imagePixels = (info.imagePixels ?? 0) + pixels;
-          info.reminderImgs = (info.reminderImgs ?? 0) + imgs.length;
-          await recordRecoverable(info, o.emitRecoverable, {
+          const reminderRecovery = await recordRecoverable(info, o.emitRecoverable, {
             kind: 'reminder',
             text: reminderRaw,
             imageCount: imgs.length,
           });
+          const reminderSidecar = exactSidecarText(
+            info,
+            factSheetTextComplete(reminderRaw, DENSE_CONTENT_CHARS_PER_IMAGE),
+            reminderRecovery,
+          );
+          if (reminderSidecar) processedExisting.push({ type: 'text', text: reminderSidecar });
+          info.imagePixels = (info.imagePixels ?? 0) + pixels;
+          info.reminderImgs = (info.reminderImgs ?? 0) + imgs.length;
           info.compressedChars += reminderRaw.length;
           bumpBucket(info, 'reminder', reminderRaw.length);
           info.imageCount += imgs.length;
@@ -1846,10 +1961,14 @@ export async function transformRequest(
         processedExisting.push(...existing);
       }
 
-      const slabFactSheet = factSheetText(combinedRaw);
+      const slabSidecar = exactSidecarText(
+        info,
+        factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE),
+        slabRecovery,
+      );
       m.content = [
         ...imageBlocks,
-        ...(slabFactSheet ? [{ type: 'text' as const, text: slabFactSheet }] : []),
+        ...(slabSidecar ? [{ type: 'text' as const, text: slabSidecar }] : []),
         { type: 'text' as const, text: '[End of rendered context.]' },
         ...processedExisting,
       ];
@@ -1878,6 +1997,10 @@ export async function transformRequest(
                 rewritten.push(blk);
                 continue;
               }
+              if (shouldKeepLosslessExact(info, o, innerRaw)) {
+                rewritten.push(blk);
+                continue;
+              }
               const inner = compactSlabWhitespace(innerRaw);
               // classifyContent sees pre-reflow `inner` so shape bucketing reflects real structure.
               const innerR = maybeReflow(inner, o.reflow);
@@ -1902,7 +2025,7 @@ export async function transformRequest(
                 info.imagePixels = (info.imagePixels ?? 0) + pixels;
                 info.toolResultImgs = (info.toolResultImgs ?? 0) + imgs.length;
                 info.imageCount += imgs.length;
-                await recordRecoverable(info, o.emitRecoverable, {
+                const recovery = await recordRecoverable(info, o.emitRecoverable, {
                   kind: 'tool_result',
                   toolUseId: tr.tool_use_id,
                   text: innerRaw,
@@ -1913,10 +2036,14 @@ export async function transformRequest(
                 for (const [cp, n] of dcp) {
                   droppedCodepoints.set(cp, (droppedCodepoints.get(cp) ?? 0) + n);
                 }
-                const trFactSheet = factSheetText(innerRaw);
+                const trSidecar = exactSidecarText(
+                  info,
+                  factSheetTextComplete(innerRaw, DENSE_CONTENT_CHARS_PER_IMAGE),
+                  recovery,
+                );
                 rewritten.push({
                   ...tr,
-                  content: trFactSheet ? [...imgs, { type: 'text' as const, text: trFactSheet }] : imgs,
+                  content: trSidecar ? [...imgs, { type: 'text' as const, text: trSidecar }] : imgs,
                 });
                 changed = true;
                 bumpBucket(info, toolResultBucket(classifyContent(inner)), innerRaw.length);
@@ -1938,6 +2065,10 @@ export async function transformRequest(
                 if (callerKeepsSharp(o.keepSharp, { kind: 'tool_result_part', text: innerTextRaw, toolUseId: tr.tool_use_id })) {
                   bumpPassthrough(info, 'kept_sharp');
                   info.keptSharpBlocks = (info.keptSharpBlocks ?? 0) + 1;
+                  newInner.push(ib as TextBlock | ImageBlock);
+                  continue;
+                }
+                if (shouldKeepLosslessExact(info, o, innerTextRaw)) {
                   newInner.push(ib as TextBlock | ImageBlock);
                   continue;
                 }
@@ -1974,17 +2105,21 @@ export async function transformRequest(
                   newInner.push(out as ImageBlock);
                   info.imageBytes += approxBlockBytes(img);
                 }
-                const partFactSheet = factSheetText(innerTextRaw);
-                if (partFactSheet) newInner.push({ type: 'text', text: partFactSheet });
-                info.imagePixels = (info.imagePixels ?? 0) + pixels;
-                info.toolResultImgs = (info.toolResultImgs ?? 0) + imgs.length;
-                info.imageCount += imgs.length;
-                await recordRecoverable(info, o.emitRecoverable, {
+                const recovery = await recordRecoverable(info, o.emitRecoverable, {
                   kind: 'tool_result_part',
                   toolUseId: tr.tool_use_id,
                   text: innerTextRaw,
                   imageCount: imgs.length,
                 });
+                const partSidecar = exactSidecarText(
+                  info,
+                  factSheetTextComplete(innerTextRaw, DENSE_CONTENT_CHARS_PER_IMAGE),
+                  recovery,
+                );
+                if (partSidecar) newInner.push({ type: 'text', text: partSidecar });
+                info.imagePixels = (info.imagePixels ?? 0) + pixels;
+                info.toolResultImgs = (info.toolResultImgs ?? 0) + imgs.length;
+                info.imageCount += imgs.length;
                 info.compressedChars += innerTextRaw.length;
                 info.droppedChars = (info.droppedChars ?? 0) + droppedChars;
                 for (const [cp, n] of dcp) {
@@ -2023,7 +2158,8 @@ export async function transformRequest(
       : HISTORY_CHARS_PER_TOKEN;
     const horizon = Math.max(1, Math.floor(o.historyAmortizationHorizon));
     const historyProfitable = (text: string, cols: number): boolean => {
-      // Gate at dense 384-col/240-row geometry (matches history.ts renderer).
+      if (shouldKeepLosslessExact(info, o, text)) return false;
+      // Gate at dense 312-col/90-row geometry (matches history.ts renderer).
       const g = denseGateGeometry(cols, 1);
       return isCompressionProfitableAmortized(
         text, g.cols, undefined, 1, historyCpt, horizon,
@@ -2056,6 +2192,14 @@ export async function transformRequest(
       info.historyReason = 'collapsed';
       info.historyTextChars = histInfo.collapsedChars;
       info.historyImageSha = await historyImageSha8(newMessages);
+      const historyRecovery = histInfo.collapsedText
+        ? await recordRecoverable(info, o.emitRecoverable, {
+            kind: 'history',
+            text: histInfo.collapsedText,
+            imageCount: histInfo.collapsedImages,
+          })
+        : undefined;
+      if (historyRecovery) insertHistoryRecoveryRef(newMessages, historyRecovery);
       bumpBucket(info, 'history', histInfo.collapsedChars);
       // Move the single cache anchor onto the history image so slab + history
       // cache as one stable prefix (created once, then read), instead of the

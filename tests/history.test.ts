@@ -825,8 +825,8 @@ describe('isCompressionProfitableAmortized — multi-turn horizon gate', () => {
     // N=10 accepts I < 0.47·text.length/1.5. We want a text in between —
     // pick a moderate-density block where the cold gate would reject but
     // the amortized one wins.
-    // ~80k chars of dense JSON-shaped text → ~6 images @ 2500 tok = 15k
-    // image-tokens. Text-tokens at cpt=1.0 (worst-case dense) = 80k.
+    // ~80k chars of dense JSON-shaped text spans several patch-priced images.
+    // Text-tokens at cpt=1.0 (worst-case dense) = 80k.
     // Cold gate: 15k < 80k → already accepts. Need a denser-image case.
     // Use very short content where image cost dominates per-turn but
     // amortization wins.

@@ -12,7 +12,7 @@
  *
  * Contract being verified:
  *   - Default (option off): `info.recoverable` is undefined even when imaging.
- *   - emitRecoverable → true: each imaged live-region block yields an entry with
+ *   - emitRecoverable → true: each imaged block yields an entry with
  *     a stable `rec_` id, kind, toolUseId, byte-exact original `text`, and
  *     `imageCount`.
  *   - The id is content-derived and stable (same content → same id).
@@ -119,10 +119,10 @@ describe('emitRecoverable recovery channel', () => {
         keepSharp: (blk) => blk.toolUseId === 'keep_me',
       },
     );
-    // Pinned as text up-front, so there is nothing to recover.
+    // Pinned as text up-front, so the tool_result has nothing to recover.
     expect(info.keptSharpBlocks ?? 0).toBeGreaterThan(0);
     expect(info.toolResultImgs ?? 0).toBe(0);
-    expect(info.recoverable).toBeUndefined();
+    expect((info.recoverable ?? []).some((r) => r.toolUseId === 'keep_me')).toBe(false);
   });
 
   it('records only the imaged sibling when one block is kept sharp', async () => {

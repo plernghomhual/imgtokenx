@@ -1,5 +1,10 @@
 # Imaged-text legibility audit — 2026-07-01
 
+> Current note: this is a historical audit. The shipped implementation now
+> estimates Anthropic image cost with the documented 28px patch formula plus a
+> 10% safety margin; keep the resize/legibility findings, but do not copy the
+> old `px/750` billing shorthand into current code.
+
 Motivated by a demo failure: the pxpipe arm of `demo/effective-context` read all
 files but could not report the `AUDIT-ZX9` line count, and hedged that imaged text
 was uncertain. This audit measured **why**, with data, and shipped the fixes that

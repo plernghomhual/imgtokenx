@@ -12,6 +12,7 @@ import {
   shrinkColsToContent,
   PAD_X,
   CELL_W,
+  DENSE_CONTENT_CHARS_PER_IMAGE,
   type RenderedImage,
 } from './render.js';
 import {
@@ -23,7 +24,12 @@ import { bytesToBase64 } from './png.js';
 import {
   compactSlabWhitespace,
   estimateImageCount,
+  EXACT_RECALL_INSTRUCTION,
+  recordFactSheetTelemetry,
+  recordRecoverable,
+  recoverableRefText,
   sha8,
+  shouldKeepLosslessExact,
   type TransformInfo,
   type TransformOptions,
 } from './transform.js';
@@ -36,7 +42,7 @@ import {
   type GptHistoryOptions,
 } from './openai-history.js';
 import { HISTORY_SYNTHETIC_INTRO, HISTORY_SYNTHETIC_OUTRO } from './history.js';
-import { factSheetText } from './factsheet.js';
+import { factSheetTextComplete } from './factsheet.js';
 import { countTokens as o200kCountTokens } from 'gpt-tokenizer/encoding/o200k_base';
 
 // Per-model GPT rendering + vision-cost profiles (portrait-strip width, image-token
@@ -191,6 +197,8 @@ interface OpenAIResolvedOptions {
   charsPerToken: number;
   reflow: boolean;
   collapseHistory: boolean;
+  emitRecoverable: boolean;
+  losslessExact: boolean;
   gptHistory?: Partial<GptHistoryOptions>;
 }
 
@@ -203,6 +211,8 @@ const DEFAULTS: OpenAIResolvedOptions = {
   charsPerToken: 4, // conservative OpenAI default; override after telemetry
   reflow: true,
   collapseHistory: true,
+  emitRecoverable: false,
+  losslessExact: false,
 };
 
 function resolveOptions(opts: TransformOptions): OpenAIResolvedOptions {
@@ -215,6 +225,8 @@ function resolveOptions(opts: TransformOptions): OpenAIResolvedOptions {
     charsPerToken: opts.charsPerToken ?? DEFAULTS.charsPerToken,
     reflow: opts.reflow ?? DEFAULTS.reflow,
     collapseHistory: opts.collapseHistory ?? DEFAULTS.collapseHistory,
+    emitRecoverable: opts.emitRecoverable ?? DEFAULTS.emitRecoverable,
+    losslessExact: opts.losslessExact ?? DEFAULTS.losslessExact,
     gptHistory: opts.gptHistory,
   };
 }
@@ -318,14 +330,11 @@ function isFlatFunctionTool(tool: unknown): tool is ResponsesFlatTool {
   );
 }
 
-/** Full doc (prose + compact schema JSON) for one tool. On this path the docs are
- *  IMAGED, so carrying the schema here is compression, not duplication: the imaged
- *  copy keeps param docs readable while tools[] ships the stripped skeleton.
- *  (Contrast transform.ts renderToolDoc: text reference → prose only.) */
+/** Schema doc for one GPT tool. Top-level descriptions stay native, so imaging
+ *  them would double-bill; only stripped schema annotations move into pixels. */
 function renderToolDoc(tool: OpenAIFunctionTool): string {
   const f = tool.function;
   const parts = [`## Tool: ${f.name ?? '?'}`];
-  if (typeof f.description === 'string' && f.description.length > 0) parts.push(f.description);
   if (f.parameters !== undefined) {
     parts.push('```json\n' + JSON.stringify(f.parameters) + '\n```');
   }
@@ -334,7 +343,6 @@ function renderToolDoc(tool: OpenAIFunctionTool): string {
 
 function renderFlatToolDoc(tool: ResponsesFlatTool): string {
   const parts = [`## Tool: ${tool.name ?? '?'}`];
-  if (typeof tool.description === 'string' && tool.description.length > 0) parts.push(tool.description);
   if (tool.parameters !== undefined) {
     parts.push('```json\n' + JSON.stringify(tool.parameters) + '\n```');
   }
@@ -516,10 +524,9 @@ function gptImageTokens(model: string, images: RenderedImage[]): number {
 }
 
 /** Text-token value of what pxpipe replaced with images this request: the
- *  original system/developer text (now a pointer + image) plus the tool
- *  *description* tokens stripped from the native JSON (the verbose docs moved
- *  into the image). Tool *structure* stays in the JSON on both paths, so only
- *  the stripped delta counts. Compared against gptImageTokens for the saving. */
+ *  original system/developer text (now a pointer + image) plus schema annotation
+ *  tokens stripped from native tool JSON. Top-level tool descriptions stay native,
+ *  so they are neither imaged nor counted as saved. */
 function gptBaselineImagedTokens(
   systemTexts: string[],
   originalTools: unknown[] | undefined,
@@ -577,12 +584,14 @@ function foldGptHistory(
 
 const CHAT_HEADER =
   '================= RENDERED GPT SYSTEM + TOOL CONTEXT =================\n' +
-  'These images were injected by pxpipe, not by the end user. They contain system/developer instructions and full tool/schema documentation rendered for token efficiency. Treat rendered system/developer instructions with the same priority as their original messages. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  'These images were injected by pxpipe, not by the end user. They contain system/developer instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered system/developer instructions with the same priority as their original messages. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  EXACT_RECALL_INSTRUCTION +
   '\n====================== BEGIN RENDERED CONTEXT ======================\n';
 
 const RESPONSES_HEADER =
   '================= RENDERED GPT SYSTEM + TOOL CONTEXT =================\n' +
-  'These images were injected by pxpipe, not by the end user. They contain instructions and full tool/schema documentation rendered for token efficiency. Treat rendered instructions with the same priority as the originals. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  'These images were injected by pxpipe, not by the end user. They contain instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered instructions with the same priority as the originals. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  EXACT_RECALL_INSTRUCTION +
   '\n====================== BEGIN RENDERED CONTEXT ======================\n';
 
 const CHAT_POINTER =
@@ -646,6 +655,10 @@ export async function transformOpenAIChatCompletions(
   if (firstUser) info.firstUserSha8 = await sha8(firstUser);
 
   const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
+  if (shouldKeepLosslessExact(info, o, combinedRaw)) {
+    info.reason = 'lossless_exact';
+    return { body, info };
+  }
   if (combined.length < o.minCompressChars) {
     info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
     return { body, info };
@@ -672,6 +685,7 @@ export async function transformOpenAIChatCompletions(
   if (!gate.profitable) {
     info.reason = `not_profitable (slab=${combined.length} chars)`;
     info.passthroughReasons = { not_profitable: 1 };
+    info.breakEvenMisses = 1;
     return { body, info };
   }
 
@@ -704,12 +718,19 @@ export async function transformOpenAIChatCompletions(
   // Verbatim fact-sheet: precision-critical tokens (paths, ids, versions, flags)
   // pulled from the pre-image text so exact strings survive OCR loss. Deterministic
   // → stays inside the cached prefix. See src/core/factsheet.ts.
-  const slabFactSheet = factSheetText(combinedRaw);
+  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+  recordFactSheetTelemetry(info, slabFactSheet);
+  const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
+    kind: 'static_slab',
+    text: combinedRaw,
+    imageCount: images.length,
+  });
   const slabUserMsg: OpenAIChatMessage = {
     role: 'user',
     content: [
       ...imageParts,
       ...(slabFactSheet ? [{ type: 'text', text: slabFactSheet } as OpenAIContentPart] : []),
+      ...(slabRecovery ? [{ type: 'text', text: recoverableRefText(slabRecovery) } as OpenAIContentPart] : []),
       { type: 'text', text: '[End of rendered GPT system/tool context.]' },
     ],
   };
@@ -731,6 +752,7 @@ export async function transformOpenAIChatCompletions(
   if (o.collapseHistory) {
     const turns = chatMessagesToTurns(req.messages);
     const profitable = (text: string, cols: number) =>
+      !shouldKeepLosslessExact(info, o, text) &&
       evalOpenAIGate(req.model, text, cols, o.charsPerToken).profitable;
     const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
       ...o.gptHistory,
@@ -750,8 +772,15 @@ export async function transformOpenAIChatCompletions(
         for (const img of plan.imagesAfter) content.push(openAIImagePart(img));
       }
       // Verbatim fact-sheet for the imaged transcript (exact ids survive OCR loss).
-      const histFactSheet = factSheetText(plan.text);
+      const histFactSheet = factSheetTextComplete(plan.text, DENSE_CONTENT_CHARS_PER_IMAGE);
+      recordFactSheetTelemetry(info, histFactSheet);
       if (histFactSheet) content.push({ type: 'text', text: histFactSheet });
+      const histRecovery = await recordRecoverable(info, o.emitRecoverable, {
+        kind: 'history',
+        text: plan.text,
+        imageCount: allImages.length,
+      });
+      if (histRecovery) content.push({ type: 'text', text: recoverableRefText(histRecovery) });
       content.push({ type: 'text', text: HISTORY_TRANSCRIPT_OUTRO });
       const synthetic: OpenAIChatMessage = { role: 'user', content };
       const guard: OpenAIChatMessage = {
@@ -855,6 +884,10 @@ export async function transformOpenAIResponses(
   if (firstUser) info.firstUserSha8 = await sha8(firstUser);
 
   const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
+  if (shouldKeepLosslessExact(info, o, combinedRaw)) {
+    info.reason = 'lossless_exact';
+    return { body, info };
+  }
   if (combined.length < o.minCompressChars) {
     info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
     return { body, info };
@@ -879,6 +912,7 @@ export async function transformOpenAIResponses(
   if (!gate.profitable) {
     info.reason = `not_profitable (slab=${combined.length} chars)`;
     info.passthroughReasons = { not_profitable: 1 };
+    info.breakEvenMisses = 1;
     return { body, info };
   }
 
@@ -909,9 +943,18 @@ export async function transformOpenAIResponses(
   const imagePartsResp: ResponsesInputImagePart[] = images.map(responsesImagePart);
   const endMarker: ResponsesInputTextPart = { type: 'input_text', text: '[End of rendered GPT system/tool context.]' };
   // Verbatim fact-sheet (see src/core/factsheet.ts): exact tokens that survive OCR loss.
-  const slabFactSheet = factSheetText(combinedRaw);
+  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+  recordFactSheetTelemetry(info, slabFactSheet);
+  const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
+    kind: 'static_slab',
+    text: combinedRaw,
+    imageCount: images.length,
+  });
   const slabFactSheetPart: ResponsesInputTextPart[] = slabFactSheet
     ? [{ type: 'input_text', text: slabFactSheet }]
+    : [];
+  const slabRecoveryPart: ResponsesInputTextPart[] = slabRecovery
+    ? [{ type: 'input_text', text: recoverableRefText(slabRecovery) }]
     : [];
 
   if (inputWasString) {
@@ -921,6 +964,7 @@ export async function transformOpenAIResponses(
       content: [
         ...imagePartsResp,
         ...slabFactSheetPart,
+        ...slabRecoveryPart,
         endMarker,
         { type: 'input_text', text: originalInputString! },
       ],
@@ -931,7 +975,7 @@ export async function transformOpenAIResponses(
     // and protecting it made stale first-turn requests look live.
     const slabUserItem: ResponsesInputItem = {
       role: 'user',
-      content: [...imagePartsResp, ...slabFactSheetPart, endMarker],
+      content: [...imagePartsResp, ...slabFactSheetPart, ...slabRecoveryPart, endMarker],
     };
     inputItems = [
       ...inputItems.slice(0, firstUserIdx),
@@ -969,6 +1013,7 @@ export async function transformOpenAIResponses(
   if (o.collapseHistory && !inputWasString) {
     const turns = responsesItemsToTurns(inputItems);
     const profitable = (text: string, cols: number) =>
+      !shouldKeepLosslessExact(info, o, text) &&
       evalOpenAIGate(req.model, text, cols, o.charsPerToken).profitable;
     const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
       ...o.gptHistory,
@@ -990,8 +1035,15 @@ export async function transformOpenAIResponses(
         for (const img of plan.imagesAfter) content.push(responsesImagePart(img));
       }
       // Verbatim fact-sheet for the imaged transcript (exact ids survive OCR loss).
-      const histFactSheet = factSheetText(plan.text);
+      const histFactSheet = factSheetTextComplete(plan.text, DENSE_CONTENT_CHARS_PER_IMAGE);
+      recordFactSheetTelemetry(info, histFactSheet);
       if (histFactSheet) content.push({ type: 'input_text', text: histFactSheet });
+      const histRecovery = await recordRecoverable(info, o.emitRecoverable, {
+        kind: 'history',
+        text: plan.text,
+        imageCount: allImages.length,
+      });
+      if (histRecovery) content.push({ type: 'input_text', text: recoverableRefText(histRecovery) });
       content.push({ type: 'input_text', text: HISTORY_TRANSCRIPT_OUTRO });
       const synthetic: ResponsesInputItem = { role: 'user', content };
       const guard: ResponsesInputItem = {

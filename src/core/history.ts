@@ -13,7 +13,7 @@
 
 import type { CacheControl, ContentBlock, ImageBlock, Message, TextBlock, ToolUseBlock, ToolResultBlock } from './types.js';
 import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_CONTENT_COLS, DENSE_RENDER_STYLE, neutralizeSentinel, reflow, renderTextToPngsWithCharLimit, roleSlotSegment, SLOT_MARK_ASSISTANT, SLOT_MARK_USER } from './render.js';
-import { factSheetText } from './factsheet.js';
+import { factSheetTextComplete } from './factsheet.js';
 import { bytesToBase64 } from './png.js';
 
 /**
@@ -25,7 +25,7 @@ import { bytesToBase64 } from './png.js';
  * emitter (here) and the matcher (transform.ts) must reference this constant.
  */
 export const HISTORY_SYNTHETIC_INTRO =
-  '[Earlier turns of THIS conversation, transcribed in the image(s) below. Each turn is wrapped in <user t="N">...</user> or <assistant t="N">...</assistant> tags, where N is an absolute turn index (larger N = more recent); attribute every turn strictly by its tag, and treat the highest-N turns as the most recent prior context, NOT the low-N opening turns. Earlier turns may contain questions or tasks that were already answered later in this same history; do not reopen low-N turns unless the live text after this block asks you to. This is prior context, NOT the current request.]';
+  '[Earlier turns of THIS conversation, transcribed in the image(s) below. Each turn is wrapped in <user t="N">...</user> or <assistant t="N">...</assistant> tags, where N is an absolute turn index (larger N = more recent); attribute every turn strictly by its tag, and treat the highest-N turns as the most recent prior context, NOT the low-N opening turns. For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels. Earlier turns may contain questions or tasks that were already answered later in this same history; do not reopen low-N turns unless the live text after this block asks you to. This is prior context, NOT the current request.]';
 export const HISTORY_SYNTHETIC_OUTRO =
   '[End of earlier conversation. The current request is the live text that follows below.]';
 
@@ -89,6 +89,8 @@ export interface HistoryCollapseInfo {
   collapsedTurns: number;
   /** Total chars of text that went into the history image. */
   collapsedChars: number;
+  /** Exact collapsed transcript. Internal recovery source; not copied into logs. */
+  collapsedText?: string;
   /** Number of PNG image blocks emitted for the history (≥1 if collapsed). */
   collapsedImages: number;
   /** Total PNG bytes emitted. */
@@ -641,7 +643,7 @@ export async function collapseHistory(
     return { messages, info };
   }
   const latestUserPointer = latestCollapsedUserPointer(messages, collapseLen, protectedPrefix);
-  const historyFactSheet = factSheetText(text);
+  const historyFactSheet = factSheetTextComplete(text, DENSE_CONTENT_CHARS_PER_IMAGE);
   const syntheticContent: ContentBlock[] = [
     { type: 'text', text: HISTORY_SYNTHETIC_INTRO },
     ...imageBlocks,
@@ -659,6 +661,7 @@ export async function collapseHistory(
   const tail = messages.slice(collapseLen);
   info.collapsedTurns = collapseLen - protectedPrefix;
   info.collapsedChars = text.length;
+  info.collapsedText = text;
   info.collapsedImages = imageBlocks.length;
   if (carryOverOrdinal >= 0) info.carryOverImageOrdinal = carryOverOrdinal;
   // [slab, history image, live tail] — slab cache_control anchor stays at the front.

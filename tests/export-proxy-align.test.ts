@@ -12,9 +12,9 @@
 // (`cols < maxCols ? 1 : requestedCols`). This test pins that parity against the REAL proxy
 // function (not a replica), so any future drift in either path fails CI.
 //
-// Alignment is guaranteed at the proxy's operating width, DENSE_CONTENT_COLS (384) — the
+// Alignment is guaranteed at the proxy's operating width, DENSE_CONTENT_COLS (312) — the
 // export CLI's default and the proxy's hardcoded dense cap. `pxpipe export --cols N` with
-// N≠384 is an intentionally-wider export and is out of scope for proxy parity.
+// N≠312 is an intentionally-wider export and is out of scope for proxy parity.
 import { describe, expect, it } from 'vitest';
 import { renderTextToImages } from '../src/core/library.js';
 import { textToImageBlocks } from '../src/core/transform.js';
@@ -81,8 +81,8 @@ describe('export ⇄ proxy render alignment', () => {
     await expectIdenticalRender(code, { multiCol: 1, shrink: true });
   });
 
-  it('full-width prose (lines at the 384-col cap) → byte-identical', async () => {
-    const line = 'lorem ipsum dolor sit amet '.repeat(20); // > 384 display cols → fills width
+  it('full-width prose (lines at the 312-col cap) → byte-identical', async () => {
+    const line = 'lorem ipsum dolor sit amet '.repeat(20); // > 312 display cols → fills width
     const prose = Array.from({ length: 12 }, () => line).join('\n');
     await expectIdenticalRender(prose, { multiCol: 1, shrink: true });
   });

@@ -133,6 +133,7 @@ function printHelp(): void {
 Usage:
   pxpipe                run the proxy (no flags)
   pxpipe export [...]   render files/diff to PNG pages + cost report (see pxpipe export --help)
+  pxpipe recover rec_*  print exact source text from PXPIPE_RECOVERABLE_DIR
 
 The proxy compresses eligible tools, schemas, reminders, tool_results,
 and history; tracks events to disk; and measures real saved_pct via
@@ -167,12 +168,20 @@ Environment:
   PXPIPE_LOG              JSONL events path (default ~/.pxpipe/events.jsonl)
   PXPIPE_DUMP_DIR         debug: write every rendered PNG here (what the model
                           sees); off unless set. Compress arm only.
+  PXPIPE_RECOVERABLE_DIR  debug: write exact source text for rec_* recovery
+                          refs here; off unless set. May contain secrets.
+  PXPIPE_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
+                          PXPIPE_RECOVERABLE_DIR is also set.
 
 Use with Claude Code:
   ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 
-Use with OpenAI-compatible GPT clients:
+Use with Codex / OpenAI-compatible GPT clients:
   OPENAI_BASE_URL=http://127.0.0.1:47821/v1
+
+Use with OpenCode provider-prefixed routers:
+  Anthropic base: http://127.0.0.1:47821/anthropic
+  OpenAI base:    http://127.0.0.1:47821/openai
 `);
 }
 
@@ -860,6 +869,48 @@ async function runExport(argv: string[]): Promise<void> {
   }
 }
 
+function runRecover(argv: string[]): void {
+  const id = argv[0]?.trim();
+  if (argv.includes('-h') || argv.includes('--help')) {
+    console.log(`pxpipe recover — print exact source text for a rec_* id
+
+Usage:
+  PXPIPE_RECOVERABLE_DIR=/private/dir pxpipe recover rec_1234abcd
+`);
+    process.exit(0);
+  }
+  if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
+    console.error('[pxpipe recover] expected a recovery id like rec_1234abcd');
+    process.exit(2);
+  }
+  const dir = process.env.PXPIPE_RECOVERABLE_DIR?.trim();
+  if (!dir) {
+    console.error('[pxpipe recover] PXPIPE_RECOVERABLE_DIR is not set');
+    process.exit(2);
+  }
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch (err) {
+    console.error(`[pxpipe recover] cannot read PXPIPE_RECOVERABLE_DIR: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  const matches = entries
+    .filter((name) => name.endsWith('.txt') && name.includes(`${id}_`))
+    .map((name) => {
+      const file = path.join(dir, name);
+      const stat = fs.statSync(file);
+      return { file, mtimeMs: stat.mtimeMs, name };
+    })
+    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+  const match = matches[matches.length - 1];
+  if (!match) {
+    console.error(`[pxpipe recover] no recovery source found for ${id}`);
+    process.exit(1);
+  }
+  process.stdout.write(fs.readFileSync(match.file, 'utf8'));
+}
+
 // ---- main ----------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -868,13 +919,20 @@ async function main(): Promise<void> {
     await runExport(argv.slice(1));
     return; // server never starts
   }
-  // No subcommands — pxpipe is just the proxy. Stats / sessions / cleanup
-  // tools live in the dashboard (see http://127.0.0.1:${port}/).
+  if (argv[0] === 'recover' || argv[0] === 'rehydrate') {
+    runRecover(argv.slice(1));
+    return;
+  }
+  // Stats / sessions / cleanup tools live in the dashboard.
   const opts = parseCli(argv);
   // A/B harness passthrough switch (see the `transform` callback below).
   const forcePassthrough = /^(1|true|yes|on)$/i.test(process.env.PXPIPE_DISABLE ?? '');
   if (forcePassthrough) {
     console.log('[pxpipe] PXPIPE_DISABLE set — passthrough mode (compress=false), still logging usage + baselines');
+  }
+  const losslessExact = /^(1|true|yes|on)$/i.test(process.env.PXPIPE_LOSSLESS_EXACT ?? '');
+  if (losslessExact) {
+    console.log('[pxpipe] PXPIPE_LOSSLESS_EXACT set — exact-risk blocks stay text unless recovery dumping is enabled');
   }
   // Debug aid: when PXPIPE_DUMP_DIR is set, persist every rendered PNG this
   // process emits, so you can eyeball exactly what the model received (OCR /
@@ -890,6 +948,17 @@ async function main(): Promise<void> {
     } catch (err) {
       console.warn(`[pxpipe] PXPIPE_DUMP_DIR unusable (${(err as Error).message}) — image dumping disabled`);
       imageDumpDir = undefined;
+    }
+  }
+  let recoverableDir: string | undefined = process.env.PXPIPE_RECOVERABLE_DIR?.trim() || undefined;
+  let recoverableSeq = 0;
+  if (recoverableDir) {
+    try {
+      fs.mkdirSync(recoverableDir, { recursive: true });
+      console.log(`[pxpipe] PXPIPE_RECOVERABLE_DIR set — writing exact recovery sources to ${recoverableDir}`);
+    } catch (err) {
+      console.warn(`[pxpipe] PXPIPE_RECOVERABLE_DIR unusable (${(err as Error).message}) — recovery dumping disabled`);
+      recoverableDir = undefined;
     }
   }
   // Transform options pass through empty — the proxy uses the DEFAULTS
@@ -945,7 +1014,10 @@ async function main(): Promise<void> {
       // (The dashboard kill switch does the same thing at runtime.)
       if (forcePassthrough || !dashboard.getCompressionEnabled()) return { compress: false };
       // Active path: use DEFAULTS in transform.ts for break-even gating.
-      return {};
+      return {
+        ...(recoverableDir ? { emitRecoverable: true } : {}),
+        ...(losslessExact ? { losslessExact: true } : {}),
+      };
     },
     onRequest: async (e) => {
       // Feed the dashboard BEFORE tracker.emit — toTrackEvent strips
@@ -968,6 +1040,24 @@ async function main(): Promise<void> {
           }
         }
         console.log(`  ↳ dumped ${pngs.length} rendered png(s) → ${imageDumpDir}`);
+      }
+      if (recoverableDir && e.info?.recoverable && e.info.recoverable.length > 0) {
+        const seq = ++recoverableSeq;
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const modelTag = (e.model ?? 'model').replace(/[^A-Za-z0-9._-]+/g, '_');
+        let written = 0;
+        for (const rec of e.info.recoverable) {
+          const kind = rec.kind.replace(/[^A-Za-z0-9._-]+/g, '_');
+          const name = `${stamp}_req${String(seq).padStart(3, '0')}_${modelTag}_${rec.id}_${kind}.txt`;
+          try {
+            fs.writeFileSync(path.join(recoverableDir, name), rec.text);
+            written++;
+          } catch (err) {
+            console.warn(`[pxpipe] recovery dump write failed: ${(err as Error).message}`);
+            break;
+          }
+        }
+        if (written > 0) console.log(`  ↳ dumped ${written} recoverable source(s) → ${recoverableDir}`);
       }
       // Terse human-readable console line.
       const extra: string[] = [];

@@ -7,10 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 // End-to-end coverage of the real `pxpipe export --git` path (the bug PR-4 fixed
 // was in collectSource's untracked branch, not in the readExportTextFile helper).
-// Runs the actual CLI via tsx against a throwaway git repo and asserts the
+// Runs the actual CLI via the tsx loader against a throwaway git repo and asserts the
 // untracked-file filtering. Kept in its own file because it spawns a subprocess.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const tsxBin = path.join(repoRoot, 'node_modules', '.bin', 'tsx');
 
 function git(cwd: string, args: string[]): void {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -43,8 +42,8 @@ describe('pxpipe export --git (end-to-end)', () => {
 
   it('applies --include, the size cap, and the binary sniff to untracked files', () => {
     const run = spawnSync(
-      tsxBin,
-      ['src/node.ts', 'export', '--git', repo, '--include', '*.ts', '--out', outDir, '--json'],
+      process.execPath,
+      ['--import', 'tsx', 'src/node.ts', 'export', '--git', repo, '--include', '*.ts', '--out', outDir, '--json'],
       { cwd: repoRoot, encoding: 'utf8', timeout: 120_000 },
     );
     expect(run.status, `stderr:\n${run.stderr}`).toBe(0);

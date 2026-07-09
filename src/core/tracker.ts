@@ -23,7 +23,7 @@ export interface TrackEvent {
   reason?: string;
   orig_chars?: number;
   /** Text-chars replaced by image blocks (slab + reminders + tool_results).
-   *  Compare with image_count: textTokens(n/4) vs imageTokens(n×2500). */
+   *  Compare with image_count/image_pixels and the current patch-grid estimator. */
   compressed_chars?: number;
   image_count?: number;
   image_bytes?: number;
@@ -62,7 +62,22 @@ export interface TrackEvent {
   /** Top-20 dropped codepoints (U+HHHH keys) by frequency. Only present when dropped_chars > 0. */
   dropped_codepoints_top?: Record<string, number>;
   /** Blocks that weren't image-compressed this request; only emitted when at least one counter > 0. */
-  passthrough_reasons?: { below_threshold?: number; not_profitable?: number };
+  passthrough_reasons?: {
+    below_threshold?: number;
+    not_profitable?: number;
+    kept_sharp?: number;
+    lossless_exact?: number;
+  };
+  /** Exact sidecar telemetry. Counts only emitted factsheets, not raw source text. */
+  fact_sheet_items?: number;
+  fact_sheet_chars?: number;
+  /** `rec_*` refs emitted beside rendered images. */
+  recoverable_refs?: number;
+  /** Blocks/chars kept as native text by `losslessExact`. */
+  lossless_exact_kept?: number;
+  lossless_exact_chars?: number;
+  /** Blocks rejected by the image/text break-even gate. */
+  break_even_misses?: number;
   /** Unrecognized tag names in the static slab — canary for Claude Code releases adding new dynamic tags. */
   unknown_static_tags?: string[];
   /** Slab tags whose content changed within a session — proven per-turn dynamics busting the image cache. */
@@ -222,6 +237,24 @@ export function toTrackEvent(ev: ProxyEvent): TrackEvent {
     if (info.omittedChars !== undefined && info.omittedChars > 0) {
       out.omitted_chars = info.omittedChars;
     }
+    if (info.factSheetItems !== undefined && info.factSheetItems > 0) {
+      out.fact_sheet_items = info.factSheetItems;
+    }
+    if (info.factSheetChars !== undefined && info.factSheetChars > 0) {
+      out.fact_sheet_chars = info.factSheetChars;
+    }
+    if (info.recoverableRefs !== undefined && info.recoverableRefs > 0) {
+      out.recoverable_refs = info.recoverableRefs;
+    }
+    if (info.losslessExactKept !== undefined && info.losslessExactKept > 0) {
+      out.lossless_exact_kept = info.losslessExactKept;
+    }
+    if (info.losslessExactChars !== undefined && info.losslessExactChars > 0) {
+      out.lossless_exact_chars = info.losslessExactChars;
+    }
+    if (info.breakEvenMisses !== undefined && info.breakEvenMisses > 0) {
+      out.break_even_misses = info.breakEvenMisses;
+    }
     if (info.collapsedTurns !== undefined && info.collapsedTurns > 0) {
       out.collapsed_turns = info.collapsedTurns;
     }
@@ -242,7 +275,7 @@ export function toTrackEvent(ev: ProxyEvent): TrackEvent {
     }
     if (info.passthroughReasons) {
       const pr = info.passthroughReasons;
-      if ((pr.below_threshold ?? 0) > 0 || (pr.not_profitable ?? 0) > 0) {
+      if (Object.values(pr).some((n) => (n ?? 0) > 0)) {
         out.passthrough_reasons = pr;
       }
     }

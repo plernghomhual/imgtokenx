@@ -28,6 +28,7 @@ import {
   DENSE_CONTENT_CHARS_PER_IMAGE,
   DENSE_CONTENT_COLS,
   DENSE_RENDER_STYLE,
+  MAX_HEIGHT_PX,
   READABLE_CHARS_PER_IMAGE,
   renderTextToPngsWithCharLimit,
 } from '../src/core/render.js';
@@ -115,7 +116,7 @@ describe('dense readable render profile', () => {
     );
     for (const img of imgs) {
       expect(img.width).toBeLessThanOrEqual(2000);
-      expect(img.height).toBeLessThanOrEqual(1932);
+      expect(img.height).toBeLessThanOrEqual(MAX_HEIGHT_PX);
     }
   });
 });
@@ -344,7 +345,7 @@ function makeReq(toolResultText: string) {
 describe('paging end-to-end (transformRequest)', () => {
   it('tool_result under cap renders normally (no truncation counters)', async () => {
     // Above the multi-col break-even (~22k chars), well under the 10-image
-    // single-column budget (~920k chars = 10 × ~92k DENSE at the 5×8 atlas).
+    // single-column budget (~280k chars = 10 × 28,080 DENSE at the 5×8 atlas).
     // charsPerToken:2 reflects reality (tool_result content is code/logs, ~2 ch/tok)
     // and ensures the gate accepts this size at numCols=1.
     const text = 'x'.repeat(50_000);

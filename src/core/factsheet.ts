@@ -17,16 +17,21 @@
 /** ReDoS-safe extraction patterns (each global). Ordered most- to least-specific so the
  *  longest, most-identifying tokens are kept first when the substring filter runs. */
 const PATTERNS: readonly RegExp[] = [
+  /\b[A-Z][A-Z0-9_]{2,}=(?:"[^"\s<>]{6,}"|'[^'\s<>]{6,}'|[^\s"'<>]{6,})/g, // env-style secret/value assignments
+  /"[^"\s]*(?:api[_-]?key|token|secret|password)[^"\s]*":"[^"]{6,}"/gi, // minified JSON secret/value fields
+  /["'](?=[^"'\s]{6,120}["'])(?=[^"'\s]*(?:[A-Z][a-z]+[A-Z]|[A-Za-z]\d|\d[A-Za-z]|[_/.-]))[^"'\s]+["']/g, // quoted exact-risk strings
   /\bhttps?:\/\/[^\s)"'<>]+/g, // URLs
   /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, // UUID
   /(?:[\w@~+-]+)?(?:\/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b/g, // path with a file extension (multi-dot ok: .test.ts)
   /\/[\w.@+-]+(?:\/[\w.@+-]+)+\/?/g, // dir path (>=2 segments)
   /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/g, // git sha / long hex (must contain a digit)
+  /\b(?=[A-Za-z0-9_-]{12,120}\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_-]{10,118}[A-Za-z0-9]\b/g, // opaque mixed ids / tokens
   /\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b/g, // version string
   /(?:^|[^\w-])(--?[A-Za-z][\w-]+)/g, // CLI flag (token in capture group 1)
   /\b\d[\d,_]{3,}\b/g, // large / separated number
   /\b\d+\.\d+\b/g, // decimal
   /\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b/g, // CONST_IDS / env var names
+  /\b[$A-Za-z_][A-Za-z0-9_$]*(?:[a-z0-9][A-Z][A-Za-z0-9_$]*){2,}\b/g, // multi-hump camelCase/PascalCase identifiers
   // Ticket/advisory-style codes: uppercase hyphenated with ≥1 digit (PROJ-1482,
   // CVE-2024-30078, AUDIT-ZX9). Digit lookahead is bounded → no backtracking blowup.
   /\b(?=[A-Z0-9-]{0,119}\d)[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b/g,
@@ -55,6 +60,11 @@ const SHAPE_TICKET = /^(?=[A-Z0-9-]*\d)[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+$/; // PROJ-
 const SHAPE_FLAG = /^--?[A-Za-z][\w-]+$/; // CLI flag
 const SHAPE_NUM = /^\d[\d,_]*$|^\d+\.\d+$/; // port / large or separated number / decimal
 const SHAPE_URL = /^https?:\/\//;
+const SHAPE_SECRET_ASSIGNMENT = /^[A-Z][A-Z0-9_]{2,}=.+/;
+const SHAPE_JSON_SECRET = /^"[^"]*(?:api[_-]?key|token|secret|password)[^"]*":"[^"]{6,}"$/i;
+const SHAPE_OPAQUE = /^(?=[A-Za-z0-9_-]{12,120}\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_-]{10,118}[A-Za-z0-9]$/;
+const SHAPE_CAMEL = /^[$A-Za-z_][A-Za-z0-9_$]*(?:[a-z0-9][A-Z][A-Za-z0-9_$]*){2,}$/;
+const WORDISH = /[\w$]/;
 
 /** Lower tier = higher keep-priority. Pure function of the token → deterministic. */
 function priorityTier(tok: string): 0 | 1 | 2 {
@@ -64,12 +74,24 @@ function priorityTier(tok: string): 0 | 1 | 2 {
     SHAPE_CONST.test(tok) ||
     SHAPE_TICKET.test(tok) ||
     SHAPE_FLAG.test(tok) ||
-    SHAPE_NUM.test(tok)
+    SHAPE_NUM.test(tok) ||
+    SHAPE_SECRET_ASSIGNMENT.test(tok) ||
+    SHAPE_JSON_SECRET.test(tok) ||
+    (SHAPE_OPAQUE.test(tok) && !SHAPE_CAMEL.test(tok))
   ) {
     return 0;
   }
   if (SHAPE_URL.test(tok)) return 2;
+  if (SHAPE_CAMEL.test(tok)) return 1;
   return 1;
+}
+
+function containsWholeToken(haystack: string, needle: string): boolean {
+  const i = haystack.indexOf(needle);
+  if (i < 0 || haystack === needle) return false;
+  const before = i === 0 ? '' : haystack[i - 1]!;
+  const after = i + needle.length >= haystack.length ? '' : haystack[i + needle.length]!;
+  return (i === 0 || needle.startsWith('/') || !WORDISH.test(before)) && !WORDISH.test(after);
 }
 
 /**
@@ -104,7 +126,7 @@ export interface FactSheetEntry {
  * behaviour; only counts are new. Same-token spans matched by two patterns are
  * deduped by offset so a token is never double-counted.
  */
-export function extractFactSheetEntries(text: string): FactSheetEntry[] {
+export function extractFactSheetEntries(text: string, maxTokens: number = MAX_TOKENS): FactSheetEntry[] {
   const scan = text.length > MAX_SCAN ? text.slice(0, MAX_SCAN) : text;
   const counts = new Map<string, number>();
   for (const chunk of scan.split(/\s+/)) {
@@ -132,7 +154,7 @@ export function extractFactSheetEntries(text: string): FactSheetEntry[] {
   const ordered = [...counts.keys()].sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0));
   const specific: string[] = [];
   for (const t of ordered) {
-    if (!specific.some((k) => k.includes(t))) specific.push(t);
+    if (!specific.some((k) => containsWholeToken(k, t))) specific.push(t);
   }
   // Phase 2 — allocate the budget by priority tier (shape, not length) so short,
   // zero-redundancy tokens (SHAs, ports, flags) can never be evicted by long low-risk URLs.
@@ -142,9 +164,11 @@ export function extractFactSheetEntries(text: string): FactSheetEntry[] {
     .sort((a, b) => a.tier - b.tier || b.t.length - a.t.length || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
   const kept: string[] = [];
   let urls = 0;
+  const limit = maxTokens === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : Math.max(0, maxTokens | 0);
+  const capUrls = limit !== Number.POSITIVE_INFINITY;
   for (const { t, tier } of ranked) {
-    if (kept.length >= MAX_TOKENS) break;
-    if (tier === 2 && urls++ >= MAX_URLS) continue;
+    if (kept.length >= limit) break;
+    if (capUrls && tier === 2 && urls++ >= MAX_URLS) continue;
     kept.push(t);
   }
   return kept.map((t) => ({ token: t, count: counts.get(t) ?? 1 }));
@@ -154,10 +178,9 @@ export function extractFactSheetEntries(text: string): FactSheetEntry[] {
  * Page-aware variant of `extractFactSheetTokens` for large source texts.
  *
  * Splits `text` into chunks of `charsPerPage` (use `DENSE_CONTENT_CHARS_PER_IMAGE`
- * from render.ts for the export pipeline), calls `extractFactSheetTokens` on each
- * chunk (each chunk is smaller than MAX_SCAN so no truncation occurs), merges the
- * results across all chunks with first-seen deduplication, then applies a single
- * global priority-budget pass to select the best MAX_TOKENS identifiers.
+ * from render.ts for the export pipeline), extracts each chunk without the 64-token
+ * reporting cap, merges the results across all chunks with first-seen deduplication,
+ * then applies one global priority-budget pass to select the best MAX_TOKENS identifiers.
  *
  * Returns `{ kept, dropped }` where `dropped` is the count of identifiers that
  * survived extraction across all pages but did not fit in the MAX_TOKENS budget.
@@ -177,6 +200,7 @@ export function extractFactSheetTokensAllPages(
 export function extractFactSheetEntriesAllPages(
   text: string,
   charsPerPage: number,
+  maxTokens: number = MAX_TOKENS,
 ): { kept: FactSheetEntry[]; dropped: number } {
   const counts = new Map<string, number>();
   const all: string[] = [];
@@ -186,7 +210,7 @@ export function extractFactSheetEntriesAllPages(
   const pageCount = Math.max(1, Math.ceil(text.length / charsPerPage));
   for (let i = 0; i < pageCount; i++) {
     const chunk = text.slice(i * charsPerPage, (i + 1) * charsPerPage);
-    for (const { token, count } of extractFactSheetEntries(chunk)) {
+    for (const { token, count } of extractFactSheetEntries(chunk, Number.POSITIVE_INFINITY)) {
       if (!counts.has(token)) all.push(token);
       counts.set(token, (counts.get(token) ?? 0) + count);
     }
@@ -199,13 +223,23 @@ export function extractFactSheetEntriesAllPages(
     .sort((a, b) => a.tier - b.tier || b.t.length - a.t.length || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
   const kept: FactSheetEntry[] = [];
   let urls = 0;
+  const limit = maxTokens === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : Math.max(0, maxTokens | 0);
+  const capUrls = limit !== Number.POSITIVE_INFINITY;
   for (const { t, tier } of ranked) {
-    if (kept.length >= MAX_TOKENS) break;
-    if (tier === 2 && urls++ >= MAX_URLS) continue;
+    if (kept.length >= limit) break;
+    if (capUrls && tier === 2 && urls++ >= MAX_URLS) continue;
     kept.push({ token: t, count: counts.get(t) ?? 1 });
   }
 
   return { kept, dropped: all.length - kept.length };
+}
+
+/** Complete sidecar for live proxy requests: scans every rendered page and does not
+ * apply the reporting/export budget cap. Use only where exact strings outrank savings. */
+export function factSheetTextComplete(text: string, charsPerPage: number): string {
+  return factSheetTextFromEntries(
+    extractFactSheetEntriesAllPages(text, charsPerPage, Number.POSITIVE_INFINITY).kept,
+  );
 }
 
 const OPEN =

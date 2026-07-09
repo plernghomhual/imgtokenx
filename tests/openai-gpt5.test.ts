@@ -71,7 +71,13 @@ describe('openAIVisionTokens', () => {
 const BIG_SYSTEM = 'System instruction with lots of detail. '.repeat(500); // ~20k chars
 const BIG_TOOL_DESC = 'Tool description with lots of context. '.repeat(200); // ~8k chars
 const CHAT_TOOL_PARAMS = { type: 'object', description: 'Param root.', properties: { x: { type: 'string', description: 'x param' } } };
-const CHAT_TOOL_DOC = `## Tool: do_thing\n${BIG_TOOL_DESC}\n\`\`\`json\n${JSON.stringify(CHAT_TOOL_PARAMS)}\n\`\`\``;
+const CHAT_TOOL_DOC = `## Tool: do_thing\n\`\`\`json\n${JSON.stringify(CHAT_TOOL_PARAMS)}\n\`\`\``;
+const BIG_CHAT_TOOL_PARAMS = {
+  type: 'object',
+  description: 'Parameter root docs. '.repeat(200),
+  properties: { x: { type: 'string', description: 'x param docs. '.repeat(200) } },
+};
+const BIG_CHAT_TOOL_DOC = `## Tool: do_thing\n\`\`\`json\n${JSON.stringify(BIG_CHAT_TOOL_PARAMS)}\n\`\`\``;
 
 // Real `task`/`question` tools have a required parameter literally NAMED `description`
 // (others collide with `title`/`default`). The strip must drop the annotation but KEEP
@@ -134,14 +140,14 @@ describe('transformOpenAIChatCompletions (gpt-5.6)', () => {
       ? sysMsg.content
       : (sysMsg.content as Array<{ text?: string }>)[0]?.text ?? '').toContain('rendered into image');
 
-    // Tool selection stays native; verbose schema prose moved into the image.
+    // Tool selection and top-level description stay native; schema prose moved into the image.
     const tools = out.tools as Array<{ function: { description?: string; parameters?: { description?: string; properties?: { x?: { description?: string } } } } }>;
     expect(tools[0]!.function.description).toBe(BIG_TOOL_DESC);
     expect(tools[0]!.function.parameters?.description).toBeUndefined();
     expect(tools[0]!.function.parameters?.properties?.x?.description).toBeUndefined();
   });
 
-  it('images GPT tool definitions even when there is no instruction context', async () => {
+  it('images large GPT schema annotations even when there is no instruction context', async () => {
     const body = enc.encode(JSON.stringify({
       model: 'gpt-5.6',
       messages: [{ role: 'user', content: 'hello' }],
@@ -150,24 +156,45 @@ describe('transformOpenAIChatCompletions (gpt-5.6)', () => {
         function: {
           name: 'do_thing',
           description: BIG_TOOL_DESC,
-          parameters: CHAT_TOOL_PARAMS,
+          parameters: BIG_CHAT_TOOL_PARAMS,
         },
       }],
     }));
 
     const result = await transformOpenAIChatCompletions(body, { charsPerToken: 1, minCompressChars: 1 });
     expect(result.info.compressed).toBe(true);
-    expect(result.info.origChars).toBe(CHAT_TOOL_DOC.length);
-    expect(result.info.compressedChars).toBe(CHAT_TOOL_DOC.length);
+    expect(result.info.origChars).toBe(BIG_CHAT_TOOL_DOC.length);
+    expect(result.info.compressedChars).toBe(BIG_CHAT_TOOL_DOC.length);
     const out = JSON.parse(dec.decode(result.body)) as any;
     expect(out.tools[0].function.description).toBe(BIG_TOOL_DESC);
     expect(out.tools[0].function.parameters.description).toBeUndefined();
   });
 
-  it('keeps a parameter literally named "description" (task-tool regression)', async () => {
+  it('does not image GPT top-level tool descriptions that remain native', async () => {
     const body = enc.encode(JSON.stringify({
       model: 'gpt-5.6',
       messages: [{ role: 'user', content: 'hello' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'do_thing',
+          description: BIG_TOOL_DESC,
+          parameters: { type: 'object' },
+        },
+      }],
+    }));
+
+    const result = await transformOpenAIChatCompletions(body, { charsPerToken: 1, minCompressChars: 1 });
+    expect(result.info.compressed).toBe(false);
+    const out = JSON.parse(dec.decode(result.body)) as any;
+    expect(out.tools[0].function.description).toBe(BIG_TOOL_DESC);
+    expect(out.tools[0].function.parameters).toEqual({ type: 'object' });
+  });
+
+  it('keeps a parameter literally named "description" (task-tool regression)', async () => {
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6',
+      messages: [{ role: 'system', content: BIG_SYSTEM }, { role: 'user', content: 'hello' }],
       tools: [{
         type: 'function',
         function: { name: 'task', description: BIG_TOOL_DESC, parameters: TASK_LIKE_PARAMS },
@@ -209,7 +236,13 @@ describe('transformOpenAIChatCompletions (gpt-5.6)', () => {
 const BIG_INSTRUCTIONS = 'These are detailed instructions. '.repeat(600); // ~20k chars
 const BIG_FLAT_TOOL_DESC = 'Flat tool description with lots of context. '.repeat(200); // ~8k chars
 const RESPONSES_TOOL_PARAMS = { type: 'object', description: 'Param root.', properties: { x: { type: 'string', description: 'x param' } } };
-const RESPONSES_TOOL_DOC = `## Tool: do_thing\n${BIG_FLAT_TOOL_DESC}\n\`\`\`json\n${JSON.stringify(RESPONSES_TOOL_PARAMS)}\n\`\`\``;
+const RESPONSES_TOOL_DOC = `## Tool: do_thing\n\`\`\`json\n${JSON.stringify(RESPONSES_TOOL_PARAMS)}\n\`\`\``;
+const BIG_RESPONSES_TOOL_PARAMS = {
+  type: 'object',
+  description: 'Parameter root docs. '.repeat(200),
+  properties: { x: { type: 'string', description: 'x param docs. '.repeat(200) } },
+};
+const BIG_RESPONSES_TOOL_DOC = `## Tool: do_thing\n\`\`\`json\n${JSON.stringify(BIG_RESPONSES_TOOL_PARAMS)}\n\`\`\``;
 
 describe('transformOpenAIResponses (gpt-5.6)', () => {
   it('compresses GPT Responses instructions + tool docs while preserving native tool selection metadata', async () => {
@@ -249,7 +282,7 @@ describe('transformOpenAIResponses (gpt-5.6)', () => {
     expect(parts[0]!.type).toBe('input_image');
     expect(parts[0]!.image_url).toMatch(/^data:image\/png;base64,/);
 
-    // Tool selection stays native; verbose schema prose moved into the image.
+    // Tool selection and top-level description stay native; schema prose moved into the image.
     const tools = out.tools as Array<{ description?: string; parameters?: { description?: string; properties?: { x?: { description?: string } } } }>;
     expect(tools[0]!.description).toBe(BIG_FLAT_TOOL_DESC);
     expect(tools[0]!.parameters?.description).toBeUndefined();
@@ -285,7 +318,7 @@ describe('transformOpenAIResponses (gpt-5.6)', () => {
     expect(JSON.stringify(dev.content)).not.toContain('These are detailed');
   });
 
-  it('images GPT Responses tool definitions even when there is no instruction context', async () => {
+  it('images large GPT Responses schema annotations even when there is no instruction context', async () => {
     const body = enc.encode(JSON.stringify({
       model: 'gpt-5.6',
       input: [{ role: 'user', content: 'Please do the thing.' }],
@@ -293,22 +326,42 @@ describe('transformOpenAIResponses (gpt-5.6)', () => {
         type: 'function',
         name: 'do_thing',
         description: BIG_FLAT_TOOL_DESC,
-        parameters: RESPONSES_TOOL_PARAMS,
+        parameters: BIG_RESPONSES_TOOL_PARAMS,
       }],
     }));
 
     const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
     expect(result.info.compressed).toBe(true);
-    expect(result.info.origChars).toBe(RESPONSES_TOOL_DOC.length);
-    expect(result.info.compressedChars).toBe(RESPONSES_TOOL_DOC.length);
+    expect(result.info.origChars).toBe(BIG_RESPONSES_TOOL_DOC.length);
+    expect(result.info.compressedChars).toBe(BIG_RESPONSES_TOOL_DOC.length);
     const out = JSON.parse(dec.decode(result.body)) as any;
     expect(out.tools[0].description).toBe(BIG_FLAT_TOOL_DESC);
     expect(out.tools[0].parameters.description).toBeUndefined();
   });
 
+  it('does not image GPT Responses top-level tool descriptions that remain native', async () => {
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6',
+      input: [{ role: 'user', content: 'Please do the thing.' }],
+      tools: [{
+        type: 'function',
+        name: 'do_thing',
+        description: BIG_FLAT_TOOL_DESC,
+        parameters: { type: 'object' },
+      }],
+    }));
+
+    const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
+    expect(result.info.compressed).toBe(false);
+    const out = JSON.parse(dec.decode(result.body)) as any;
+    expect(out.tools[0].description).toBe(BIG_FLAT_TOOL_DESC);
+    expect(out.tools[0].parameters).toEqual({ type: 'object' });
+  });
+
   it('keeps a parameter literally named "description" (task-tool regression)', async () => {
     const body = enc.encode(JSON.stringify({
       model: 'gpt-5.6',
+      instructions: BIG_INSTRUCTIONS,
       input: [{ role: 'user', content: 'Please do the thing.' }],
       tools: [{ type: 'function', name: 'task', description: BIG_FLAT_TOOL_DESC, parameters: TASK_LIKE_PARAMS }],
     }));

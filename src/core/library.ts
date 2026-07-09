@@ -149,7 +149,7 @@ export async function transformAnthropicMessages(
 // ---------------------------------------------------------------------------
 
 export interface RenderTextToImagesOptions {
-  /** Wrap-width cap in cols. Default DENSE_CONTENT_COLS (384). */
+  /** Wrap-width cap in cols. Default DENSE_CONTENT_COLS (312). */
   readonly cols?: number;
   /** Shrink the canvas to the widest actual line (default true). `false` keeps the
    *  full `cols` width — the proxy's eval-backed full-canvas behavior. */
@@ -205,14 +205,14 @@ export async function renderTextToImages(
   // full-width rows instead of one-line-per-row with a ragged right margin. Indentation is
   // preserved (minifyForRender only touches trailing ws), so code stays readable and the ↵
   // marks every real newline so the text is fully reconstructable. This is exactly what the
-  // proxy's history path does before rendering — without it, a 384-col canvas holding ~25-col
+  // proxy's history path does before rendering — without it, a 312-col canvas holding ~25-col
   // code lines wastes ~75% of every row, which is why raw exports looked sparse. reflow()
   // bails (→ raw text) only if the source already contains ↵, which is vanishingly rare.
   const source = opts.reflow ? reflow(text) ?? text : text;
 
   // Width/columns: measure the content, then pack as many side-by-side columns as fit the
   // width cap (auto) or the caller's explicit count. Reflowed source is one ↵-joined full-
-  // width line, so this collapses to a single dense 384-col column — byte-identical to the
+  // width line, so this collapses to a single dense 312-col column — byte-identical to the
   // proxy's history render (renderTextToPngsWithCharLimit at DENSE_CONTENT_COLS).
   const cols = opts.shrink === false ? maxCols : measureContentCols(source, maxCols);
   const requestedCols =

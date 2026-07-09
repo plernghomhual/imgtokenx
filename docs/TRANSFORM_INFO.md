@@ -15,11 +15,10 @@ to re-read that text in token form — Anthropic prompt-caches it, and image
 blocks OCR cleanly at small font sizes. So pxpipe pulls the static prefix
 out of the JSON body, renders it as one or more grayscale PNG image blocks,
 and pins a single `cache_control` breakpoint on the last image. Anthropic
-charges roughly `ceil(W*H/750)` tokens per image; a full static-slab page is
-1573×1280, so each slab tile costs ~2684 tokens regardless of how much text it
-carries. A 68K-token static slab collapses to ~3.5K image tokens on the first
-turn and to a cache-read (billed at 0.10×) on every subsequent turn. The
-trade is real text tokens for a few image tokens we cache once.
+charges one visual token per 28px patch after standard image resizing. A full
+1568x728 pxpipe page is 56x26 patches = 1456 visual tokens; the gate estimates
+1602 tokens with its 10% safety margin. The trade is real text tokens for a few
+image tokens we cache once.
 
 ## 2. The static / dynamic split
 
@@ -156,9 +155,9 @@ across the session. Once a tool result is produced its bytes are static —
 turn N+1 ships the same `tool_result` block as turn N, plus one more. Over a
 long session this compounds into tens of KB of text re-sent every turn.
 
-`compressToolResults` (default `true`, threshold `minToolResultChars=2000`)
+`compressToolResults` (default `true`, threshold `minToolResultChars=6000`)
 walks **all** user messages (not just the first), finds every `tool_result`
-block with content ≥ 2000 chars, and replaces the content with image blocks.
+block with content ≥ 6000 chars, and replaces the content with image blocks.
 The block's `content` may be either a string or an array of TextBlock /
 ImageBlock; the transform handles both shapes (see `src/core/transform.ts:573`
 onwards).
@@ -169,6 +168,22 @@ rejects images nested inside an `is_error` tool_result. Test:
 `tests/render.test.ts`.
 
 Like reminder images, tool_result images carry no `cache_control`.
+
+### 5c. Exactness sidecars and lossless mode
+
+Rendered blocks get an adjacent deterministic factsheet containing exact-risk
+strings extracted from the original source: paths, IDs, hashes, UUIDs,
+versions, flags, large numbers, env-style assignments, and quoted
+exact-looking strings. When `emitRecoverable` is enabled, each rendered block
+also gets a `rec_*` reference and `TransformInfo.recoverable` carries the
+byte-exact source for a local harness or the Node `pxpipe recover` command.
+
+`losslessExact` is the stricter mode: if recoverable refs are off and a block
+contains extracted exact-risk strings, pxpipe leaves that block as native text
+instead of rendering it. Telemetry lands in JSONL as `fact_sheet_items`,
+`fact_sheet_chars`, `recoverable_refs`, `lossless_exact_kept`,
+`lossless_exact_chars`, and `break_even_misses`; `passthrough_reasons` now
+also includes `kept_sharp` and `lossless_exact` when those branches fire.
 
 ## 6. Determinism and fingerprints
 
@@ -263,7 +278,7 @@ NOT compressed:
 
 ```
 text_tokens_we_removed = origChars / 4              # ~4 chars per token, rough
-image_tokens_we_added  = imageCount * 4761          # dense 1928×1928 ≈ 4761 tokens (slab ~2684)
+image_tokens_we_added  = sum(ceil(W/28)*ceil(H/28))*1.10
 extra_text_baseline    = max(0, text_tokens_we_removed - image_tokens_we_added)
 
 # cache_create dominates the first turn; bias the baseline toward 1.25 in

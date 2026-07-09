@@ -509,22 +509,46 @@ function isProviderPrefixedPath(pathname: string): boolean {
 }
 
 function isOpenAIChatPath(pathname: string): boolean {
-  return pathname === '/v1/chat/completions' || pathname === '/openai/v1/chat/completions';
+  return pathname === '/v1/chat/completions'
+    || pathname === '/chat/completions'
+    || pathname === '/openai/v1/chat/completions'
+    || pathname === '/openai/chat/completions';
 }
 
 function isOpenAIResponsesPath(pathname: string): boolean {
   return pathname === '/v1/responses'
+    || pathname === '/responses'
     || pathname === '/openai/v1/responses'
     || pathname === '/openai/responses';
 }
 
 function isCanonicalOpenAIPath(pathname: string, headers: Headers, hasOpenAIKey: boolean): boolean {
-  const isModelsPath = pathname === '/v1/models' || pathname.startsWith('/v1/models/');
+  const isModelsPath = pathname === '/v1/models'
+    || pathname.startsWith('/v1/models/')
+    || pathname === '/models'
+    || pathname.startsWith('/models/');
+  const isResponsesPath = pathname === '/v1/responses'
+    || pathname.startsWith('/v1/responses/')
+    || pathname === '/responses'
+    || pathname.startsWith('/responses/');
   const looksOpenAIAuth = hasOpenAIKey || (headers.has('authorization') && !headers.has('x-api-key'));
   return pathname === '/v1/chat/completions'
+    || pathname === '/chat/completions'
     || pathname === '/v1/responses'
-    || pathname.startsWith('/v1/responses/')
+    || isResponsesPath
     || (isModelsPath && looksOpenAIAuth);
+}
+
+function openAIUpstreamPath(pathname: string, search: string, stripOpenAIV1: boolean): string {
+  let outPathname = pathname;
+  const isRootAlias = pathname === '/chat/completions'
+    || pathname === '/responses'
+    || pathname.startsWith('/responses/')
+    || pathname === '/models'
+    || pathname.startsWith('/models/');
+  if (isRootAlias) outPathname = `/v1${pathname}`;
+  if (stripOpenAIV1) outPathname = outPathname.replace(/^\/v1(?=\/)/, '');
+  return outPathname + search;
 }
 
 /** POST /v1/messages/count_tokens with the given body. Returns the upstream's
@@ -789,10 +813,14 @@ export function createProxy(config: ProxyConfig = {}) {
 
     applyGatewayHeaders(outHeaders);
 
-    // Gateway OpenAI routes drop the `/v1` prefix; provider-prefixed passthrough
-    // routes keep their full path so ocproxy-style upstreams see `/openai/*`,
+    // Direct OpenAI clients may point at either http://proxy or http://proxy/v1.
+    // Root aliases are normalized to OpenAI's /v1 upstream. Gateway OpenAI
+    // routes then drop /v1. Provider-prefixed passthrough routes keep their
+    // full path so ocproxy-style upstreams see `/openai/*`,
     // `/google-ai-studio/*`, etc. exactly as the client sent them.
-    const outPath = isOpenAIPath && routes.stripOpenAIV1 ? path.replace(/^\/v1(?=\/)/, '') : path;
+    const outPath = isOpenAIPath && !providerPrefixed
+      ? openAIUpstreamPath(url.pathname, url.search, routes.stripOpenAIV1)
+      : path;
     const upstreamUrl = upstreamBase + outPath;
     let upstreamRes: Response;
     try {

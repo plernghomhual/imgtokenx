@@ -8,16 +8,16 @@ the same plan without re-running the telemetry queries.
 
 `isCompressionProfitable` in `src/core/transform.ts` decides whether a text
 block buys more tokens than the image that would replace it. The math is
-`textTokens = textLen / CHARS_PER_TOKEN` vs `imageTokens = imageCount × 2500`.
+`textTokens = textLen / CHARS_PER_TOKEN` vs rendered image patch tokens.
 Today `CHARS_PER_TOKEN` is a hand-tuned constant per content shape:
 
 ```ts
 CHARS_PER_TOKEN        = 4    // default fallback
-SLAB_CHARS_PER_TOKEN   = 2.5  // static slab (JSON-dense system text)
-HISTORY_CHARS_PER_TOKEN= 2.5  // history-rendered text
+SLAB_CHARS_PER_TOKEN   = 2.0  // static slab (JSON-dense system text)
+HISTORY_CHARS_PER_TOKEN= 2.0  // history-rendered text
 ```
 
-The 2.5 came from `count_tokens` baselines on the system slab body
+The original 2.5 came from `count_tokens` baselines on the system slab body
 (N=354 events, body cpt median 1.17, p95 2.5, MAX 2.62). 2.5 was picked as
 a conservative upper bound so the gate never accidentally rejects a profitable
 slab compression.
@@ -91,17 +91,18 @@ fit an ordinary least-squares model:
 
 ```
 baseline_tokens ≈ Σ_b (chars_b / cpt_b) + image_cost
-                = Σ_b α_b · chars_b + β · image_pixels
+                = Σ_b α_b · chars_b + image_patch_tokens
 ```
 
 where `α_b = 1 / cpt_b` is the per-bucket marginal token rate and
-`β ≈ 4/750 ≈ 0.00533` is the area-proportional image rate (fixed from
-Anthropic's published formula; we don't fit it).
+`image_patch_tokens = ceil(W/28) * ceil(H/28) * 1.10` summed over rendered
+pages. The 28px patch size comes from Anthropic's current published formula; we
+do not fit image cost from text-regression data.
 
 Subtract the image cost first to get a pure text regression:
 
 ```
-text_tokens_observed := baseline_tokens − β · image_pixels
+text_tokens_observed := baseline_tokens − image_patch_tokens
 text_tokens_observed ≈ α_slab·c_slab + α_rem·c_rem + α_trj·c_trj + α_trl·c_trl + α_trp·c_trp + α_hist·c_hist
 ```
 
@@ -211,7 +212,7 @@ nothing on the table), Phase 2 might shrink in scope.
 
 ## 7. Out of scope
 
-- Changing the image cost formula (β stays at 4/750).
+- Changing the image patch formula or 10% safety margin.
 - Adapting cpt for assistant-prose blocks (those are billed in *output*
   tokens, not input; the gate doesn't touch them).
 - Cross-session cpt sharing (each `system_sha8` is independent — projects

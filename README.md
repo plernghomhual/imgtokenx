@@ -47,6 +47,17 @@ rate is why Opus is opt-in.
 ```bash
 npx pxpipe-proxy                                  # proxy on 127.0.0.1:47821
 ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude  # point Claude Code at it
+
+# Codex / OpenAI-compatible clients
+OPENAI_BASE_URL=http://127.0.0.1:47821/v1 codex
+
+# OpenCode provider-prefixed routing
+# Anthropic base: http://127.0.0.1:47821/anthropic
+# OpenAI base:    http://127.0.0.1:47821/openai
+
+# Optional exact-source recovery
+PXPIPE_RECOVERABLE_DIR=/private/pxpipe-recovery npx pxpipe-proxy
+PXPIPE_RECOVERABLE_DIR=/private/pxpipe-recovery npx pxpipe-proxy recover rec_1234abcd
 ```
 
 Dashboard at <http://127.0.0.1:47821/>: tokens saved, every text→image
@@ -57,11 +68,16 @@ are imaged.
 
 ## The honest part
 
-- **It is lossy.** Exact 12-char hex strings in dense imaged content:
+- **Images are lossy.** Exact 12-char hex strings in dense imaged content:
   **13/15** on Fable 5, **0/15** on Opus — and misses are *silent
-  confabulations*, not errors. Byte-exact values (IDs, hashes, secrets)
-  must stay text; recent turns do. A dedicated verbatim-risk guard is not
-  built yet.
+  confabulations*, not errors. pxpipe now emits text sidecars for extracted
+  exact-risk values. For byte-exact source recovery, run the Node proxy with
+  `PXPIPE_RECOVERABLE_DIR=/path/to/private/dir`; transformed requests include
+  `rec_*` ids and the exact original text is written locally. Run
+  `pxpipe recover rec_1234abcd` with the same `PXPIPE_RECOVERABLE_DIR` to
+  print the local source. If you cannot keep recovery files, set
+  `PXPIPE_LOSSLESS_EXACT=1` to leave exact-risk blocks as text instead of
+  imaging them.
 - **Escape hatch:** subagents on non-allowlisted models pass through as
   text — route byte-exact work there
   (`CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-4-6`, or `model: sonnet` in
@@ -106,15 +122,25 @@ evals.)
 ## How it works
 
 ```
-tool_result string ──► wrap at 1928px-wide columns ──► pack ~92,000 chars/page ──► PNG[]
+tool_result string ──► wrap at 1568px-wide columns ──► pack ~28,000 chars/page ──► PNG[]
 ```
 
-The proxy intercepts `/v1/messages`, rewrites eligible bulk into image
-blocks, splices them back cache-friendly (static prefix preserved, prompt
-caching keeps working), and forwards. A 1928×1928 image costs ≈4,761 vision
-tokens and holds ≈92,000 chars, so text wins only above ~19 chars/token —
-Claude Code traffic runs ~1.91 (N=391). A per-request estimator decides;
-sparse prose stays text. Events log to `~/.pxpipe/events.jsonl`.
+The proxy intercepts Anthropic Messages and OpenAI Chat/Responses requests,
+rewrites eligible bulk into image blocks, splices them back cache-friendly
+(static prefix preserved, prompt caching keeps working), and forwards. It
+accepts both canonical SDK paths and Codex/OpenCode aliases:
+`/v1/messages`, `/anthropic/v1/messages`, `/anthropic/messages`,
+`/v1/responses`, `/responses`, `/openai/v1/responses`, `/openai/responses`,
+`/v1/chat/completions`, `/chat/completions`,
+`/openai/v1/chat/completions`, and `/openai/chat/completions`. OpenAI model
+list and response-retrieval paths (`/v1/models`, `/models`,
+`/v1/responses/*`, `/responses/*`) pass through to the OpenAI upstream so
+client capability probes do not fall back to Anthropic by accident.
+
+A full 1568×728 page costs 1,456 visual tokens and holds ≈28,000 chars, so
+text wins only at very sparse densities — Claude Code traffic runs ~1.91
+chars/token (N=391). A per-request estimator decides; sparse prose stays
+text. Events log to `~/.pxpipe/events.jsonl`.
 
 ## Library use (no proxy)
 
@@ -129,9 +155,10 @@ const { body, applied, info } = await transformAnthropicMessages({
 ```
 
 `options.keepSharp(block)` pins blocks as text; `options.emitRecoverable`
-returns the originals of imaged blocks. Pure-JS runtime (Node and
-edge/Workers); `@napi-rs/canvas` is build-time only. Full API:
-`src/core/index.ts`.
+returns the originals of imaged blocks and adds `rec_*` refs beside the
+images; `options.losslessExact` keeps exact-risk blocks as text whenever
+recoverable refs are off. Pure-JS runtime (Node and edge/Workers);
+`@napi-rs/canvas` is build-time only. Full API: `src/core/index.ts`.
 
 ## Development
 

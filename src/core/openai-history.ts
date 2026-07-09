@@ -27,7 +27,7 @@ import { countTokens as o200kCountTokens } from 'gpt-tokenizer/encoding/o200k_ba
 
 /** Portrait-strip width for GPT history images. Mirrors GPT_STRIP_COLS in
  *  openai.ts (kept local to avoid a circular import): ≤768px wide so OpenAI
- *  doesn't downscale dense text below its OCR-legibility floor. The 384-col
+ *  doesn't downscale dense text below its OCR-legibility floor. The 312-col
  *  Anthropic dense profile would be scaled to fit OpenAI's 768px box and become
  *  illegible — that profile is Anthropic-only. */
 const GPT_HISTORY_COLS = 152;

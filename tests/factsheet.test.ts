@@ -4,6 +4,7 @@ import {
   extractFactSheetEntries,
   extractFactSheetEntriesAllPages,
   factSheetText,
+  factSheetTextComplete,
 } from '../src/core/factsheet.js';
 
 describe('factsheet extraction', () => {
@@ -60,6 +61,32 @@ describe('factsheet extraction', () => {
     expect(toks).toContain('47821');
     expect(toks.length).toBeLessThanOrEqual(64);
     expect(toks.filter((t) => t.startsWith('http')).length).toBeLessThanOrEqual(8);
+  });
+
+  it('captures secret-bearing assignments as one exact token', () => {
+    const toks = extractFactSheetTokens('using FAKE_API_TOKEN=token_TEST_ABC1234567890 for a local check');
+    expect(toks).toContain('FAKE_API_TOKEN=token_TEST_ABC1234567890');
+  });
+
+  it('captures multi-hump code identifiers without evicting tier-0 exact values', () => {
+    const camelFlood = Array.from({ length: 100 }, (_, i) => `extractFactSheetToken${i}FromPage`);
+    const toks = extractFactSheetTokens([
+      ...camelFlood,
+      'tokenLedgerShard',
+      'commit 9d121ac',
+      'secret FAKE_API_TOKEN=token_TEST_ABC1234567890',
+    ].join(' '));
+    expect(toks.some((t) => t.startsWith('extractFactSheetToken'))).toBe(true);
+    expect(toks).toContain('9d121ac');
+    expect(toks).toContain('FAKE_API_TOKEN=token_TEST_ABC1234567890');
+    expect(toks.length).toBeLessThanOrEqual(64);
+  });
+
+  it('complete proxy sheet scans every page and keeps all extracted identifiers', () => {
+    const ids = Array.from({ length: 80 }, (_, i) => `/dir${i}/file${i}.ts`);
+    const sheet = factSheetTextComplete('x'.repeat(270_000) + ' ' + ids.join(' '), 28_080);
+    expect(sheet).toContain('/dir79/file79.ts');
+    expect(sheet.match(/\/dir\d+\/file\d+\.ts/g)?.length).toBe(80);
   });
 });
 

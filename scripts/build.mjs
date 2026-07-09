@@ -17,7 +17,7 @@ const OUT = 'dist';
 if (existsSync(OUT)) await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
 
-const tsc = spawnSync('pnpm', ['exec', 'tsc', '-p', 'tsconfig.json'], {
+const tsc = spawnSync(process.platform === 'win32' ? 'tsc.cmd' : 'tsc', ['-p', 'tsconfig.json'], {
   stdio: 'inherit',
   shell: false,
 });

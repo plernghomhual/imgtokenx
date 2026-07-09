@@ -157,6 +157,41 @@ describe('toTrackEvent', () => {
     expect(out.history_text_chars).toBe(300);
   });
 
+  it('surfaces exactness telemetry when present', () => {
+    const out = toTrackEvent({
+      method: 'POST',
+      path: '/v1/messages',
+      status: 200,
+      durationMs: 50,
+      info: {
+        compressed: true,
+        origChars: 30000,
+        factSheetItems: 7,
+        factSheetChars: 240,
+        recoverableRefs: 2,
+        losslessExactKept: 1,
+        losslessExactChars: 12000,
+        breakEvenMisses: 3,
+        passthroughReasons: {
+          kept_sharp: 1,
+          lossless_exact: 1,
+          not_profitable: 3,
+        },
+      },
+    });
+    expect(out.fact_sheet_items).toBe(7);
+    expect(out.fact_sheet_chars).toBe(240);
+    expect(out.recoverable_refs).toBe(2);
+    expect(out.lossless_exact_kept).toBe(1);
+    expect(out.lossless_exact_chars).toBe(12000);
+    expect(out.break_even_misses).toBe(3);
+    expect(out.passthrough_reasons).toEqual({
+      kept_sharp: 1,
+      lossless_exact: 1,
+      not_profitable: 3,
+    });
+  });
+
   it('omits bucket_chars when no gates fired and the bucket map is empty', () => {
     // Pass-through requests (compress=false, parse errors) never call
     // bumpBucket. `info.bucketChars` either stays undefined or — if

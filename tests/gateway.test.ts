@@ -128,6 +128,27 @@ describe('gateway end-to-end routing (stubbed fetch)', () => {
     expect(cap.url).toBe(`${FAKE_BASE}/openai/responses`);
   });
 
+  it('routes OpenAI root aliases to gateway OpenAI paths', async () => {
+    const cap: { url?: string; headers?: Headers } = {};
+    stubFetch(cap);
+    await proxy()(
+      new Request('http://localhost/responses', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer fake-openai-key' },
+        body: JSON.stringify({ model: 'gpt-fake', input: 'hi' }),
+      }),
+    );
+    expect(cap.url).toBe(`${FAKE_BASE}/openai/responses`);
+
+    await proxy()(
+      new Request('http://localhost/models?limit=20', {
+        method: 'GET',
+        headers: { authorization: 'Bearer fake-openai-key' },
+      }),
+    );
+    expect(cap.url).toBe(`${FAKE_BASE}/openai/models?limit=20`);
+  });
+
   it('passes unrecognized Anthropic-family paths through untouched', async () => {
     const cap: { url?: string; headers?: Headers } = {};
     stubFetch(cap);

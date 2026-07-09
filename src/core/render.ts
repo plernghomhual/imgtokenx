@@ -1,8 +1,8 @@
 /**
  * Text → PNG renderer. Blits atlas glyphs into a grayscale framebuffer, then PNG-encodes.
  * Iterates by codepoint so East Asian Wide chars (2-cell advance) and surrogate pairs handled correctly.
- * Pages capped at ~1932×1932 px: Fable/Opus 4.8 >20-image requests are held to ≤2000 px/side
- * (REJECTED if exceeded, not silently downscaled); ≤4784 token limit binds first at 1932 px.
+ * Dense Anthropic pages are capped at 1568×728 px so Claude sees the glyphs
+ * at uploaded resolution instead of resizing a taller page before vision.
  */
 
 import {
@@ -25,7 +25,7 @@ import { encodeGrayPng, encodeRgbPng } from './png.js';
 
 /** Page-height ceiling. Measured (2026-07-01, count_tokens sweep, claude-sonnet-4-5 — see
  *  /tmp/pxexp/LEVER1-findings.md): the API downscales any image to fit BOTH long-edge ≤1568
- *  AND ~1.15 MP (≈1,143,750 px), then bills ≈ px/750 (≈1525 tok cap, applied per-image).
+ *  AND ~1.15 MP (≈1,143,750 px), then bills one token per 28×28 patch.
  *  The old 1932×1932 page was billed at cap but resampled 0.555× → 5×8 glyphs reached the
  *  encoder at ~2.8×4.4 px. New page shape 1568×728 = 1,141,504 px fits both bounds →
  *  WYSIWYG for the vision encoder (also satisfies ≤2000 px/side for >20-image requests). */
@@ -703,7 +703,7 @@ export async function renderTextToPngsWithCharLimit(
       ? wrapLines(slotText, cols, markerScale)
       : null;
   const hardLinesPerImg = Math.max(1, Math.floor((maxHeightPx - 2 * PAD_Y) / cellH));
-  // Dense pages (DENSE_CONTENT_CHARS_PER_IMAGE) fill the full 1932 px height;
+  // Dense pages (DENSE_CONTENT_CHARS_PER_IMAGE) fill the 1568×728 page;
   // the slab budget (READABLE_CHARS_PER_IMAGE) keeps its shorter row cap.
   const linesPerImg = Math.min(hardLinesPerImg, Math.max(1, Math.floor(maxCharsPerImage / cols)));
 
@@ -738,7 +738,7 @@ export async function renderTextToPngs(
 
 const GUTTER_CELLS = 4;
 // Width hard-capped at the API's long-edge bound: anything wider is resampled server-side
-// (measured 2026-07-01: fit-within 1568-edge AND ~1.15 MP, then ≈px/750 billing).
+// (measured 2026-07-01: fit-within 1568-edge AND ~1.15 MP; billed on 28px patches).
 const MAX_WIDTH_PX = 1568;
 
 const GUTTER_DIVIDER_INK = 64; // pre-invert → 191 post-invert: light gray column separator
@@ -887,7 +887,7 @@ export async function renderTextToPngsReflowMultiCol(
 }
 
 export interface RenderDensePagesOptions {
-  /** Wrap-width cap in cols. Default DENSE_CONTENT_COLS (384). */
+  /** Wrap-width cap in cols. Default DENSE_CONTENT_COLS (312). */
   readonly cols?: number;
   /** Shrink the canvas to the widest actual line (default true). `false` keeps the full
    *  `cols` width — the proxy's eval-backed full-canvas / slab behavior. */
@@ -915,7 +915,7 @@ export interface RenderDensePagesOptions {
  * divider column when the canvas shrinks), then render. Both callers route through HERE so
  * export PNGs and proxy image blocks are produced by the exact same code and cannot drift —
  * `shrinkColsToContent` is `measureContentCols`, so the proxy's old inline path was already
- * identical at the default 384 cols; this makes it identical at every cols. Returns the raw
+ * identical at the default 312 cols; this makes it identical at every cols. Returns the raw
  * rendered pages; each caller packages them (PNG files vs. base64 Anthropic ImageBlocks).
  *
  * History (history.ts) deliberately does NOT use this: it reflows a parallel role-slot string
