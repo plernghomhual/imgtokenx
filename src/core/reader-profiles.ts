@@ -11,6 +11,7 @@
  * `safeToImage: true` means it's safe to image at the given cell-size bonus (added
  * to render.ts's ATLAS_CELL_W/H); the existing profitability gate still decides
  * whether imaging at that (possibly larger, less compressive) density is worth it.
+ * To add a model safely, run the repeatable sweep in eval/reader-capacity/.
  *
  * Retune without a code change via PXPIPE_READER_PROFILES (JSON map of model-id
  * PREFIX -> partial profile; longest matching prefix wins, checked BEFORE the

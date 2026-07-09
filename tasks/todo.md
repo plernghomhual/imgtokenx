@@ -144,8 +144,8 @@ Plan: `/Users/plernghomhual/.claude/plans/jaunty-whistling-shannon.md`
 
 - [x] Phase 0: commit pending exactness pass as checkpoint (verify green first). Commit `142e964`.
 - [x] Phase 1: lossless-by-default (`losslessExact` on), widen exact-risk detectors, recovery MCP server + `pxpipe mcp`, default `emitRecoverable`/`PXPIPE_RECOVERABLE_DIR`, banner mentions recovery tool. Commit `65a85a1`.
-- [x] Phase 2a (miner-xhigh): per-model reader-capacity profiles (`reader-profiles.ts`), density selection threaded through transform.ts + history.ts, safe default (text passthrough) for unknown/uncalibrated models, `applicability.ts` GPT-vs-Anthropic split documented. Commit pending.
-- [ ] Phase 2b: calibration harness (`eval/reader-capacity/`, live-API opt-in sweep tool) — deferred, not part of this delegate's scope; see Final Review below.
+- [x] Phase 2a (miner-xhigh): per-model reader-capacity profiles (`reader-profiles.ts`), density selection threaded through transform.ts + history.ts, safe default (text passthrough) for unknown/uncalibrated models, `applicability.ts` GPT-vs-Anthropic split documented. Commit `2268cdd`.
+- [x] Phase 2b: calibration harness (`eval/reader-capacity/`, live-API opt-in sweep tool). See Final Review below.
 - [ ] Phase 3: launchd LaunchAgent + `pxpipe install`/`uninstall`, shell wrappers (claude/codex/opencode) with health-check + kill switch, MCP registration per harness, `/healthz`.
 - [ ] Phase 4: compat/lossless/reader-profile tests, doctor self-check.
 - [ ] Full verification: typecheck, build, test, install dry-run, final review entry.
@@ -193,3 +193,28 @@ Remaining risks / next steps:
 - Phase 2b (calibration harness, `eval/reader-capacity/`) is explicitly out of scope for this pass — it's a separate live-API opt-in sweep tool per the plan, not a numeric-correctness change to the render/gate path. Needs its own delegated task.
 - `renderTextToPngsMultiCol` still hardcodes `CELL_H`/no `RenderStyle` param — multi-col imaging for a bonus-cell model (e.g. Opus 4.x with `multiCol` set >1, an opt-in/off-by-default feature) will under-size glyphs relative to its calibrated profile, silently reverting to the unsafe 5×8 density. Documented at each call site; not fixed here per the brief's explicit scope limit. Should be closed before `multiCol` is recommended for any non-default-profile model.
 - Ready to commit as a single Phase 2a checkpoint.
+
+## Final Review - 2026-07-09 (Phase 2b — calibration harness)
+
+Files changed:
+- `eval/reader-capacity/run.mjs` (new) — generalized calibration harness copied from the proven `opus-density` shape: CLI model list, same 5x8/7x10/9x12 sweep, same question battery/scoring, dry-run mode, results JSON, and live-score profile-row recommendations.
+- `eval/reader-capacity/README.md` (new) — usage, dry-run/live-run notes, acceptance bar, and relationship to the `eval/opus-density/` one-off receipt.
+- `src/core/reader-profiles.ts` — comment-only pointer to `eval/reader-capacity/` for safely adding a model.
+- `tasks/todo.md` — Phase 2b status and this review entry.
+
+Behavior changed:
+- No production behavior changed; `src/` changed only by a documentation comment. New eval tooling only.
+- `eval/reader-capacity/run.mjs` accepts a comma-separated CLI model list, defaults to `claude-opus-4-8,claude-fable-5`, renders with the production renderer through `src/core/library.ts`, and emits live profile candidates only when live scoring exists.
+- `eval/opus-density/` was not modified.
+
+Verification performed:
+- `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.5 --dry-run --out /tmp/pxpipe-reader-capacity-dry-run.json`: exit 0; parsed the explicit CLI model list; rendered 5x8/7x10/9x12 as 280/504/728 image tokens vs 1335 text tokens (79%/62%/45% saved); made no model calls.
+- `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs --dry-run --out /tmp/pxpipe-reader-capacity-default-dry-run.json`: exit 0; defaulted to `claude-opus-4-8,claude-fable-5`; rendered the same accounting; made no model calls.
+- `npm run typecheck`: exit 0 (`tsc --noEmit`; npm printed existing unknown-project-config warnings).
+- `npm test`: exit 0; 38 files, 686 tests passed.
+- `git diff --check`: exit 0.
+
+Remaining risks / next steps:
+- Live calibration was intentionally not run because this phase must not use a real `ANTHROPIC_API_KEY`; dry-run proves rendering, token accounting, and CLI parsing only.
+- The live scorer intentionally keeps the `eval/opus-density/` Anthropic Messages call path; non-Anthropic model IDs are accepted for dry-run/accounting but require a provider caller extension before live scoring.
+- Phase 3 (launchd/wrappers) and Phase 4 (compat hardening) remain unstarted and still require explicit confirmation before touching user shell/launchd state.
