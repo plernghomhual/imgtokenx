@@ -9,7 +9,7 @@
  * the conversation grows turn-by-turn (the real Claude Code / OpenCode loop).
  *
  *   fake api  = the upstream output (canned responses + count_tokens probe)
- *   our input = pxpipe's transform of the request body
+ *   our input = imgtokenx's transform of the request body
  *
  * If a regression ever makes the rendered prefix non-deterministic (timestamp,
  * map ordering, re-imaging on every turn), the byte-identity assertions below go
@@ -402,7 +402,7 @@ describe('e2e cache alignment — Anthropic /v1/messages through the real proxy'
     // context, never blended into user prose — undelimited, it can BECOME the
     // entire visible message on an empty/short user turn (observed live).
     expect(lastUserText(cap2.main[0]!.body)).toMatch(
-      /<system-reminder>[\s\S]*relocated by pxpipe[\s\S]*# Environment[\s\S]*<\/system-reminder>/,
+      /<system-reminder>[\s\S]*relocated by imgtokenx[\s\S]*# Environment[\s\S]*<\/system-reminder>/,
     );
   });
 
@@ -439,7 +439,7 @@ describe('e2e cache alignment — Anthropic /v1/messages through the real proxy'
   });
 
   it('GATE: an out-of-scope model is forwarded byte-for-byte untouched (no images)', async () => {
-    // claude-3-5-sonnet is NOT in the default PXPIPE_MODELS scope → passthrough.
+    // claude-3-5-sonnet is NOT in the default IMGTOKENX_MODELS scope → passthrough.
     const body = anthropicBody({ model: 'claude-3-5-sonnet', slabChars: 80_000, turns: turns(4, 20) });
     const cap = await driveAnthropic(body);
     cap.restore();

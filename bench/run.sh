@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bench/run.sh — headless multi-turn claude session through pxpipe, then score it.
+# bench/run.sh — headless multi-turn claude session through imgtokenx, then score it.
 #
 #   bash bench/run.sh [--turns N] [--model M] [--label NAME] [--port P]
 #                     [--no-build] [--prompts FILE]
@@ -63,7 +63,7 @@ mkdir -p "$RUN_DIR/dumps" "$RUN_DIR/turns"
 RUN_DIR_ABS="$(cd "$RUN_DIR" && pwd)"
 
 # --- proxy ------------------------------------------------------------------
-PORT="$PORT" PXPIPE_LOG="$RUN_DIR_ABS/events.jsonl" PXPIPE_DUMP_DIR="$RUN_DIR_ABS/dumps" \
+PORT="$PORT" IMGTOKENX_LOG="$RUN_DIR_ABS/events.jsonl" IMGTOKENX_DUMP_DIR="$RUN_DIR_ABS/dumps" \
   node bin/cli.js > "$RUN_DIR_ABS/proxy.log" 2>&1 &
 PROXY_PID=$!
 cleanup() { kill "$PROXY_PID" 2>/dev/null; wait "$PROXY_PID" 2>/dev/null; }
@@ -83,7 +83,7 @@ echo "[bench] proxy pid=$PROXY_PID port=$PORT"
 WS="$RUN_DIR_ABS/ws"
 cp -R demo/cost-ab/template "$WS"
 git -C "$WS" init -q && git -C "$WS" add -A && \
-  git -C "$WS" -c user.email=bench@pxpipe -c user.name=bench commit -qm seed
+  git -C "$WS" -c user.email=bench@imgtokenx -c user.name=bench commit -qm seed
 
 # --- turns --------------------------------------------------------------------
 SID=""

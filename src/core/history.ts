@@ -342,7 +342,7 @@ function verbatimTaskText(text: string): string {
  * The user's typed words in a user message: text blocks only, excluding
  * <system-reminder> wrappers and (in the opening slab message) everything at or
  * before the '[End of rendered context.]' boundary — same rule as
- * demoteProtectedHeadText, so pxpipe scaffolding is never mistaken for the task.
+ * demoteProtectedHeadText, so imgtokenx scaffolding is never mistaken for the task.
  */
 function typedUserText(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content.trim();
@@ -402,7 +402,7 @@ function demoteProtectedHeadText(head: Message[]): Message[] {
       return preview ? { ...m, content: [tomb(preview)] } : m;
     }
     if (!Array.isArray(m.content)) return m;
-    // pxpipe's own slab scaffolding (the rendered images, the fact-sheet, and the
+    // imgtokenx's own slab scaffolding (the rendered images, the fact-sheet, and the
     // '[End of rendered context.]' boundary) is NOT the user's request and must
     // survive byte-identical: relocateAnchorToHistoryImage keys on that boundary
     // text to locate the slab cache anchor. Only the user's stale opening turn —

@@ -1,6 +1,6 @@
 # Reflow Eval Harness
 
-Evaluation harness for the **reflow** image-rendering mode in pxpipe.
+Evaluation harness for the **reflow** image-rendering mode in imgtokenx.
 
 Reflow re-packs text densely and marks original newlines with the ↵ glyph
 (U+21B5) before rendering to PNG. It reduces image count by ~30–50% on typical

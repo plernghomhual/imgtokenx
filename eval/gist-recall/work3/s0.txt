@@ -474,7 +474,7 @@ BATCH_WINDOW_MS changed 9600 -> 2400.
       // profitability gate decide whether each block is worth converting.
       // If the source text block had a cache_control marker, it's moved
       // onto the LAST produced image so the cache anchors at the end of
-      // that content. pxpipe never adds its own markers (Task #21) —
+      // that content. imgtokenx never adds its own markers (Task #21) —
       // it only relocates ones the caller already set.
       const processedExisting: ContentBlock[] = [];
       if (o.compressReminders) {
@@ -512,7 +512,7 @@ BATCH_WINDOW_MS changed 9600 -> 2400.
             await textToImageBlocks(reminderText, o.cols, numCols);
           // Preserve any cache_control the caller set on this text block by
           // re-attaching it to the LAST produced image (cache anchors at the
-          // end of the content). pxpipe never adds new markers — only
+          // end of the content). imgtokenx never adds new markers — only
           // moves existing ones across the text→image flip (Task #21).
           const srcCacheControl = (blk as { cache_control?: unknown }).cache_control;
           for (let i = 0; i < imgs.length; i++) {
@@ -656,7 +656,7 @@ BATCH_WINDOW_MS changed 9600 -> 2400.
                   await textToImageBlocks(paged.text, o.cols, numCols);
                 // Preserve any cache_control the caller set on this inner
                 // text block (inside a tool_result) by re-attaching it to the
-                // LAST produced image. pxpipe never adds new markers (Task #21).
+                // LAST produced image. imgtokenx never adds new markers (Task #21).
                 const srcCacheControl = (ib as { cache_control?: unknown }).cache_control;
                 for (let i = 0; i < imgs.length; i++) {
                   const img = imgs[i]!;

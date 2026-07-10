@@ -7,13 +7,13 @@
  * hardcoded `resolveVisionCost` + `GPT_STRIP_COLS` + `MAX_HEIGHT_PX`, so existing
  * cost numbers (1190 / 1445 / 2372 / 1464 / 630 …) are unchanged.
  *
- * Retune without a code change via the PXPIPE_GPT_PROFILES env var (JSON map of
+ * Retune without a code change via the IMGTOKENX_GPT_PROFILES env var (JSON map of
  * model-id PREFIX -> partial profile; longest matching prefix wins, checked
  * BEFORE the built-in table). Partial fields fall back to the built-in match, so
  * you can override just one knob:
  *
- *   PXPIPE_GPT_PROFILES='{"gpt-5.6":{"vision":{"regime":"patch","multiplier":1,"patchCap":12000},"stripCols":200,"maxHeightPx":2400}}'
- *   PXPIPE_GPT_PROFILES='{"gpt-5.6":{"stripCols":176}}'   # widen only
+ *   IMGTOKENX_GPT_PROFILES='{"gpt-5.6":{"vision":{"regime":"patch","multiplier":1,"patchCap":12000},"stripCols":200,"maxHeightPx":2400}}'
+ *   IMGTOKENX_GPT_PROFILES='{"gpt-5.6":{"stripCols":176}}'   # widen only
  */
 
 /**
@@ -111,7 +111,7 @@ function resolveBuiltin(m: string): GptModelProfile {
   return DEFAULT_GPT_PROFILE;
 }
 
-// --- env override (PXPIPE_GPT_PROFILES) -----------------------------------
+// --- env override (IMGTOKENX_GPT_PROFILES) -----------------------------------
 // Parsed lazily and memoized on the raw env string so tests can mutate
 // process.env and have it re-read, without re-parsing on every hot-path call.
 
@@ -155,7 +155,7 @@ function parseEnvProfiles(raw: string): Map<string, GptModelProfile> {
 }
 
 function envProfiles(): Map<string, GptModelProfile> {
-  const raw = (typeof process !== 'undefined' && process.env && process.env.PXPIPE_GPT_PROFILES) || '';
+  const raw = (typeof process !== 'undefined' && process.env && process.env.IMGTOKENX_GPT_PROFILES) || '';
   if (raw !== envRaw) {
     envRaw = raw;
     envMap = parseEnvProfiles(raw);

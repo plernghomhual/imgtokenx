@@ -6,7 +6,7 @@ FONT = "/System/Library/Fonts/SFNSMono.ttf"
 WORK = "/tmp/needle_eval/sweep"
 os.makedirs(WORK, exist_ok=True)
 CCI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib", "cci.py")
-W, H = 1568, 1276          # pxpipe-equivalent dims -> ~2668 image tokens
+W, H = 1568, 1276          # imgtokenx-equivalent dims -> ~2668 image tokens
 IMG_TOKENS = round(W*H/750)
 
 FILLER = ("the quick brown fox jumps over the lazy dog while the cache layer "

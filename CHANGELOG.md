@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to pxpipe are documented here. This project adheres to
+All notable changes to imgtokenx are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) (pre-1.0: minor = features /
 behavioral changes, patch = fixes).
 
@@ -14,31 +14,31 @@ behavioral changes, patch = fixes).
   lossless-exact is the primary guard (known exact-risk content never gets
   imaged), recovery sidecars are a backstop for whatever else does.
 - **Lossless-exact and recovery sidecars are now ON by default**, no env
-  vars required. `PXPIPE_LOSSLESS_EXACT` defaults on; set it to `0`/`false`/
-  `off` to disable. `PXPIPE_RECOVERABLE_DIR` now defaults to
-  `~/.pxpipe/recovery` (mode `0700`) when unset; set it to `off`/`0`/`false`
+  vars required. `IMGTOKENX_LOSSLESS_EXACT` defaults on; set it to `0`/`false`/
+  `off` to disable. `IMGTOKENX_RECOVERABLE_DIR` now defaults to
+  `~/.imgtokenx/recovery` (mode `0700`) when unset; set it to `off`/`0`/`false`
   to disable. The Cloudflare Worker build gets the same lossless-exact
   default via `LOSSLESS_EXACT` (no recovery sidecar there — Workers has no
-  writable filesystem). `pxpipe recover` resolves the same default dir.
+  writable filesystem). `imgtokenx recover` resolves the same default dir.
 - **Widened exact-risk detection** in the fact-sheet extractor: URL query
   strings (`?key=value...`), long base64/JWT-like runs (incl. dot-separated
   3-part JWTs), and semver/version pins with a range operator prefix
   (`^2.0.0-beta.1`, `~1.4.2`) are now recognized as exact-risk and kept
   verbatim instead of being gist-read from pixels.
-- **New `pxpipe mcp` command**: a stdio MCP server exposing a
-  `pxpipe_recover` tool. A model that sees a `rec_*` id in the exact-risk
+- **New `imgtokenx mcp` command**: a stdio MCP server exposing a
+  `imgtokenx_recover` tool. A model that sees a `rec_*` id in the exact-risk
   render banner can call the tool directly with that id to get the verbatim
   original source, instead of guessing it from image pixels. Reuses the
-  same lookup logic as the `pxpipe recover` CLI (`recoverById`).
-- Exact-risk render banners now mention the `pxpipe_recover` MCP tool by
+  same lookup logic as the `imgtokenx recover` CLI (`recoverById`).
+- Exact-risk render banners now mention the `imgtokenx_recover` MCP tool by
   name alongside the existing fact-sheet/recovery-ref guidance.
 
 ## 0.8.0 — 2026-07-03
 
 ### Security
 - Worker: deploying with an `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` override now
-  requires `PXPIPE_WORKER_SECRET`; callers authenticate via the
-  `x-pxpipe-secret` header. Without the secret the Worker returns 503 instead
+  requires `IMGTOKENX_WORKER_SECRET`; callers authenticate via the
+  `x-imgtokenx-secret` header. Without the secret the Worker returns 503 instead
   of proxying on your key.
 - Node: dashboard binds to loopback (127.0.0.1) by default; set `HOST` to opt
   into all interfaces.
@@ -46,7 +46,7 @@ behavioral changes, patch = fixes).
 
 ### Fixed
 - History imaging no longer teaches the model to skip `Read` calls.
-- Fixed the pxpipe-vs-plain-Claude demo image link.
+- Fixed the imgtokenx-vs-plain-Claude demo image link.
 
 ### Docs
 - README cut to 217 lines — caveats deduped, benchmark prose moved to eval/
@@ -71,12 +71,12 @@ behavioral changes, patch = fixes).
 
 ### Fixed
 - **Relocated env block is now wrapped in `<system-reminder>` tags.** The
-  volatile `# Environment` text that pxpipe moves out of the cached system
+  volatile `# Environment` text that imgtokenx moves out of the cached system
   prefix used to be appended to the last user message as bare prose — on an
   empty or short user turn it could read as the user's entire message, and
   models would mis-attribute it ("your message consisted of environment
   metadata"). The block now carries an explicit provenance header
-  ("Context relocated by pxpipe from the system prompt … not written by the
+  ("Context relocated by imgtokenx from the system prompt … not written by the
   user"), fixing attribution. No cache impact: the wrapper rides the volatile
   tail behind all cache breakpoints (~60 chars/request).
 
@@ -88,7 +88,7 @@ behavioral changes, patch = fixes).
   instead of anecdotal.
 - **Headless bench:** multi-turn `claude -p` driver + `events.jsonl` scorer for
   fast, non-interactive A/B runs; plus a constant-cost render-style eval harness.
-- **`PXPIPE_DUMP_DIR`** persists rendered PNGs per request for demo/debug
+- **`IMGTOKENX_DUMP_DIR`** persists rendered PNGs per request for demo/debug
   inspection of exactly what the model saw.
 - **Dashboard/factsheet:** one-time cache-create losses tagged in the recent
   table; factsheet carries occurrence counts with ticket-style codes.
@@ -114,7 +114,7 @@ behavioral changes, patch = fixes).
 ### Docs
 - **Fable 5 side-by-side demo** in the README with verified numbers from the
   recording — same two tasks, same answers: plain $42.21 / 96% context vs
-  pxpipe $4.51 — plus the honest caveat (compressed arm needed one nudge for
+  imgtokenx $4.51 — plus the honest caveat (compressed arm needed one nudge for
   single-reply format) and the full attempt log in
   `demo/effective-context/ATTEMPTS.md`.
 - Node transform hook documented as kill-switch only.
@@ -185,7 +185,7 @@ behavioral changes, patch = fixes).
   the model the image is prior context, not the current request — reinforcing the
   turn-index so a stale opening turn doesn't read as live. (`openai.ts`)
 - **Honest cache math.** Savings are priced warm whenever a cache read was actually
-  observed (`cache_read > 0`), even when pxpipe has no in-memory warmth prior (after a
+  observed (`cache_read > 0`), even when imgtokenx has no in-memory warmth prior (after a
   restart/eviction or on the first tracked turn). Pricing those turns cold billed the
   text counterfactual a 1.25× create on a prefix we know was cached — fabricating
   inflated "saved" rows. Applied across the live dashboard, its replay path, and the
@@ -222,14 +222,14 @@ it were the live request).
   colored via a parallel "slot string" carried from serialize time, replacing the
   parse-back that miscolored a body quoting a literal tag. (`render.ts`)
 - **Per-model GPT profiles (`gpt-model-profiles.ts`).** Vision-cost regime, strip
-  width, and max image height per model id, retunable via `PXPIPE_GPT_PROFILES` (a
+  width, and max image height per model id, retunable via `IMGTOKENX_GPT_PROFILES` (a
   JSON model-id-prefix map) without a code change. Built-ins are behavior-identical
   to the prior hardcoded values.
 
 ### Changed
 - **↵-packing for sentinel-bearing content.** A pre-existing ↵ (U+21B5) in content
   is swapped to ⏎ (U+23CE) in render-prep so `reflow` packs newlines instead of
-  bailing to a raw, unpacked render — common when the content is about pxpipe
+  bailing to a raw, unpacked render — common when the content is about imgtokenx
   itself (rendered dumps, OCR). Render-only; originals are preserved.
 
 ### Fixed
@@ -283,14 +283,14 @@ New library surface for harness authors, opt-in GPT-5.x / Responses API support,
 and a round of dashboard-honesty and cache-correctness fixes.
 
 ### Added
-- **Library API (`pxpipe/transform`):** `transformAnthropicMessages` now accepts
+- **Library API (`imgtokenx/transform`):** `transformAnthropicMessages` now accepts
   `keepSharp` (pin specific blocks as text so the caller controls what stays
   legible) and `emitRecoverable` (a provenance-recovery channel surfaced on
   `info.recoverable`). New exported types `KeepSharpBlock`, `RecoverableBlock`.
 - **Edge / Workers-safe packaging.** `process.env` access is `typeof`-guarded;
   `@napi-rs/canvas` moved to `devDependencies` (the atlas is baked at build time),
   so the runtime is pure-JS and runs on Node and Cloudflare Workers unchanged.
-- **GPT-5.x family + Responses API (opt-in, off by default).** `isPxpipeSupportedGptModel`
+- **GPT-5.x family + Responses API (opt-in, off by default).** `isImgtokenxSupportedGptModel`
   gates the `gpt-5`/`5.5`/`5.6`/`-mini`/`-nano` family; a 768 px portrait-strip
   render profile avoids OpenAI's mandatory shortest-side-768 downscale; an OpenAI
   vision-token cost model replaces the Anthropic 750 px/token math for the GPT
@@ -303,7 +303,7 @@ and a round of dashboard-honesty and cache-correctness fixes.
   so slab + history cache as one stable prefix — created once, then read at 0.1×.
   Previously the ~141k-token history image re-created at the 1.25× rate on warm
   turns, turning a real compression win into a net loss. Marker count is
-  unchanged: pxpipe still never *adds* a breakpoint, only relocates the caller's.
+  unchanged: imgtokenx still never *adds* a breakpoint, only relocates the caller's.
 - **Dashboard honesty.** The Details headline and the session hero now use
   cache-weighted tokens (matching the Saved column) instead of dividing the raw
   `count_tokens` baseline by sent tokens — which over-claimed "fewer tokens" even
@@ -339,7 +339,7 @@ multi-agent code review with five confirmed fixes. Reviewed at extra-high recall
 ### Changed
 - **Render page ceiling raised to ~1932×1932.** Fable 5 / Opus 4.8 accept images
   up to 2576 px long edge / 4784 visual tokens, but a request with >20 images
-  (pxpipe always sends many) is held to the stricter ≤2000 px/side rule — so the
+  (imgtokenx always sends many) is held to the stricter ≤2000 px/side rule — so the
   real ceiling is ~1932×1932 (1928×1928 = 69×69 = 4761 tokens). `MAX_HEIGHT_PX`
   1568→1932; dense tool/history pages now `DENSE_CONTENT_COLS=384` /
   `DENSE_CONTENT_CHARS_PER_IMAGE=92160` (1928×1928 full page) — fewer image
@@ -350,7 +350,7 @@ multi-agent code review with five confirmed fixes. Reviewed at extra-high recall
   been independently re-eval'd (revert = the four render constants).
 - **Opus is OFF by default.** Production scope defaults to **Fable-5 only**;
   Opus 4.8/4.7 are opt-in (they read imaged content at a measurable tax — see
-  FINDINGS.md). Opt in via `PXPIPE_MODELS` or the dashboard chips.
+  FINDINGS.md). Opt in via `IMGTOKENX_MODELS` or the dashboard chips.
 - **Honest savings accounting.** Per-turn/session savings are the real
   `baseline_eff − actual_eff` with **no ≥0 floor** — a net-losing turn (e.g. a
   cache_create-heavy image rewrite) now reports the real loss instead of a
@@ -362,7 +362,7 @@ multi-agent code review with five confirmed fixes. Reviewed at extra-high recall
   of every rendered page, reached via a **"view"** link on each recent-requests
   row.
 - **Flexible "compress models" chips** — the toggle set is the union of a model
-  catalog (Fable 5, Opus 4.8/4.7, Sonnet 4.6, Haiku 4.5), the `PXPIPE_MODELS`
+  catalog (Fable 5, Opus 4.8/4.7, Sonnet 4.6, Haiku 4.5), the `IMGTOKENX_MODELS`
   env scope, and the currently-active scope, so any env-enabled model stays
   toggleable (off ↔ on). Runtime-only override of the compress scope.
 - **Demos** — `demo/cost-ab/` (cost A/B on a real coding task) and

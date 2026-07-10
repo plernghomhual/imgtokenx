@@ -136,7 +136,7 @@ function safeStringifyLen(v: unknown): number {
   }
 }
 /**
- * The pxpipe proxy as a single Web-standard fetch handler.
+ * The imgtokenx proxy as a single Web-standard fetch handler.
  *
  * Both `src/node.ts` and `src/worker.ts` adapt this to their respective
  * runtimes (node:http server vs CF Worker `fetch` export). The handler
@@ -146,7 +146,7 @@ function safeStringifyLen(v: unknown): number {
 
 import { transformRequest, type TransformOptions, type TransformInfo } from './transform.js';
 import { transformOpenAIChatCompletions } from './openai.js';
-import { isPxpipeSupportedGptModel, isPxpipeSupportedModel } from './applicability.js';
+import { isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,
@@ -668,7 +668,7 @@ function renderToolDoc(t: ToolDef, includeSchema: boolean): string {
 }
 
 function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
-  // Per Task #21: pxpipe NEVER adds its own cache_control marker.
+  // Per Task #21: imgtokenx NEVER adds its own cache_control marker.
   // Claude Code already places markers on system+tools, CLAUDE.md, and the
   // per-turn anchor; we honor those positions byte-identically and add
   // nothing of our own. The `_ephemeral` parameter is preserved for call-
@@ -1003,7 +1003,7 @@ export function resolveUpstreams(config: ProxyConfig): {
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
       throw new Error(
-        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (PXPIPE_GATEWAY_BASE_URL)",
+        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
     return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
@@ -1015,7 +1015,7 @@ export function resolveUpstreams(config: ProxyConfig): {
   };
 }
 
-/** Parse `PXPIPE_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
+/** Parse `IMGTOKENX_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
 export function parseGatewayHeaders(spec: string | undefined): Record<string, string> {
   if (!spec) return {};
   const trimmed = spec.trim();

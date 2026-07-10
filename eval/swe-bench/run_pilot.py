@@ -77,7 +77,7 @@ def main():
             pf = os.path.join(WORK, inst["instance_id"], f"patch_{arm}.diff")
             patch = open(pf).read() if os.path.exists(pf) else ""
             preds.append({"instance_id": inst["instance_id"],
-                          "model_name_or_path": f"pxpipe-{arm}",
+                          "model_name_or_path": f"imgtokenx-{arm}",
                           "model_patch": patch})
         out = os.path.join(HERE, f"preds_{arm}.json")
         json.dump(preds, open(out, "w"), indent=1)

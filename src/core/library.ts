@@ -1,4 +1,4 @@
-import { isPxpipeSupportedModel } from './applicability.js';
+import { isImgtokenxSupportedModel } from './applicability.js';
 import { countCacheControlMarkers } from './measurement.js';
 import {
   renderTextToPngsWithCharLimit,
@@ -24,7 +24,7 @@ export type { KeepSharpBlock, RecoverableBlock };
 
 export type BytesLike = Uint8Array | ArrayBuffer | ArrayBufferView;
 
-export interface PxpipeOptions
+export interface ImgtokenxOptions
   extends Pick<
     TransformOptions,
     'charsPerToken' | 'historyAmortizationHorizon' | 'keepSharp' | 'emitRecoverable'
@@ -33,15 +33,15 @@ export interface PxpipeOptions
   readonly compress?: boolean;
 }
 
-export interface PxpipeTransformInput {
+export interface ImgtokenxTransformInput {
   readonly body: BytesLike;
   /** Resolved upstream model when available; aliases are accepted for applicability checks. */
   readonly model?: string | null;
   readonly requestId?: string;
-  readonly options?: PxpipeOptions;
+  readonly options?: ImgtokenxOptions;
 }
 
-export type PxpipeReason =
+export type ImgtokenxReason =
   | 'applied'
   | 'unsupported_model'
   | 'parse_error'
@@ -53,10 +53,10 @@ export type PxpipeReason =
   | 'transform_error'
   | 'passthrough';
 
-export interface PxpipeTransformResult {
+export interface ImgtokenxTransformResult {
   readonly body: Uint8Array;
   readonly applied: boolean;
-  readonly reason: PxpipeReason;
+  readonly reason: ImgtokenxReason;
   readonly detail?: string;
   readonly info: TransformInfo;
   readonly cache: {
@@ -86,7 +86,7 @@ function emptyInfo(reason: string): TransformInfo {
   };
 }
 
-function classifyReason(info: TransformInfo): PxpipeReason {
+function classifyReason(info: TransformInfo): ImgtokenxReason {
   if (info.compressed) return 'applied';
   const r = info.reason ?? '';
   if (r.startsWith('parse_error')) return 'parse_error';
@@ -103,10 +103,10 @@ function classifyReason(info: TransformInfo): PxpipeReason {
  * reasons, and cache_control ownership flag (prevents hosts stacking a second injector).
  */
 export async function transformAnthropicMessages(
-  input: PxpipeTransformInput,
-): Promise<PxpipeTransformResult> {
+  input: ImgtokenxTransformInput,
+): Promise<ImgtokenxTransformResult> {
   const original = toUint8Array(input.body);
-  if (!isPxpipeSupportedModel(input.model)) {
+  if (!isImgtokenxSupportedModel(input.model)) {
     return {
       body: original,
       applied: false,
@@ -159,7 +159,7 @@ export interface RenderTextToImagesOptions {
   readonly multiCol?: number | 'auto';
   /** Reflow the text before rendering (minify + join hard newlines with the ↵ sentinel so
    *  short lines pack into full-width rows). This is the proxy's dense history format and is
-   *  what `pxpipe export` uses. Default false (raw one-line-per-row). */
+   *  what `imgtokenx export` uses. Default false (raw one-line-per-row). */
   readonly reflow?: boolean;
   /** Max source chars per page. Default DENSE_CONTENT_CHARS_PER_IMAGE. */
   readonly maxCharsPerImage?: number;

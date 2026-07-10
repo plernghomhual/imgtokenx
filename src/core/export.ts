@@ -1,5 +1,5 @@
 /**
- * Core logic for `pxpipe export` — renders a source text to PNG pages, extracts
+ * Core logic for `imgtokenx export` — renders a source text to PNG pages, extracts
  * a verbatim factsheet, builds a manifest and paste-ready prompt, and returns a
  * token-cost report + list of artifacts to write.
  *
@@ -15,7 +15,7 @@ import {
   CELL_W,
 } from './render.js';
 // Dogfood the public SDK: render via the same `./transform` entry external
-// consumers import (pxpipe-proxy/transform → renderTextToImages), not the
+// consumers import (imgtokenx/transform → renderTextToImages), not the
 // internal leaf renderer.
 import { renderTextToImages } from './library.js';
 import { estimateImageCount, ANTHROPIC_PATCH_PX, IMAGE_COST_SAFETY_MARGIN, REPORT_CHARS_PER_TOKEN } from './transform.js';
@@ -381,7 +381,7 @@ export function buildPromptText(
         `   factsheet.txt is the authoritative source of truth for all exact strings.\n`;
 
   return (
-    `These ${pageCount} image${pageCount !== 1 ? 's' : ''} contain source code/text rendered as PNG pages by pxpipe.\n\n` +
+    `These ${pageCount} image${pageCount !== 1 ? 's' : ''} contain source code/text rendered as PNG pages by imgtokenx.\n\n` +
     fileSection +
     `Instructions for the reading agent:\n` +
     `1. Read the images in order: page-001.png through page-${lastPageStr}.png.\n` +
@@ -427,7 +427,7 @@ export async function runExportCore(
   // Render to PNG pages via the public SDK primitive. shrink=true sizes the canvas
   // to the widest line so short-line code isn't padded to full width; multiCol='auto'
   // packs as many columns side-by-side as fit. Same render surface shipped to external
-  // SDK consumers (pxpipe-proxy/transform).
+  // SDK consumers (imgtokenx/transform).
   const { pages: images } = await renderTextToImages(sourceText, {
     cols: opts.cols,
     shrink: true,

@@ -102,7 +102,7 @@ jotai is a reasonable candidate; let me also benchmark nanostores.
       // Honest "share of total bill saved" — measured-rows numerator over
       // ALL paid requests in the denominator (compressed + passthrough +
       // probe-failed). This is the number users actually want when they
-      // ask "is pxpipe helping". Negative when flap-pollution from
+      // ask "is imgtokenx helping". Negative when flap-pollution from
       // passthrough turns exceeds the collapse win on measured turns.
       saved_pct_of_all_spend: round1(pctAllSpend),
       all_baseline_equivalent_weighted: Math.round(allBaselineEquiv),
@@ -246,7 +246,7 @@ The symptom first appeared in src/mailbox/io.ts (stack trace top frame), still t
       } as RequestInit);
     } catch (e) {
       fire(502, info, `upstream_error: ${(e as Error).message}`);
-      return new Response(JSON.stringify({ error: 'pxpipe upstream unreachable' }), {
+      return new Response(JSON.stringify({ error: 'imgtokenx upstream unreachable' }), {
         status: 502,
         headers: { 'content-type': 'application/json' },
       });
@@ -303,7 +303,7 @@ The symptom first appeared in src/mailbox/io.ts (stack trace top frame), still t
  *
  * The synthesized user message uses `role: 'user'` because Anthropic
  * **forbids `image` blocks inside `role: 'assistant'`** (see
- * `/tmp/pxpipe-history-compression.md` line 14 and `types.ts:58`
+ * `/tmp/imgtokenx-history-compression.md` line 14 and `types.ts:58`
  * comments). Self-attribution ("I previously said X") is the price.
  *
  * `thinking` blocks inside the collapsed range are dropped from the
@@ -312,7 +312,7 @@ The symptom first appeared in src/mailbox/io.ts (stack trace top frame), still t
  * and that turn is in the live tail by construction.
  *
  * **Cache-control**: caller controls whether the history-image carries
- * pxpipe's ephemeral breakpoint. This module returns the image blocks
+ * imgtokenx's ephemeral breakpoint. This module returns the image blocks
  *
 [assistant]
 Reviewed src/core/transform.ts.
@@ -674,7 +674,7 @@ fix only the root cause file.
                   await textToImageBlocks(paged.text, o.cols, numCols);
                 // Preserve any cache_control the caller set on this inner
                 // text block (inside a tool_result) by re-attaching it to the
-                // LAST produced image. pxpipe never adds new markers (Task #21).
+                // LAST produced image. imgtokenx never adds new markers (Task #21).
                 const srcCacheControl = (ib as { cache_control?: unknown }).cache_control;
                 for (let i = 0; i < imgs.length; i++) {
                   const img = imgs[i]!;
@@ -769,7 +769,7 @@ function renderToolDoc(t: ToolDef, includeSchema: boolean): string {
 }
 
 function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
-  // Per Task #21: pxpipe NEVER adds its own cache_control marker.
+  // Per Task #21: imgtokenx NEVER adds its own cache_control marker.
   // Claude Code already places markers on system+tools, CLAUDE.md, and the
   // per-turn anchor; we honor those positions byte-identically and add
   // nothing of our own. The `_ephemeral` parameter is preserved for call-
@@ -1038,7 +1038,7 @@ export async function collapseHistory(
 /**
  * Live dashboard for the Node host. Serves the main HTML page and JSON
  * polling endpoints. All "/api/*.json" endpoints recompute from disk on
- * every request — pxpipe doesn't have a query layer, but a 1.5 MB JSONL
+ * every request — imgtokenx doesn't have a query layer, but a 1.5 MB JSONL
  * streams in well under 100 ms.
  *
  * Legacy live-poll endpoints (left in place, the existing tick() loop uses

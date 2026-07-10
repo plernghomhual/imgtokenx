@@ -25,13 +25,13 @@ eline_input + output × 5) × 100
     // estimation), but the denominator MUST include every request the user
     // actually paid for — including passthrough rows, probe-failed rows,
     // and untransformed turns the gate said no to. Otherwise the headline
-    // answers "did pxpipe help on the rows where it ran" instead of
-    // "did pxpipe move my real bill". The first is a cherry-pick.
+    // answers "did imgtokenx help on the rows where it ran" instead of
+    // "did imgtokenx move my real bill". The first is a cherry-pick.
     const allBaselineEquiv = this.totals.allBaselineEquivalentWeighted;
     const allActual = this.totals.allActualInputWeighted;
     const allOutput = this.totals.allOutputWeighted;
     // Denominator = counterfactual all-rows bill: what the user would have
-    // paid with no pxpipe. Bounded ratio at 100%; a single cold-miss
+    // paid with no imgtokenx. Bounded ratio at 100%; a single cold-miss
     // compressed request on an otherwise empty session shows ~99% saved,
     // not 280%.
     const allCounterfactualBill = allBaselineEquiv + allOutput;
@@ -491,14 +491,14 @@ interface Totals {
    *  with a usage block. For measured rows: cache-aware baseline (what the
    *  unproxied path would have billed). For unmeasured/probe-failed rows:
    *  actual_input_eff (best available estimate — these rows didn't run
-   *  pxpipe or we can't measure what it would have cost, so the
+   *  imgtokenx or we can't measure what it would have cost, so the
    *  counterfactual ≈ actual).
    *
    *  This is the right denominator for "share of bill saved": dividing
    *  by what-you-would-have-paid is bounded at 100% (you can't save more
    *  than you would have spent). Dividing by what-you-DID-pay is not
    *  bounded — a single big cold-miss compressed request can make
-   *  saved/actual exceed 100% because pxpipe shrunk the actual to
+   *  saved/actual exceed 100% because imgtokenx shrunk the actual to
    *  near zero. */
   allBaselineEquivalentWeighted: number;
   /** Sum of weighted ACTUAL input tokens across the same all-rows set.

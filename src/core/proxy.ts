@@ -1,11 +1,11 @@
 /**
- * pxpipe proxy as a single Web-standard fetch handler.
+ * imgtokenx proxy as a single Web-standard fetch handler.
  * Adapted by src/node.ts and src/worker.ts; uses only Request/Response/URL/fetch.
  */
 
 import { transformRequest, type TransformOptions, type TransformInfo } from './transform.js';
 import { transformOpenAIChatCompletions, transformOpenAIResponses } from './openai.js';
-import { isAnthropicMessagesPath, isPxpipeSupportedGptModel, isPxpipeSupportedModel } from './applicability.js';
+import { isAnthropicMessagesPath, isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,
@@ -586,7 +586,7 @@ export function resolveUpstreams(config: ProxyConfig): {
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
       throw new Error(
-        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (PXPIPE_GATEWAY_BASE_URL)",
+        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
     return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
@@ -598,7 +598,7 @@ export function resolveUpstreams(config: ProxyConfig): {
   };
 }
 
-/** Parse PXPIPE_GATEWAY_HEADERS — JSON object or `k=v;k2=v2`. */
+/** Parse IMGTOKENX_GATEWAY_HEADERS — JSON object or `k=v;k2=v2`. */
 export function parseGatewayHeaders(spec: string | undefined): Record<string, string> {
   if (!spec) return {};
   const trimmed = spec.trim();
@@ -754,8 +754,8 @@ export function createProxy(config: ProxyConfig = {}) {
         const model = readModelField(bodyIn);
         requestModel = model ?? undefined;
         const modelOk = isMessages
-          ? isPxpipeSupportedModel(model)
-          : isPxpipeSupportedGptModel(model);
+          ? isImgtokenxSupportedModel(model)
+          : isImgtokenxSupportedGptModel(model);
         // Unsupported model → a true passthrough: no break-even compression
         // (a text-only model may not accept injected image blocks at all).
         const effectiveOpts = modelOk
@@ -802,7 +802,7 @@ export function createProxy(config: ProxyConfig = {}) {
         }
       } catch (e) {
         fire(502, undefined, `transform_error: ${(e as Error).message}`);
-        return new Response(JSON.stringify({ error: 'pxpipe transform failed' }), {
+        return new Response(JSON.stringify({ error: 'imgtokenx transform failed' }), {
           status: 502,
           headers: { 'content-type': 'application/json' },
         });
@@ -840,7 +840,7 @@ export function createProxy(config: ProxyConfig = {}) {
       } as RequestInit);
     } catch (e) {
       fire(502, info, `upstream_error: ${(e as Error).message}`);
-      return new Response(JSON.stringify({ error: 'pxpipe upstream unreachable' }), {
+      return new Response(JSON.stringify({ error: 'imgtokenx upstream unreachable' }), {
         status: 502,
         headers: { 'content-type': 'application/json' },
       });

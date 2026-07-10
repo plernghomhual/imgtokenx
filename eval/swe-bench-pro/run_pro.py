@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Paired SWE-bench Pro runs: pxpipe ON vs OFF. Generation only.
+"""Paired SWE-bench Pro runs: imgtokenx ON vs OFF. Generation only.
 
 Measurement hygiene (the rules that make the numbers trustworthy):
 - Bench-dedicated proxies on fresh ports (ON 47823, OFF 47824) with their own
-  PXPIPE_LOG files. The operator's own Claude session (47821) can never
+  IMGTOKENX_LOG files. The operator's own Claude session (47821) can never
   pollute the bench logs - separation by construction, not by time-window.
 - Docker grading does NOT involve the proxy at all: containers run the
   repo's test suite only, make no model calls, and get no ANTHROPIC_BASE_URL.
@@ -28,7 +28,7 @@ CLAUDE = os.path.expanduser("~/.claude/local/claude")
 CCI = os.path.join(HERE, "..", "lib", "cci.py")
 MODEL = "claude-fable-5"
 ARMS = {"on": 47823, "off": 47824}
-LOGS = {a: os.path.expanduser(f"~/.pxpipe/events-bench-{a}.jsonl") for a in ARMS}
+LOGS = {a: os.path.expanduser(f"~/.imgtokenx/events-bench-{a}.jsonl") for a in ARMS}
 TIMEOUT = 1800  # 30 min hard cap per run; Pro tasks are long-horizon
 QUOTA_RE = re.compile(r"rate.?limit|usage limit|exceed.*limit|quota", re.I)
 
@@ -63,8 +63,8 @@ def ensure_proxies():
                 break
             subprocess.Popen(
                 ["node", "bin/cli.js"], cwd=root,
-                env=dict(os.environ, PORT=str(port), PXPIPE_LOG=LOGS[arm]),
-                stdout=open(f"/tmp/pxpipe-bench-{arm}.log", "a"),
+                env=dict(os.environ, PORT=str(port), IMGTOKENX_LOG=LOGS[arm]),
+                stdout=open(f"/tmp/imgtokenx-bench-{arm}.log", "a"),
                 stderr=subprocess.STDOUT, start_new_session=True)
             time.sleep(3)
         else:

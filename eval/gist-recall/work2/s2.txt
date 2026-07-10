@@ -729,7 +729,7 @@ function buildPagingMarker(args: {
       ? ` Showing first ${args.shownHeadLines} lines and last ${args.shownTailLines} lines.`
       : ` Showing first ${args.shownHeadLines} lines (tail elided).`;
   return (
-    `\n\n[ pxpipe paging: omitted ${args.omittedLines.toLocaleString('en-US')} lines ` +
+    `\n\n[ imgtokenx paging: omitted ${args.omittedLines.toLocaleString('en-US')} lines ` +
     `(${args.omittedChars.toLocaleString('en-US')} chars) of content here. ` +
     `Original length: ${args.originalChars.toLocaleString('en-US')} chars ` +
     `(${args.originalLines.toLocaleString('en-US')} lines, ~${args.originalEstImages} images).` +

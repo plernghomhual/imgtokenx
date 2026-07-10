@@ -113,7 +113,7 @@ export function renderModelsFragment(
     const mode = readerMode(id);
     return `<span class="policy-badge ${mode.safe ? 'image' : 'text'}"><span class="policy-dot"></span>${label} · ${mode.label}</span>`;
   };
-  // Union the catalog with env-configured + active ids so PXPIPE_MODELS-enabled
+  // Union the catalog with env-configured + active ids so IMGTOKENX_MODELS-enabled
   // families always show as toggles, then split by family for the two sections.
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -163,7 +163,7 @@ export function renderModelsFragment(
     `<div class="models"><span class="models-label">Claude scope</span>${claudeChips}</div>` +
     `<div class="models"><span class="models-label">OpenAI scope</span>${gptChips}</div>` +
     (otherChips ? `<div class="models"><span class="models-label">Custom scope</span>${otherChips}</div>` : '') +
-    `<div class="scope-note">Runtime only · persist with <code>PXPIPE_MODELS</code> · reader safety always wins${moot}</div>` +
+    `<div class="scope-note">Saved automatically · <code>IMGTOKENX_MODELS</code> overrides saved scope · reader safety always wins${moot}</div>` +
     `</div></section>`
   );
 }
@@ -177,7 +177,7 @@ void INPUT_USD_PER_MTOK; // suppress unused-var; renderHeaderFragment uses the s
 // Lifetime hero. Reads the SAME cumulative weighted totals as the header strip
 // (serveStats), so the headline and the "$ saved" tiles can never disagree, and
 // the number stops swinging on tiny per-session samples. Cache-weighted on
-// purpose ("lifeweight"): it answers "did pxpipe move my real, cache-discounted
+// purpose ("lifeweight"): it answers "did imgtokenx move my real, cache-discounted
 // bill since this proxy started", not a raw token count.
 export function renderSessionSummaryFragment(s: StatsPayload): string {
   const measured = s.compressed_requests ?? 0;
@@ -194,7 +194,7 @@ export function renderSessionSummaryFragment(s: StatsPayload): string {
   // Raw count_tokens would over-claim: most of the text baseline would have been
   // cheap cache-reads (~0.1×), not full-price tokens. Weighting both sides at their
   // real cache rate is the only comparison that can't contradict the Saved column.
-  // Input-only: pxpipe never touches output, so lumping it in just dampened the %.
+  // Input-only: imgtokenx never touches output, so lumping it in just dampened the %.
   const baselineW = s.baseline_input_weighted ?? 0; // same context as text, cache-aware
   const actualW = s.actual_input_weighted ?? 0; // what we actually sent, cache-aware
   const outMult = s.pricing_assumptions?.output_multiplier || 5;
@@ -262,7 +262,7 @@ export function renderHeaderFragment(s: StatsPayload, port: number): string {
     ? statTile(
         'Cost per request',
         `$${cAvg.toFixed(4)}`,
-        `vs $${pAvg.toFixed(4)} without pxpipe`,
+        `vs $${pAvg.toFixed(4)} without imgtokenx`,
         cAvg <= pAvg ? 'pos' : 'neg',
         'Average real cost of a request with imaging on vs off (passthrough), measured on your own traffic.',
       )
@@ -465,7 +465,7 @@ export function renderContextMapFragment(
       : `<span class="ctx-big">${-pct}%</span> bigger — images billed as <strong>${kFmt(real)}</strong> input tokens vs <strong>${kFmt(base)}</strong> for ${textNoun}`;
   // Clarifying sub-line. It must match the actual request's cache state: claiming
   // a 0.1× read discount when cache_read===0 would count hypothetical cache as a
-  // pxpipe effect, so cold rows price both paths cold.
+  // imgtokenx effect, so cold rows price both paths cold.
   const subnote = !showCompare
     ? 'Billed tokens count cache discounts (reads at 0.1×) — no trustworthy text baseline for this request yet.'
     : !warm
@@ -484,7 +484,7 @@ export function renderContextMapFragment(
     `<div class="split-col split-img">` +
     `<div class="split-head">Compressed into images <span class="split-sum">${kFmt(totalImagedChars)} chars · ${c.imageCount} page${c.imageCount === 1 ? '' : 's'}</span></div>` +
     (imgRows || `<div class="ctx-row muted-row">nothing imaged this request</div>`) +
-    `<div class="split-note">pxpipe can misread exact values inside images — treat these as gist, not byte-exact.</div>` +
+    `<div class="split-note">imgtokenx can misread exact values inside images — treat these as gist, not byte-exact.</div>` +
     `</div>` +
     `<div class="split-col split-txt">` +
     `<div class="split-head">Kept as plain text <span class="split-sum">byte-exact</span></div>` +
@@ -608,7 +608,7 @@ export function renderLatestFragment(inp: LatestFragmentInput): string {
     // When source pane is open the image appears inside the pairing — don't duplicate it.
     main = showSource ? '' : `<div class="frame"><img src="${imgSrc}" alt="rendered page" /></div>`;
   } else {
-    main = `<div class="empty-note">No images yet — they appear the instant pxpipe compresses a request.</div>`;
+    main = `<div class="empty-note">No images yet — they appear the instant imgtokenx compresses a request.</div>`;
   }
 
   const showBtn = pin != null ? !pinnedEvicted : hasPreview;
@@ -1094,7 +1094,7 @@ export function renderPage(port: number): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>pxpipe — live dashboard</title>
+<title>imgtokenx — live dashboard</title>
 <link rel="icon" href="${FAVICON}" />
 <style>${CSS}</style>
 <script>
@@ -1114,7 +1114,7 @@ export function renderPage(port: number): string {
   <div class="brand">
     <span class="flame-dot"></span>
     <div>
-      <div class="wordmark">pxpipe</div>
+      <div class="wordmark">imgtokenx</div>
       <div class="tagline">Inspect how long context is compressed without sacrificing exact text.</div>
     </div>
   </div>

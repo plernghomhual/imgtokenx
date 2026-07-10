@@ -17,7 +17,7 @@ import type { TrackEvent } from '../src/core/tracker.js';
 import type { StatsPayload, RecentPayload } from '../src/dashboard/types.js';
 
 function makeTmp(): SessionsPaths {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxpipe-dashapi-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-dashapi-'));
   return {
     eventsFile: path.join(dir, 'events.jsonl'),
     sidecarDir: path.join(dir, '4xx-bodies'),
@@ -116,10 +116,10 @@ describe('serveSessionsJson', () => {
 
   it('respects ?project filtering', async () => {
     writeEvents(tmp, [
-      ev({ first_user_sha8: 'aaaaaaaa', cwd: '/Users/me/code/pxpipe' }),
+      ev({ first_user_sha8: 'aaaaaaaa', cwd: '/Users/me/code/imgtokenx' }),
       ev({ first_user_sha8: 'bbbbbbbb', cwd: '/Users/me/code/other' }),
     ]);
-    const res = await dash.serveSessionsJson({ project: 'pxpipe' });
+    const res = await dash.serveSessionsJson({ project: 'imgtokenx' });
     const body = await res.json();
     expect(body.count).toBe(1);
     expect(body.sessions[0].id).toBe('aaaaaaaa');
@@ -183,11 +183,11 @@ describe('serveFragment', () => {
   });
 
   it('renders reader-safe model policy and mutates the single model scope', async () => {
-    const prev = process.env.PXPIPE_MODELS;
-    const prevProfiles = process.env.PXPIPE_READER_PROFILES;
+    const prev = process.env.IMGTOKENX_MODELS;
+    const prevProfiles = process.env.IMGTOKENX_READER_PROFILES;
     try {
-      delete process.env.PXPIPE_MODELS;
-      delete process.env.PXPIPE_READER_PROFILES;
+      delete process.env.IMGTOKENX_MODELS;
+      delete process.env.IMGTOKENX_READER_PROFILES;
       setAllowedModelBases(null); // reset to built-in default (Fable 5 + GPT 5.6)
       const on = await (await dash.serveFragment('models', url, 1234)).text();
       expect(on).toContain('Reader policy');
@@ -228,10 +228,33 @@ describe('serveFragment', () => {
       expect(custom).toContain('text only');
     } finally {
       setAllowedModelBases(null);
-      if (prev === undefined) delete process.env.PXPIPE_MODELS;
-      else process.env.PXPIPE_MODELS = prev;
-      if (prevProfiles === undefined) delete process.env.PXPIPE_READER_PROFILES;
-      else process.env.PXPIPE_READER_PROFILES = prevProfiles;
+      if (prev === undefined) delete process.env.IMGTOKENX_MODELS;
+      else process.env.IMGTOKENX_MODELS = prev;
+      if (prevProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+      else process.env.IMGTOKENX_READER_PROFILES = prevProfiles;
+    }
+  });
+
+  it('persists model choices before changing runtime state', () => {
+    const saved: string[][] = [];
+    const persistentDash = new DashboardState(
+      undefined,
+      undefined,
+      (models) => saved.push([...models]),
+    );
+    setAllowedModelBases(['gpt-5.6']);
+    try {
+      persistentDash.handleModelsToggle('gpt-5.5', true);
+      expect(saved).toEqual([['gpt-5.6', 'gpt-5.5']]);
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.5']);
+
+      const failingDash = new DashboardState(undefined, undefined, () => {
+        throw new Error('disk full');
+      });
+      expect(() => failingDash.handleModelsToggle('claude-fable-5', true)).toThrow('disk full');
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.5']);
+    } finally {
+      setAllowedModelBases(null);
     }
   });
 
@@ -447,10 +470,10 @@ describe('server-observed warmth: text follows actual cache_read', () => {
     const recent = (await dash.serveRecent().json()) as RecentPayload;
     const miss = recent.recent.at(-1)!;
 
-    // pxpipe's image really did miss — it paid the cold create this turn.
+    // imgtokenx's image really did miss — it paid the cold create this turn.
     expect(miss.cache_read).toBe(0);
 
-    // actual = 100 + 20000×1.25 = 25100 (what pxpipe actually paid this turn).
+    // actual = 100 + 20000×1.25 = 25100 (what imgtokenx actually paid this turn).
     expect(miss.actual_input).toBe(25100);
 
     // Cold text baseline: 20000×1.25 + 10000 tail = 35000.
@@ -579,7 +602,7 @@ describe('server-observed warmth: text follows actual cache_read', () => {
 
   it('prices a warm read warm even with NO prior warmth state (post-restart)', async () => {
     // The cache is already warm on Anthropic's side (cr>0), but this process has
-    // never seen the session — exactly the first turn after a pxpipe restart or a
+    // never seen the session — exactly the first turn after an imgtokenx restart or a
     // SESSION_CAP eviction. The OLD code required
     // an in-memory warmthPrev entry, so it fell through to the COLD branch and
     // billed the known-cached prefix the 1.25× CREATE rate — fabricating the

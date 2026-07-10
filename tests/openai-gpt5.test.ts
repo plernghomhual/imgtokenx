@@ -3,7 +3,7 @@
  * Chat Completions transformer, and Responses API transformer.
  */
 import { describe, expect, it } from 'vitest';
-import { isPxpipeSupportedGptModel } from '../src/core/applicability.js';
+import { isImgtokenxSupportedGptModel } from '../src/core/applicability.js';
 import { openAIVisionTokens, resolveVisionCost, transformOpenAIChatCompletions, transformOpenAIResponses } from '../src/core/openai.js';
 
 const enc = new TextEncoder();
@@ -11,22 +11,22 @@ const dec = new TextDecoder();
 
 // ── Task 1: applicability gate ──────────────────────────────────────────────
 
-describe('isPxpipeSupportedGptModel', () => {
+describe('isImgtokenxSupportedGptModel', () => {
   it('matches GPT 5.6 by default; GPT 5.5 is opt-in only', () => {
-    expect(isPxpipeSupportedGptModel('gpt-5')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.5')).toBe(false); // off by default — degrades on imaged context
-    expect(isPxpipeSupportedGptModel('gpt-5.6')).toBe(true);
-    expect(isPxpipeSupportedGptModel('gpt-5-mini')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.6-nano')).toBe(true);
-    expect(isPxpipeSupportedGptModel('gpt-5.6[1m]')).toBe(true); // variant tag stripped
+    expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false); // off by default — degrades on imaged context
+    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true); // variant tag stripped
   });
 
   it('rejects non-GPT-5 models', () => {
-    expect(isPxpipeSupportedGptModel('gpt-4o')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-50')).toBe(false);
-    expect(isPxpipeSupportedGptModel('')).toBe(false);
-    expect(isPxpipeSupportedGptModel(null)).toBe(false);
-    expect(isPxpipeSupportedGptModel(undefined)).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-4o')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-50')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('')).toBe(false);
+    expect(isImgtokenxSupportedGptModel(null)).toBe(false);
+    expect(isImgtokenxSupportedGptModel(undefined)).toBe(false);
   });
 });
 
@@ -760,7 +760,7 @@ describe('GPT history collapse — pins the live request as text (autonomous sha
 // Per OpenAI docs (patch tokenization): flagship gpt-5.4/5.5/5.6 have NO listed
 // multiplier (= 1.0); the 1.62/2.46 values are mini/nano ONLY. And `detail:original`
 // (gpt-5.5's default) gives a 10,000-patch / 6000px budget vs `high`'s 2,500 / 2048px.
-// pxpipe renders dense text, so it must use the LARGER budget or OpenAI downscales
+// imgtokenx renders dense text, so it must use the LARGER budget or OpenAI downscales
 // the image and the text becomes unreadable.
 describe('openAIVisionTokens — gpt-5.x flagship patch model', () => {
   it('flagship multiplier is 1.0, not the mini 1.62', () => {

@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createProxy, parseGatewayHeaders, resolveUpstreams, type ProxyConfig } from './core/proxy.js';
 import { doctorExitCode, formatDoctor, parseInstallArgs, runDoctor, runInstall, runUninstall } from './install.js';
+import { applyConfigFileDefaults, persistModelsConfig } from './node-config.js';
+import { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
+export { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
 import {
   parseExportArgv,
   runExportCore,
@@ -53,41 +56,9 @@ interface RuntimeConfig {
   eventsFile: string;
 }
 
-const DEFAULT_CONFIG_FILE = path.join(os.homedir(), '.config', 'pxpipe', 'config.json');
-
-function normalizeModelsConfig(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    const models = value.map((v) => String(v).trim()).filter(Boolean);
-    return models.length > 0 ? models.join(',') : 'off';
-  }
-  if (typeof value === 'string') return value.trim() || 'off';
-  return undefined;
-}
-
-function applyConfigFileDefaults(): void {
-  const file = process.env.PXPIPE_CONFIG ?? DEFAULT_CONFIG_FILE;
-  if (!fs.existsSync(file)) return;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
-  } catch (e) {
-    console.warn(`[pxpipe] ignored invalid config ${file}: ${(e as Error).message}`);
-    return;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-  const cfg = parsed as Record<string, unknown>;
-
-  // Env wins over file config. The dashboard can still override the scope at
-  // runtime (in-memory) for an emergency live flip.
-  if (process.env.PXPIPE_MODELS === undefined) {
-    const models = normalizeModelsConfig(cfg.models);
-    if (models !== undefined) process.env.PXPIPE_MODELS = models;
-  }
-}
-
 function parseCli(argv: string[]): RuntimeConfig {
   // Only flags accepted are --help and --version. Anything else is an
-  // error — there is exactly ONE way to run pxpipe and the dashboard
+  // error — there is exactly ONE way to run imgtokenx and the dashboard
   // exposes every metric the operator might want to inspect.
   for (const a of argv) {
     if (a === '-h' || a === '--help') {
@@ -99,13 +70,13 @@ function parseCli(argv: string[]): RuntimeConfig {
       process.exit(0);
     }
     if (a.startsWith('-')) {
-      console.error(`[pxpipe] unknown option: ${a}`);
-      console.error(`[pxpipe] this build accepts no flags; run \`pxpipe --help\` for env vars`);
+      console.error(`[imgtokenx] unknown option: ${a}`);
+      console.error(`[imgtokenx] this build accepts no flags; run \`imgtokenx --help\` for env vars`);
       process.exit(2);
     }
   }
   applyConfigFileDefaults();
-  const sharedUpstream = process.env.PXPIPE_UPSTREAM;
+  const sharedUpstream = process.env.IMGTOKENX_UPSTREAM;
   return {
     port: Number(process.env.PORT ?? 47821),
     // Loopback by default; opt into all-interfaces exposure explicitly via HOST.
@@ -113,32 +84,32 @@ function parseCli(argv: string[]): RuntimeConfig {
     upstream: process.env.ANTHROPIC_UPSTREAM ?? sharedUpstream ?? 'https://api.anthropic.com',
     openAIUpstream: process.env.OPENAI_UPSTREAM ?? sharedUpstream ?? 'https://api.openai.com',
     openAIApiKey: process.env.OPENAI_API_KEY,
-    provider: parseProvider(process.env.PXPIPE_PROVIDER),
-    gatewayBaseUrl: process.env.PXPIPE_GATEWAY_BASE_URL,
-    gatewayHeaders: parseGatewayHeaders(process.env.PXPIPE_GATEWAY_HEADERS),
+    provider: parseProvider(process.env.IMGTOKENX_PROVIDER),
+    gatewayBaseUrl: process.env.IMGTOKENX_GATEWAY_BASE_URL,
+    gatewayHeaders: parseGatewayHeaders(process.env.IMGTOKENX_GATEWAY_HEADERS),
     eventsFile:
-      process.env.PXPIPE_LOG ??
-      path.join(os.homedir(), '.pxpipe', 'events.jsonl'),
+      process.env.IMGTOKENX_LOG ??
+      path.join(os.homedir(), '.imgtokenx', 'events.jsonl'),
   };
 }
 
 function parseProvider(v: string | undefined): 'cloudflare-ai-gateway' | undefined {
   if (v === undefined || v === '') return undefined;
   if (v === 'cloudflare-ai-gateway') return v;
-  console.error(`[pxpipe] unknown PXPIPE_PROVIDER: ${v}`);
+  console.error(`[imgtokenx] unknown IMGTOKENX_PROVIDER: ${v}`);
   process.exit(2);
 }
 
 function printHelp(): void {
-  console.log(`pxpipe — token-saving proxy for Claude Code
+  console.log(`imgtokenx — token-saving proxy for Claude Code
 
 Usage:
-  pxpipe                run the proxy (no flags)
-  pxpipe install        install launchd auto-start + shell wrappers
-  pxpipe uninstall      remove launchd auto-start + shell wrappers
-  pxpipe doctor         check launchd, wrappers, healthz, and MCP wiring
-  pxpipe export [...]   render files/diff to PNG pages + cost report (see pxpipe export --help)
-  pxpipe recover rec_*  print exact source text from PXPIPE_RECOVERABLE_DIR
+  imgtokenx                run the proxy (no flags)
+  imgtokenx install        install launchd auto-start + shell wrappers
+  imgtokenx uninstall      remove launchd auto-start + shell wrappers
+  imgtokenx doctor         check launchd, wrappers, healthz, and MCP wiring
+  imgtokenx export [...]   render files/diff to PNG pages + cost report (see imgtokenx export --help)
+  imgtokenx recover rec_*  print exact source text from IMGTOKENX_RECOVERABLE_DIR
 
 The proxy compresses eligible tools, schemas, reminders, tool_results,
 and history; tracks events to disk; and measures real saved_pct via
@@ -158,27 +129,27 @@ Environment:
   HOST                    interface to bind (default 127.0.0.1, loopback only).
                           Set 0.0.0.0 to expose the dashboard off-host — note it
                           is unauthenticated and serves captured request context.
-  PXPIPE_UPSTREAM         upstream API base for every API family
-  ANTHROPIC_UPSTREAM      Anthropic API base; overrides PXPIPE_UPSTREAM
+  IMGTOKENX_UPSTREAM         upstream API base for every API family
+  ANTHROPIC_UPSTREAM      Anthropic API base; overrides IMGTOKENX_UPSTREAM
                            (default https://api.anthropic.com)
-  OPENAI_UPSTREAM         OpenAI API base; overrides PXPIPE_UPSTREAM
+  OPENAI_UPSTREAM         OpenAI API base; overrides IMGTOKENX_UPSTREAM
                            (default https://api.openai.com)
   OPENAI_API_KEY          optional OpenAI key override; otherwise forwarded
-  PXPIPE_PROVIDER         optional: 'cloudflare-ai-gateway' — route both API
+  IMGTOKENX_PROVIDER         optional: 'cloudflare-ai-gateway' — route both API
                           families through one gateway base URL
-  PXPIPE_GATEWAY_BASE_URL gateway base URL (required with PXPIPE_PROVIDER)
-  PXPIPE_GATEWAY_HEADERS  extra upstream headers: JSON object or k=v;k2=v2
-  PXPIPE_MODELS           comma-separated model bases to image (Claude + GPT);
+  IMGTOKENX_GATEWAY_BASE_URL gateway base URL (required with IMGTOKENX_PROVIDER)
+  IMGTOKENX_GATEWAY_HEADERS  extra upstream headers: JSON object or k=v;k2=v2
+  IMGTOKENX_MODELS           comma-separated model bases to image (Claude + GPT);
                           default claude-fable-5,gpt-5.6; off disables
-  PXPIPE_CONFIG           JSON config path (default ~/.config/pxpipe/config.json)
+  IMGTOKENX_CONFIG           JSON config path (default ~/.config/imgtokenx/config.json)
                           supports {"models": [...]} or {"models": "off"}
-  PXPIPE_LOG              JSONL events path (default ~/.pxpipe/events.jsonl)
-  PXPIPE_DUMP_DIR         debug: write every rendered PNG here (what the model
+  IMGTOKENX_LOG              JSONL events path (default ~/.imgtokenx/events.jsonl)
+  IMGTOKENX_DUMP_DIR         debug: write every rendered PNG here (what the model
                           sees); off unless set. Compress arm only.
-  PXPIPE_RECOVERABLE_DIR  debug: write exact source text for rec_* recovery
+  IMGTOKENX_RECOVERABLE_DIR  debug: write exact source text for rec_* recovery
                           refs here; off unless set. May contain secrets.
-  PXPIPE_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
-                          PXPIPE_RECOVERABLE_DIR is also set.
+  IMGTOKENX_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
+                          IMGTOKENX_RECOVERABLE_DIR is also set.
 
 Use with Claude Code:
   ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
@@ -196,12 +167,12 @@ Use with OpenCode provider-prefixed routers:
 // `define`. Under a non-bundled dev runner (tsx) the identifier is not defined;
 // `typeof` returns "undefined" instead of throwing (ECMA-262 §13.5.3), so the
 // guard is safe. `npm_package_version` is only a dev fallback: npm sets it just
-// inside its own run-script env, so for `npx pxpipe-proxy` or a global bin it is
+// inside its own run-script env, so for `npx imgtokenx` or a global bin it is
 // undefined (or reflects the *consumer's* package), never this tool's version.
-declare const __PXPIPE_VERSION__: string | undefined;
+declare const __IMGTOKENX_VERSION__: string | undefined;
 
 function printVersion(): void {
-  const injected = typeof __PXPIPE_VERSION__ === 'string' ? __PXPIPE_VERSION__ : undefined;
+  const injected = typeof __IMGTOKENX_VERSION__ === 'string' ? __IMGTOKENX_VERSION__ : undefined;
   console.log(injected ?? process.env.npm_package_version ?? 'unknown');
 }
 
@@ -495,7 +466,7 @@ class FileTracker implements Tracker {
     } catch (err) {
       if (!this.brokenLogged) {
         console.error(
-          `[pxpipe] FileTracker disabled — cannot open ${this.filePath}: ${(err as Error).message}`,
+          `[imgtokenx] FileTracker disabled — cannot open ${this.filePath}: ${(err as Error).message}`,
         );
         this.brokenLogged = true;
       }
@@ -532,7 +503,7 @@ class FileTracker implements Tracker {
     } catch (err) {
       if (!this.brokenLogged) {
         console.error(
-          `[pxpipe] FileTracker write failed: ${(err as Error).message}`,
+          `[imgtokenx] FileTracker write failed: ${(err as Error).message}`,
         );
         this.brokenLogged = true;
       }
@@ -603,13 +574,13 @@ async function maybeWriteBodySidecar(
   }
 }
 
-// ---- pxpipe export -------------------------------------------------------
+// ---- imgtokenx export -------------------------------------------------------
 
 function printExportHelp(): void {
-  console.log(`pxpipe export — render code/text to PNG pages for compressed LLM context
+  console.log(`imgtokenx export — render code/text to PNG pages for compressed LLM context
 
 Usage:
-  pxpipe export [target ...]    default target is "." (current directory)
+  imgtokenx export [target ...]    default target is "." (current directory)
 
 Targets:
   Files or directories to include. Multiple targets are joined with a header
@@ -629,7 +600,7 @@ Options:
   -h, --help         show this help
 
 Output:
-  <out>/pxpipe-export-<hash>/
+  <out>/imgtokenx-export-<hash>/
     page-001.png ...  rendered image pages
     factsheet.txt     verbatim precision tokens (paths, SHAs, ids, numbers)
     manifest.json     metadata + token report
@@ -641,12 +612,12 @@ Report columns:
   % saved       (text − image) / text × 100
 
 Examples:
-  pxpipe export .                              # whole directory
-  pxpipe export --include "*.ts" src/          # TypeScript files only
-  pxpipe export --git                          # uncommitted changes
-  pxpipe export --diff HEAD~3                  # last 3 commits
-  pxpipe export --open src/                    # render src/, then reveal the folder
-  cat big-file.txt | pxpipe export --stdin
+  imgtokenx export .                              # whole directory
+  imgtokenx export --include "*.ts" src/          # TypeScript files only
+  imgtokenx export --git                          # uncommitted changes
+  imgtokenx export --diff HEAD~3                  # last 3 commits
+  imgtokenx export --open src/                    # render src/, then reveal the folder
+  cat big-file.txt | imgtokenx export --stdin
 `);
 }
 
@@ -700,7 +671,7 @@ function collectFilesFromTargets(
   for (const target of targets) {
     let st: fs.Stats;
     try { st = fs.statSync(target); } catch {
-      console.warn(`[pxpipe export] skipping inaccessible target: ${target}`);
+      console.warn(`[imgtokenx export] skipping inaccessible target: ${target}`);
       continue;
     }
     if (st.isDirectory()) {
@@ -710,7 +681,7 @@ function collectFilesFromTargets(
       const r = readExportTextFile(target, rel, include, exclude);
       if (r.kind === 'ok') files.push({ relPath: rel, content: r.content });
       else if (r.kind !== 'excluded') {
-        console.warn(`[pxpipe export] skipping ${r.kind} file: ${target}`);
+        console.warn(`[imgtokenx export] skipping ${r.kind} file: ${target}`);
       }
     }
   }
@@ -741,7 +712,7 @@ async function collectSource(opts: ExportParsed): Promise<[string, string[]]> {
     const cwd = opts.targets.length > 0 ? opts.targets[0]! : process.cwd();
     const diff = gitRun(['diff', opts.diff], cwd);
     if (diff === null) {
-      console.error(`[pxpipe export] git diff ${opts.diff} failed`);
+      console.error(`[imgtokenx export] git diff ${opts.diff} failed`);
       process.exit(1);
     }
     return [diff, []];
@@ -766,7 +737,7 @@ async function collectSource(opts: ExportParsed): Promise<[string, string[]]> {
       const r = readExportTextFile(full, rel, opts.include, opts.exclude);
       if (r.kind === 'ok') untracked += `\n===== ${rel} =====\n` + r.content;
       else if (r.kind !== 'excluded') {
-        console.warn(`[pxpipe export] skipping ${r.kind} untracked file: ${rel}`);
+        console.warn(`[imgtokenx export] skipping ${r.kind} untracked file: ${rel}`);
       }
     }
     const sourceText = diff + untracked;
@@ -777,7 +748,7 @@ async function collectSource(opts: ExportParsed): Promise<[string, string[]]> {
   const targets = opts.targets.length > 0 ? opts.targets : ['.'];
   const files = collectFilesFromTargets(targets, opts.include, opts.exclude);
   if (files.length === 0) {
-    console.warn('[pxpipe export] no files collected');
+    console.warn('[imgtokenx export] no files collected');
   }
   const sourceText = files
     .map((f) => `===== ${f.relPath} =====\n${f.content}`)
@@ -822,7 +793,7 @@ function printExportReport(opts: ExportParsed, outDir: string, sourceFiles: stri
     ? ` (${tokenReport.factsheetDropped} dropped)`
     : '';
   console.log(
-    `\npxpipe export\n` +
+    `\nimgtokenx export\n` +
     `  out:            ${outDir}\n` +
     `  files:          ${formatNumber(sourceFiles.length)}\n` +
     `  source chars:   ${formatNumber(manifest.sourceChars)}\n` +
@@ -848,8 +819,8 @@ async function runExport(argv: string[]): Promise<void> {
     process.exit(0);
   }
   if (parseResult.kind === 'error') {
-    console.error(`[pxpipe export] ${parseResult.message}`);
-    console.error(`[pxpipe export] run \`pxpipe export --help\` for usage`);
+    console.error(`[imgtokenx export] ${parseResult.message}`);
+    console.error(`[imgtokenx export] run \`imgtokenx export --help\` for usage`);
     process.exit(2);
   }
 
@@ -858,10 +829,10 @@ async function runExport(argv: string[]): Promise<void> {
   // Collect source text
   const [sourceText, sourceFiles] = await collectSource(opts);
 
-  // Unique output dir: <out>/pxpipe-export-XXXXXX/. mkdtemp guarantees a fresh, random
+  // Unique output dir: <out>/imgtokenx-export-XXXXXX/. mkdtemp guarantees a fresh, random
   // directory so concurrent runs never collide and stale page-NNN.png never bleed in.
   fs.mkdirSync(opts.out, { recursive: true });
-  const outDir = fs.mkdtempSync(path.join(opts.out, 'pxpipe-export-'));
+  const outDir = fs.mkdtempSync(path.join(opts.out, 'imgtokenx-export-'));
 
   // Run core export
   const result = await runExportCore(sourceText, {
@@ -886,79 +857,32 @@ async function runExport(argv: string[]): Promise<void> {
   }
 }
 
-/** Default recovery sidecar directory when PXPIPE_RECOVERABLE_DIR is unset.
- *  Exported so the `recover` CLI and src/mcp.ts resolve the same default the
- *  live proxy writes sidecars to (see main() below). */
-export function defaultRecoverableDir(): string {
-  return path.join(os.homedir(), '.pxpipe', 'recovery');
-}
-
-/** Resolve the recovery sidecar dir from PXPIPE_RECOVERABLE_DIR: honors the
- *  off/0/false/no opt-out, falls back to `defaultRecoverableDir()` when
- *  unset. Returns `undefined` when recovery is disabled. Does NOT create the
- *  directory — callers that write to it must mkdir first. */
-export function resolveRecoverableDir(): string | undefined {
-  const env = process.env.PXPIPE_RECOVERABLE_DIR?.trim();
-  if (/^(0|false|off|no)$/i.test(env ?? '')) return undefined;
-  return env || defaultRecoverableDir();
-}
-
-/** Look up the newest recovery source for `id` under `dir` and return its
- *  verbatim contents. Core lookup logic shared by the `pxpipe recover` CLI
- *  and the `pxpipe_recover` MCP tool (src/mcp.ts) — protocol/CLI framing
- *  stays out of this function so both can unit-test the same code path.
- *  Throws a plain `Error` with a human-readable message on any failure. */
-export function recoverById(dir: string, id: string): string {
-  if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
-    throw new Error('expected a recovery id like rec_1234abcd');
-  }
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(dir);
-  } catch (err) {
-    throw new Error(`cannot read recovery dir: ${(err as Error).message}`);
-  }
-  const matches = entries
-    .filter((name) => name.endsWith('.txt') && name.includes(`${id}_`))
-    .map((name) => {
-      const file = path.join(dir, name);
-      const stat = fs.statSync(file);
-      return { file, mtimeMs: stat.mtimeMs, name };
-    })
-    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
-  const match = matches[matches.length - 1];
-  if (!match) {
-    throw new Error(`no recovery source found for ${id}`);
-  }
-  return fs.readFileSync(match.file, 'utf8');
-}
-
 function runRecover(argv: string[]): void {
   const id = argv[0]?.trim();
   if (argv.includes('-h') || argv.includes('--help')) {
-    console.log(`pxpipe recover — print exact source text for a rec_* id
+    console.log(`imgtokenx recover — print exact source text for a rec_* id
 
 Usage:
-  pxpipe recover rec_1234abcd
+  imgtokenx recover rec_1234abcd
 
-Reads from PXPIPE_RECOVERABLE_DIR, defaulting to ~/.pxpipe/recovery when
-unset. Set PXPIPE_RECOVERABLE_DIR=off to confirm recovery is disabled.
+Reads from IMGTOKENX_RECOVERABLE_DIR, defaulting to ~/.imgtokenx/recovery when
+unset. Set IMGTOKENX_RECOVERABLE_DIR=off to confirm recovery is disabled.
 `);
     process.exit(0);
   }
   if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
-    console.error('[pxpipe recover] expected a recovery id like rec_1234abcd');
+    console.error('[imgtokenx recover] expected a recovery id like rec_1234abcd');
     process.exit(2);
   }
   const dir = resolveRecoverableDir();
   if (!dir) {
-    console.error('[pxpipe recover] PXPIPE_RECOVERABLE_DIR is disabled (set to off/0/false/no)');
+    console.error('[imgtokenx recover] IMGTOKENX_RECOVERABLE_DIR is disabled (set to off/0/false/no)');
     process.exit(2);
   }
   try {
     process.stdout.write(recoverById(dir, id));
   } catch (err) {
-    console.error(`[pxpipe recover] ${(err as Error).message}`);
+    console.error(`[imgtokenx recover] ${(err as Error).message}`);
     process.exit(1);
   }
 }
@@ -983,13 +907,13 @@ async function main(): Promise<void> {
   if (argv[0] === 'install') {
     const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
     const { actions } = runInstall(opts);
-    for (const a of actions) console.log(`[pxpipe install] ${a}`);
+    for (const a of actions) console.log(`[imgtokenx install] ${a}`);
     return;
   }
   if (argv[0] === 'uninstall') {
     const opts = { ...parseInstallArgs(argv.slice(1)), repoRoot: packageRoot() };
     const { actions } = runUninstall(opts);
-    for (const a of actions) console.log(`[pxpipe uninstall] ${a}`);
+    for (const a of actions) console.log(`[imgtokenx uninstall] ${a}`);
     return;
   }
   if (argv[0] === 'doctor') {
@@ -1003,31 +927,31 @@ async function main(): Promise<void> {
   // Stats / sessions / cleanup tools live in the dashboard.
   const opts = parseCli(argv);
   // A/B harness passthrough switch (see the `transform` callback below).
-  const forcePassthrough = /^(1|true|yes|on)$/i.test(process.env.PXPIPE_DISABLE ?? '');
+  const forcePassthrough = /^(1|true|yes|on)$/i.test(process.env.IMGTOKENX_DISABLE ?? '');
   if (forcePassthrough) {
-    console.log('[pxpipe] PXPIPE_DISABLE set — passthrough mode (compress=false), still logging usage + baselines');
+    console.log('[imgtokenx] IMGTOKENX_DISABLE set — passthrough mode (compress=false), still logging usage + baselines');
   }
   // Default-on: exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay
   // native text instead of being imaged, so byte-exact content can never be
-  // silently lost to pixel misreads. Opt out with PXPIPE_LOSSLESS_EXACT=0.
-  const losslessExactEnv = process.env.PXPIPE_LOSSLESS_EXACT?.trim();
+  // silently lost to pixel misreads. Opt out with IMGTOKENX_LOSSLESS_EXACT=0.
+  const losslessExactEnv = process.env.IMGTOKENX_LOSSLESS_EXACT?.trim();
   const losslessExact = !/^(0|false|off|no)$/i.test(losslessExactEnv ?? '');
   if (losslessExactEnv !== undefined && !losslessExact) {
-    console.log('[pxpipe] PXPIPE_LOSSLESS_EXACT disabled — exact-risk blocks may be imaged like anything else');
+    console.log('[imgtokenx] IMGTOKENX_LOSSLESS_EXACT disabled — exact-risk blocks may be imaged like anything else');
   }
-  // Debug aid: when PXPIPE_DUMP_DIR is set, persist every rendered PNG this
+  // Debug aid: when IMGTOKENX_DUMP_DIR is set, persist every rendered PNG this
   // process emits, so you can eyeball exactly what the model received (OCR /
   // legibility audits, demo inspection). Best-effort — never affects requests.
-  // Note: the PXPIPE_DISABLE arm renders nothing, so only the compress proxy
+  // Note: the IMGTOKENX_DISABLE arm renders nothing, so only the compress proxy
   // produces files here.
-  let imageDumpDir: string | undefined = process.env.PXPIPE_DUMP_DIR?.trim() || undefined;
+  let imageDumpDir: string | undefined = process.env.IMGTOKENX_DUMP_DIR?.trim() || undefined;
   let imageDumpSeq = 0;
   if (imageDumpDir) {
     try {
       fs.mkdirSync(imageDumpDir, { recursive: true });
-      console.log(`[pxpipe] PXPIPE_DUMP_DIR set — dumping rendered PNGs to ${imageDumpDir}`);
+      console.log(`[imgtokenx] IMGTOKENX_DUMP_DIR set — dumping rendered PNGs to ${imageDumpDir}`);
     } catch (err) {
-      console.warn(`[pxpipe] PXPIPE_DUMP_DIR unusable (${(err as Error).message}) — image dumping disabled`);
+      console.warn(`[imgtokenx] IMGTOKENX_DUMP_DIR unusable (${(err as Error).message}) — image dumping disabled`);
       imageDumpDir = undefined;
     }
   }
@@ -1035,26 +959,26 @@ async function main(): Promise<void> {
   // or anything the exact-risk detector misses) gets its verbatim source
   // dumped to a recovery sidecar, keyed by the rec_* id shown in the render
   // banner, so a model that needs the exact bytes can ask for them instead
-  // of guessing from pixels. Opt out with PXPIPE_RECOVERABLE_DIR=off.
+  // of guessing from pixels. Opt out with IMGTOKENX_RECOVERABLE_DIR=off.
   let recoverableDir: string | undefined = resolveRecoverableDir();
   let recoverableSeq = 0;
   if (recoverableDir) {
     try {
       fs.mkdirSync(recoverableDir, { recursive: true, mode: 0o700 });
-      console.log(`[pxpipe] writing exact recovery sources to ${recoverableDir} (default-on; set PXPIPE_RECOVERABLE_DIR=off to disable)`);
+      console.log(`[imgtokenx] writing exact recovery sources to ${recoverableDir} (default-on; set IMGTOKENX_RECOVERABLE_DIR=off to disable)`);
     } catch (err) {
-      console.warn(`[pxpipe] recovery dir unusable (${(err as Error).message}) — recovery dumping disabled`);
+      console.warn(`[imgtokenx] recovery dir unusable (${(err as Error).message}) — recovery dumping disabled`);
       recoverableDir = undefined;
     }
-  } else if (/^(0|false|off|no)$/i.test(process.env.PXPIPE_RECOVERABLE_DIR?.trim() ?? '')) {
-    console.log('[pxpipe] PXPIPE_RECOVERABLE_DIR disabled — recovery sidecars will not be written');
+  } else if (/^(0|false|off|no)$/i.test(process.env.IMGTOKENX_RECOVERABLE_DIR?.trim() ?? '')) {
+    console.log('[imgtokenx] IMGTOKENX_RECOVERABLE_DIR disabled — recovery sidecars will not be written');
   }
   // Transform options pass through empty — the proxy uses the DEFAULTS
   // baked into transform.ts. There are no behavior toggles: system slab,
   // reminders, tool_results, and history compression all run
   // unconditionally; the per-block break-even gate decides per-call
   // whether to actually image each piece. The function-form `transform`
-  // below is ONLY a kill switch (PXPIPE_DISABLE / dashboard toggle →
+  // below is ONLY a kill switch (IMGTOKENX_DISABLE / dashboard toggle →
   // compress:false); on the active path it returns {}, so the gate always
   // runs on static DEFAULTS — charsPerToken=4, priorWarm*=0 — which leaves
   // the warm-baseline and anti-flapping burn terms inert. That is
@@ -1077,7 +1001,7 @@ async function main(): Promise<void> {
   const dashboard = new DashboardState({
     eventsFile: opts.eventsFile,
     sidecarDir: bodySidecarDir,
-  });
+  }, undefined, persistModelsConfig);
   // Seed the "recent requests" table from the JSONL log so a process restart
   // doesn't reset what you can see in the UI. Best-effort; ignored on error.
   await dashboard.replay(opts.eventsFile).catch(() => {});
@@ -1096,9 +1020,9 @@ async function main(): Promise<void> {
     //      when upstream is unhealthy without restarting.
     //   2. Otherwise use DEFAULTS in transform.ts for break-even gating.
     transform: () => {
-      // A/B harness: PXPIPE_DISABLE=1 forces passthrough (compress=false) for the
+      // A/B harness: IMGTOKENX_DISABLE=1 forces passthrough (compress=false) for the
       // whole process, so the "normal" arm can be scripted on its own port while
-      // still logging real usage + count_tokens baselines to its own PXPIPE_LOG.
+      // still logging real usage + count_tokens baselines to its own IMGTOKENX_LOG.
       // (The dashboard kill switch does the same thing at runtime.)
       if (forcePassthrough || !dashboard.getCompressionEnabled()) return { compress: false };
       // Active path: use DEFAULTS in transform.ts for break-even gating.
@@ -1111,7 +1035,7 @@ async function main(): Promise<void> {
       // Feed the dashboard BEFORE tracker.emit — toTrackEvent strips
       // info.firstImagePng, so capturing has to happen on the raw event.
       dashboard.update(e);
-      // Debug: persist this request's rendered PNGs (see PXPIPE_DUMP_DIR above).
+      // Debug: persist this request's rendered PNGs (see IMGTOKENX_DUMP_DIR above).
       // Filenames sort by request order: <stamp>_reqNNN_<model>_pNN.png.
       if (imageDumpDir && e.info?.imagePngs && e.info.imagePngs.length > 0) {
         const seq = ++imageDumpSeq;
@@ -1123,7 +1047,7 @@ async function main(): Promise<void> {
           try {
             fs.writeFileSync(path.join(imageDumpDir, name), pngs[i]!);
           } catch (err) {
-            console.warn(`[pxpipe] PNG dump write failed: ${(err as Error).message}`);
+            console.warn(`[imgtokenx] PNG dump write failed: ${(err as Error).message}`);
             break; // dir vanished / full — stop hammering it this request
           }
         }
@@ -1141,7 +1065,7 @@ async function main(): Promise<void> {
             fs.writeFileSync(path.join(recoverableDir, name), rec.text);
             written++;
           } catch (err) {
-            console.warn(`[pxpipe] recovery dump write failed: ${(err as Error).message}`);
+            console.warn(`[imgtokenx] recovery dump write failed: ${(err as Error).message}`);
             break;
           }
         }
@@ -1172,14 +1096,14 @@ async function main(): Promise<void> {
         const trimmed = e.errorBody.length > 400
           ? e.errorBody.slice(0, 400) + '…'
           : e.errorBody;
-        console.warn(`[pxpipe ${e.status}] upstream body: ${trimmed}`);
+        console.warn(`[imgtokenx ${e.status}] upstream body: ${trimmed}`);
       }
 
       // Canary: surface unknown tag-shaped blocks so a Claude Code release
       // that adds a new dynamic tag is caught within hours.
       if (e.info?.unknownStaticTags && e.info.unknownStaticTags.length > 0) {
         console.warn(
-          `[pxpipe warn] unknown tag(s) in static slab: ${e.info.unknownStaticTags.join(', ')}  ` +
+          `[imgtokenx warn] unknown tag(s) in static slab: ${e.info.unknownStaticTags.join(', ')}  ` +
             `— may need to add to DYNAMIC_BLOCK_TAGS (per-turn) or KNOWN_STATIC_TAGS (static) in src/core/transform.ts`,
         );
       }
@@ -1201,7 +1125,7 @@ async function main(): Promise<void> {
         // it (still too big to inline). We never lose the sha8 / error_body.
       }
 
-      // Persistent JSONL event for offline analysis (pxpipe stats etc.).
+      // Persistent JSONL event for offline analysis (imgtokenx stats etc.).
       tracker.emit(toTrackEvent(e));
     },
   };
@@ -1226,7 +1150,7 @@ async function main(): Promise<void> {
         await writeWebResponse(webRes, res);
       })
       .catch((err) => {
-        console.error('[pxpipe] handler error:', err);
+        console.error('[imgtokenx] handler error:', err);
         if (!res.headersSent) res.statusCode = 500;
         res.end();
       });
@@ -1237,19 +1161,19 @@ async function main(): Promise<void> {
   const isLoopbackHost =
     opts.host === '127.0.0.1' || opts.host === 'localhost' || opts.host === '::1';
   server.listen(opts.port, opts.host, () => {
-    console.log(`[pxpipe] listening on http://${displayHost}:${opts.port}`);
+    console.log(`[imgtokenx] listening on http://${displayHost}:${opts.port}`);
     if (!isLoopbackHost) {
       console.warn(
-        `[pxpipe] WARNING: bound to ${opts.host} — the unauthenticated dashboard ` +
+        `[imgtokenx] WARNING: bound to ${opts.host} — the unauthenticated dashboard ` +
           `(captured request context + kill switch) is reachable off-host. ` +
           `Unset HOST to restrict to loopback.`,
       );
     }
     const routes = resolveUpstreams(config);
-    console.log(`[pxpipe] anthropic upstream → ${routes.anthropic}`);
-    console.log(`[pxpipe] openai upstream → ${routes.openai}`);
-    console.log(`[pxpipe] tracking events → ${opts.eventsFile}`);
-    console.log(`[pxpipe] dashboard → http://127.0.0.1:${opts.port}/`);
+    console.log(`[imgtokenx] anthropic upstream → ${routes.anthropic}`);
+    console.log(`[imgtokenx] openai upstream → ${routes.openai}`);
+    console.log(`[imgtokenx] tracking events → ${opts.eventsFile}`);
+    console.log(`[imgtokenx] dashboard → http://127.0.0.1:${opts.port}/`);
   });
 
   // server.close() only stops accepting new connections and waits for open
@@ -1261,11 +1185,11 @@ async function main(): Promise<void> {
   let shuttingDown = false;
   const shutdown = (sig: string) => {
     if (shuttingDown) {
-      console.log(`[pxpipe] ${sig} again — forcing exit`);
+      console.log(`[imgtokenx] ${sig} again — forcing exit`);
       process.exit(130);
     }
     shuttingDown = true;
-    console.log(`[pxpipe] ${sig} — shutting down`);
+    console.log(`[imgtokenx] ${sig} — shutting down`);
     // Flush+close the tracker so we don't drop the last few events on exit.
     if (tracker instanceof FileTracker) tracker.close();
     server.close(() => process.exit(0));
@@ -1284,6 +1208,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('[pxpipe] fatal:', err);
+  console.error('[imgtokenx] fatal:', err);
   process.exit(1);
 });

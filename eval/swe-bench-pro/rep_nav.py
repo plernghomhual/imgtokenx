@@ -4,7 +4,7 @@ ON/OFF split on this instance (ON fail, OFF pass) at n=1. Re-run the ON
 arm 3 more times to see whether the fail reproduces or was agentic noise.
 
 Separation by construction: dedicated proxy on :47825 with its own event
-log (~/.pxpipe/events-nav-rep.jsonl) so the bench arm logs stay clean.
+log (~/.imgtokenx/events-nav-rep.jsonl) so the bench arm logs stay clean.
 Reuses the bench git cache; grading happens afterwards with the official
 harness against the already-cached navidrome Docker image.
 """
@@ -17,7 +17,7 @@ CLAUDE = os.path.expanduser("~/.claude/local/claude")
 CCI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib", "cci.py")
 MODEL = "claude-fable-5"
 PORT = 47825
-LOG = os.path.expanduser("~/.pxpipe/events-nav-rep.jsonl")
+LOG = os.path.expanduser("~/.imgtokenx/events-nav-rep.jsonl")
 TIMEOUT = 1800
 REPS = 3
 
@@ -50,9 +50,9 @@ def ensure_proxy():
     if str(PORT) in r.stdout:
         return
     root = os.path.expanduser("~/Downloads/repos/pixelpipe")
-    env = dict(os.environ, PORT=str(PORT), PXPIPE_LOG=LOG)
+    env = dict(os.environ, PORT=str(PORT), IMGTOKENX_LOG=LOG)
     subprocess.Popen(["node", "bin/cli.js"], cwd=root, env=env,
-                     stdout=open(f"/tmp/pxpipe-nav-rep.log", "a"),
+                     stdout=open(f"/tmp/imgtokenx-nav-rep.log", "a"),
                      stderr=subprocess.STDOUT, start_new_session=True)
     time.sleep(3)
     r = sh(f"lsof -nP -iTCP:{PORT} -sTCP:LISTEN | tail -1")

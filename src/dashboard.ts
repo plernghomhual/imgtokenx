@@ -1,7 +1,7 @@
 /**
  * Live dashboard for the Node host. Serves the main HTML page and JSON
  * polling endpoints. All "/api/*.json" endpoints recompute from disk on
- * every request — pxpipe doesn't have a query layer, but a 1.5 MB JSONL
+ * every request — imgtokenx doesn't have a query layer, but a 1.5 MB JSONL
  * streams in well under 100 ms.
  *
  * Legacy live-poll endpoints (left in place, the existing tick() loop uses
@@ -15,7 +15,7 @@
  * Session endpoints (read-only telemetry — no destructive operations):
  *
  *   GET  /api/sessions.json          → grouped sessions (sha8 + project + counts)
- *   GET  /api/stats.json             → full-history aggregate (formerly `pxpipe stats`)
+ *   GET  /api/stats.json             → full-history aggregate (formerly `imgtokenx stats`)
  *
  * Metric formulas and HTML shell originally ported from the Python reference
  * implementation (deleted after live cache-rate validation hit 98.7% by tokens).
@@ -161,7 +161,7 @@ export interface RecentRow {
  *      cold_tail = baseline_tokens − cacheable        (always-cold input on both paths)
  *      warm      = did THIS request read a warm cache? (cache_read > 0)
  *      The text counterfactual is WARMTH-AWARE and grounded in OBSERVED cache
- *      state: pxpipe images the cached prefix in place (moves the caller's
+ *      state: imgtokenx images the cached prefix in place (moves the caller's
  *      cache_control marker onto the image), so image and text share cache fate.
  *      cache_read>0 ⇒ a warm cache existed for both paths; cache_read===0 ⇒ cold
  *      for both, so text re-creates its prefix too (no phantom warm read on a
@@ -216,7 +216,7 @@ interface SessionTotals {
   // the headline; the weighted $ figures are diagnostics below it.
   rawActualTokens: number;
   rawBaselineTokens: number;
-  // Raw output tokens (the model's reply). pxpipe does NOT compress output, so
+  // Raw output tokens (the model's reply). imgtokenx does NOT compress output, so
   // the HONEST total reduction adds it to BOTH sides:
   //   1 − (rawActual + rawOutput) / (rawBaseline + rawOutput)
   // Headlining input-only would cherry-pick the part that compresses.
@@ -244,14 +244,14 @@ interface Totals {
    *  with a usage block. For measured rows: cache-aware baseline (what the
    *  unproxied path would have billed). For unmeasured/probe-failed rows:
    *  actual_input_eff (best available estimate — these rows didn't run
-   *  pxpipe or we can't measure what it would have cost, so the
+   *  imgtokenx or we can't measure what it would have cost, so the
    *  counterfactual ≈ actual).
    *
    *  This is the right denominator for "share of bill saved": dividing
    *  by what-you-would-have-paid is bounded at 100% (you can't save more
    *  than you would have spent). Dividing by what-you-DID-pay is not
    *  bounded — a single big cold-miss compressed request can make
-   *  saved/actual exceed 100% because pxpipe shrunk the actual to
+   *  saved/actual exceed 100% because imgtokenx shrunk the actual to
    *  near zero. */
   allBaselineEquivalentWeighted: number;
   /** Sum of weighted ACTUAL input tokens across the same all-rows set.
@@ -362,7 +362,7 @@ function isOpenAIEvent(path: string | undefined): boolean {
  *  cached subset (`cachedTokens`), there is no cache-create premium, the cached
  *  prefix reads at ~0.1×, and the baseline is the measured `baselineImagedTokens`
  *  (o200k text-token cost of the imaged content) vs the vision-token `imageTokens`
- *  pxpipe actually paid — not a count_tokens probe. No per-session warmth state:
+ *  imgtokenx actually paid — not a count_tokens probe. No per-session warmth state:
  *  OpenAI caching is automatic/prefix-based and the discount is already folded
  *  into the cached-input rate. See src/core/openai-savings.ts. */
 function gptEff(args: {
@@ -498,13 +498,16 @@ export class DashboardState {
    *  path. Lets unit tests run in tens of ms instead of scanning hundreds of
    *  the developer's actual Claude Code session files. */
   private readonly ccMapFn: () => Promise<Map<string, ClaudeCodeSessionRef>>;
+  private readonly persistModels: ((models: readonly string[]) => void) | undefined;
 
   constructor(
     paths?: SessionsPaths,
     ccMapFn?: () => Promise<Map<string, ClaudeCodeSessionRef>>,
+    persistModels?: (models: readonly string[]) => void,
   ) {
     this.paths = paths;
     this.ccMapFn = ccMapFn ?? (() => claudeCodeMap());
+    this.persistModels = persistModels;
   }
 
   /** Stash every rendered image into the ring (called from onRequest with the
@@ -631,7 +634,7 @@ export class DashboardState {
       // Weighted INPUT cost we actually paid this turn.
       actualInputEff = haveUsage ? computeActualInputEff(inp, cc, cr) : 0;
 
-      // pxpipe only reduces input by imaging the static slab. An UNCOMPRESSED
+      // imgtokenx only reduces input by imaging the static slab. An UNCOMPRESSED
       // row had its body forwarded untouched, so its unproxied counterfactual
       // IS exactly what it paid — crediting the cache-modeled baseline there
       // (which prices the prefix at the cache-READ rate) fabricates savings on
@@ -639,7 +642,7 @@ export class DashboardState {
       // actually compressed AND we have a usable probe.
       creditSaving = haveBaseline && haveUsage && compressed;
 
-      // Cache-aware, server-observed baseline. INVARIANT: pxpipe is credited ONLY
+      // Cache-aware, server-observed baseline. INVARIANT: imgtokenx is credited ONLY
       // for the text it imaged away — NEVER for caching. The imagined text path
       // gets the same observed cache state as the actual request: cr>0 means warm
       // for both, cr===0 means cold for both. No wall-clock-only inference.
@@ -751,10 +754,10 @@ export class DashboardState {
       this.totals.outputWeighted += outputEquiv;
     }
     // All-rows COUNTERFACTUAL spend, ungated on the probe — the honest
-    // denominator for "did pxpipe move my real bill". Measured rows
+    // denominator for "did imgtokenx move my real bill". Measured rows
     // contribute their cache-aware baseline (what the unproxied path
     // would have billed); unmeasured/probe-failed/passthrough rows
-    // contribute their actual input (pxpipe either didn't run or we
+    // contribute their actual input (imgtokenx either didn't run or we
     // can't measure the counterfactual, so actual ≈ baseline). This
     // keeps the ratio bounded at 100% — you can't save more than you
     // would have paid.
@@ -1139,13 +1142,13 @@ export class DashboardState {
     // estimation), but the denominator MUST include every request the user
     // actually paid for — including passthrough rows, probe-failed rows,
     // and untransformed turns the gate said no to. Otherwise the headline
-    // answers "did pxpipe help on the rows where it ran" instead of
-    // "did pxpipe move my real bill". The first is a cherry-pick.
+    // answers "did imgtokenx help on the rows where it ran" instead of
+    // "did imgtokenx move my real bill". The first is a cherry-pick.
     const allBaselineEquiv = this.totals.allBaselineEquivalentWeighted;
     const allActual = this.totals.allActualInputWeighted;
     const allOutput = this.totals.allOutputWeighted;
     // Denominator = counterfactual all-rows bill: what the user would have
-    // paid with no pxpipe. Bounded ratio at 100%; a single cold-miss
+    // paid with no imgtokenx. Bounded ratio at 100%; a single cold-miss
     // compressed request on an otherwise empty session shows ~99% saved,
     // not 280%.
     const allCounterfactualBill = allBaselineEquiv + allOutput;
@@ -1202,7 +1205,7 @@ export class DashboardState {
       // Honest "share of total bill saved" — measured-rows numerator over
       // ALL paid requests in the denominator (compressed + passthrough +
       // probe-failed). This is the number users actually want when they
-      // ask "is pxpipe helping". Negative when flap-pollution from
+      // ask "is imgtokenx helping". Negative when flap-pollution from
       // passthrough turns exceeds the collapse win on measured turns.
       saved_pct_of_all_spend: round1(pctAllSpend),
       all_baseline_equivalent_weighted: Math.round(allBaselineEquiv),
@@ -1412,7 +1415,7 @@ export class DashboardState {
   }
 
   /** GET /api/stats.json — full-history aggregate. Migrated from the
-   *  former `pxpipe stats` CLI. */
+   *  former `imgtokenx stats` CLI. */
   async serveApiStats(): Promise<Response> {
     if (!this.paths) return notConfigured('stats');
     const result = await aggregateEventsFile(this.paths.eventsFile);
@@ -1438,14 +1441,14 @@ export class DashboardState {
     return jsonResponse({ compression_enabled: on });
   }
 
-  /** POST /fragments/models — add/remove ONE model (Claude or GPT) from the
-   *  runtime compress scope. In-memory only; restart resets to the PXPIPE_MODELS
-   *  env / built-in default. The model checks read this live. */
+  /** POST /fragments/models — add/remove one model from the compression scope. */
   handleModelsToggle(model: string, on: boolean): void {
     const next = new Set(getAllowedModelBases());
     if (on) next.add(model);
     else next.delete(model);
-    setAllowedModelBases([...next]);
+    const models = [...next];
+    this.persistModels?.(models);
+    setAllowedModelBases(models);
   }
 }
 

@@ -1,4 +1,4 @@
-name = "pxpipe"
+name = "imgtokenx"
 main = "src/worker.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat_v2"]
@@ -17,5 +17,5 @@ FONT_PX = "15"
 
 # Or attach a custom route:
 # routes = [
-#   { pattern = "pxpipe.example.com/*", zone_name = "example.com" }
+#   { pattern = "imgtokenx.example.com/*", zone_name = "example.com" }
 # ]

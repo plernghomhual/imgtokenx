@@ -1,12 +1,12 @@
 export {
   getAllowedModelBases,
   getConfiguredModelBases,
-  isPxpipeSupportedGptModel,
-  isPxpipeSupportedModel,
+  isImgtokenxSupportedGptModel,
+  isImgtokenxSupportedModel,
   setAllowedModelBases,
   shouldTransformAnthropicMessages,
-  type PxpipeApplicabilityInput,
-  type PxpipeApplicabilityReason,
+  type ImgtokenxApplicabilityInput,
+  type ImgtokenxApplicabilityReason,
 } from './applicability.js';
 export {
   buildCountTokensBodies,
@@ -18,17 +18,17 @@ export {
 export {
   transformAnthropicMessages,
   renderTextToImages,
-  type PxpipeOptions,
-  type PxpipeReason,
-  type PxpipeTransformInput,
-  type PxpipeTransformResult,
+  type ImgtokenxOptions,
+  type ImgtokenxReason,
+  type ImgtokenxTransformInput,
+  type ImgtokenxTransformResult,
   type RenderTextToImagesOptions,
   type RenderedTextImage,
   type RenderTextToImagesResult,
 } from './library.js';
 export {
   transformRequest,
-  type TransformInfo as PxpipeTransformInfo,
+  type TransformInfo as ImgtokenxTransformInfo,
   type TransformOptions,
   type KeepSharpBlock,
   type RecoverableBlock,

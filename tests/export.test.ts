@@ -24,7 +24,7 @@ import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_CONTENT_COLS, MAX_HEIGHT_PX } from
 let tmpDir = '';
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxpipe-export-test-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-export-test-'));
 });
 
 afterEach(() => {
@@ -403,7 +403,7 @@ describe('runExportCore integration', () => {
   });
 
   it('manifest.pages has correct shape for each rendered page', async () => {
-    const sourceText = 'hello pxpipe export\n'.repeat(30);
+    const sourceText = 'hello imgtokenx export\n'.repeat(30);
     const result = await runExportCore(sourceText, {
       sourceFiles: [],
       cols: DEFAULT_EXPORT_COLS,

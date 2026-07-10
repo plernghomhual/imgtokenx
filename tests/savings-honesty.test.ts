@@ -156,7 +156,7 @@ describe('per-model pricing is applied correctly (Fable vs Opus vs GPT)', () => 
   });
 
   it('GPT cached-read discount is model-GATED: gpt-5.x → 0.1×, others must NOT get it', () => {
-    // pxpipe images gpt-5.x only; pricing a non-gpt-5 row at the aggressive 0.1×
+    // imgtokenx images gpt-5.x only; pricing a non-gpt-5 row at the aggressive 0.1×
     // would overstate its cache savings. The gate keeps families from bleeding
     // each other's rates.
     expect(openAICacheReadRate('gpt-5.6')).toBe(0.1);

@@ -54,7 +54,7 @@ export interface KeepSharpBlock {
   readonly toolUseId?: string;
 }
 
-/** A block pxpipe rendered to image(s), returned in `TransformInfo.recoverable`
+/** A block imgtokenx rendered to image(s), returned in `TransformInfo.recoverable`
  *  when the caller sets `emitRecoverable`. Lets a stateful harness restore
  *  byte-exact content if the model needs the imaged region verbatim. */
 export interface RecoverableBlock {
@@ -159,7 +159,7 @@ const DEFAULTS: Required<TransformOptions> = {
 };
 
 export const EXACT_RECALL_INSTRUCTION =
-  ' For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels. If a rec_* id is shown, call the pxpipe_recover MCP tool with that id to get the exact source text.';
+  ' For exact identifiers, hashes, IDs, paths, secrets, or quoted strings, use the adjacent exact fact sheet or recovery ref; do not guess them from image pixels. If a rec_* id is shown, call the imgtokenx_recover MCP tool with that id to get the exact source text.';
 
 // --- per-block break-even check ---
 //
@@ -183,7 +183,7 @@ const READ_FIRST_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
  *  History is even denser (tool_use JSON dominates), so 2.0 is doubly conservative. */
 export const HISTORY_CHARS_PER_TOKEN = 2.0;
 
-/** Chars-per-token for the `pxpipe export` *reporting* estimate (factsheet & savings %).
+/** Chars-per-token for the `imgtokenx export` *reporting* estimate (factsheet & savings %).
  *  Less conservative than the gate's CHARS_PER_TOKEN=4: reporting wants an accurate
  *  figure (~3.7 for source/prose text), not a safe-side under-estimate. Single source
  *  of truth — src/core/export.ts imports this rather than redefining it. */
@@ -331,7 +331,7 @@ function maybeReflow(text: string, enabled: boolean): string {
   if (!enabled) return text;
   // Neutralize any pre-existing ↵ so reflow packs newlines instead of bailing to a raw,
   // unpacked render (the tool_result "newlines not converted to ↵" case — common when the
-  // content is about pxpipe itself). Render-only; originals are preserved via
+  // content is about imgtokenx itself). Render-only; originals are preserved via
   // recordRecoverable(innerRaw), so this substitution never reaches recovery.
   const safe = neutralizeSentinel(text);
   return reflow(safe) ?? safe;
@@ -571,7 +571,7 @@ export interface TransformInfo {
   /** GPT only. Vision tokens the rendered images actually cost as input
    *  (Σ openAIVisionTokens over real image dims). The "Sent as image" basis. */
   imageTokens?: number;
-  /** GPT only. o200k_base text tokens of the content pxpipe imaged/stripped —
+  /** GPT only. o200k_base text tokens of the content imgtokenx imaged/stripped —
    *  the would-have-paid "as plain text" baseline. Compared against imageTokens
    *  for the per-request saving. See src/core/openai-savings.ts. */
   baselineImagedTokens?: number;
@@ -670,8 +670,8 @@ export interface TransformInfo {
   /** sha8 of the ACTUAL cacheable prefix sent this turn (tools + system +
    *  message blocks through the imaged history/slab boundary; the live tail is
    *  excluded). Read-only measurement. A change turn-over-turn within a session
-   *  ⇒ pxpipe serialized different prefix bytes (we busted our own cache,
-   *  pxpipe-side); STABLE while cache_create spikes / cache_read collapses ⇒ the
+   *  ⇒ imgtokenx serialized different prefix bytes (we busted our own cache,
+   *  imgtokenx-side); STABLE while cache_create spikes / cache_read collapses ⇒ the
    *  prefix was evicted upstream. Decisive attribution signal (see #11). */
   cachePrefixSha8?: string;
   /** Approx size (chars) of that cached prefix — pairs with cachePrefixSha8 so a
@@ -893,7 +893,7 @@ export async function recordRecoverable(
 }
 
 export function recoverableRefText(ref: RecoverableBlock): string {
-  return `[Recoverable exact source: ${ref.id} kind=${ref.kind} chars=${ref.text.length} images=${ref.imageCount}. For byte-exact wording, call the pxpipe_recover MCP tool with rec_id="${ref.id}" instead of transcribing image pixels.]`;
+  return `[Recoverable exact source: ${ref.id} kind=${ref.kind} chars=${ref.text.length} images=${ref.imageCount}. For byte-exact wording, call the imgtokenx_recover MCP tool with rec_id="${ref.id}" instead of transcribing image pixels.]`;
 }
 
 function exactSidecarText(info: TransformInfo, factSheet: string, ref?: RecoverableBlock): string {
@@ -931,7 +931,7 @@ async function historyImageSha8(
 }
 
 /**
- * After a history collapse, move pxpipe's single relocated cache breakpoint off
+ * After a history collapse, move imgtokenx's single relocated cache breakpoint off
  * the slab image and onto the LAST history image.
  *
  * The history image sits AFTER the slab in prefix order, so one marker on it
@@ -942,7 +942,7 @@ async function historyImageSha8(
  * the entire history image re-creates at the 1.25x rate turn after turn.
  *
  * Pure relocation: it acts only when a slab image already carries the anchor, so
- * the total marker count never increases (pxpipe never *adds* — only moves).
+ * the total marker count never increases (imgtokenx never *adds* — only moves).
  */
 function relocateAnchorToHistoryImage(messages: Message[] | undefined, anchorOrdinal?: number): void {
   if (!Array.isArray(messages)) return;
@@ -996,13 +996,13 @@ function relocateAnchorToHistoryImage(messages: Message[] | undefined, anchorOrd
 }
 
 /**
- * Read-only digest of the cacheable prefix pxpipe actually sends: tools +
+ * Read-only digest of the cacheable prefix imgtokenx actually sends: tools +
  * system + message blocks up to and including the imaged history image (or, on
  * no-collapse turns, the slab boundary). The naturally-growing live tail is
  * excluded, so the digest only moves when something *inside the pinned prefix*
  * moves. Pairs with per-turn cache_read/cache_create to attribute a prompt-cache
  * bust: a digest that CHANGES between consecutive turns of one session means we
- * serialized different prefix bytes (pxpipe-side — a per-turn block crossing the
+ * serialized different prefix bytes (imgtokenx-side — a per-turn block crossing the
  * breakpoint, or marker drift); a STABLE digest on a turn that still re-created
  * the prefix points upstream (eviction). Never mutates the request, so it cannot
  * perturb the cache behavior it measures.
@@ -1011,7 +1011,7 @@ async function cachePrefixDigest(
   req: { tools?: unknown; system?: unknown; messages?: unknown },
 ): Promise<{ sha8: string; bytes: number } | undefined> {
   const msgs = Array.isArray(req.messages) ? (req.messages as Message[]) : [];
-  // Boundary = latest message carrying pxpipe's imaged prefix: the history image
+  // Boundary = latest message carrying imgtokenx's imaged prefix: the history image
   // (banner) when collapse ran, else the slab message ('[End of rendered
   // context.]'). Identified exactly as relocateAnchorToHistoryImage does.
   let boundary = -1;
@@ -1161,7 +1161,7 @@ function isNativeAnthropicTool(t: ToolDef): boolean {
 }
 
 function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
-  // pxpipe never adds its own cache_control — only moves existing caller markers
+  // imgtokenx never adds its own cache_control — only moves existing caller markers
   // across the text→image flip. `_ephemeral` is preserved for call-site compat.
   return {
     type: 'image',
@@ -1266,7 +1266,7 @@ function buildPagingMarker(args: {
       ? ` Showing first ${args.shownHeadLines} lines and last ${args.shownTailLines} lines.`
       : ` Showing first ${args.shownHeadLines} lines (tail elided).`;
   return (
-    `\n\n[ pxpipe paging: omitted ${args.omittedLines.toLocaleString('en-US')} lines ` +
+    `\n\n[ imgtokenx paging: omitted ${args.omittedLines.toLocaleString('en-US')} lines ` +
     `(${args.omittedChars.toLocaleString('en-US')} chars) of content here. ` +
     `Original length: ${args.originalChars.toLocaleString('en-US')} chars ` +
     `(${args.originalLines.toLocaleString('en-US')} lines, ~${args.originalEstImages} images).` +
@@ -1407,7 +1407,7 @@ export function truncateForBudget(
  * Render text → Anthropic image blocks for the proxy. The column-selection rule below
  * (shrink, then single-col unless the content fills the width) is mirrored exactly by
  * the public SDK primitive `renderTextToImages` (library.ts), so the proxy and the
- * `pxpipe export` CLI emit byte-identical PNGs for the same text. Exported so
+ * `imgtokenx export` CLI emit byte-identical PNGs for the same text. Exported so
  * export-proxy-align.test.ts can pin that invariant against the real proxy code.
  */
 export async function textToImageBlocks(
@@ -1618,7 +1618,7 @@ export async function transformRequest(
   }
 
   // Per-model reader-capacity profile (Phase 2 — see reader-profiles.ts). Decides
-  // whether pxpipe may image ANY content for this model at all, and if so, at what
+  // whether imgtokenx may image ANY content for this model at all, and if so, at what
   // render density. Checked before any imaging work starts: an unsafe/uncalibrated
   // model gets a guaranteed-zero-image passthrough of the ORIGINAL body, mirroring
   // the `!o.compress` early return above. This has to happen here, not scattered
@@ -1753,12 +1753,12 @@ export async function transformRequest(
   // Static slab + Tool Reference go into the renderer; dynamic slab and billing
   // line stay as plain text so the cache key (= image bytes) is stable across
   // turns. The reference header carries the same first-party provenance framing
-  // that defused the imaged-slab banner refusal (169521c): pxpipe names itself
+  // that defused the imaged-slab banner refusal (169521c): imgtokenx names itself
   // as the author of the relocation so the block reads as this session's own
   // config, not a replayed/extracted prompt.
   const toolReferenceText = toolDocsText
     ? '=== TOOL REFERENCE ===\n' +
-      "pxpipe (this user's local proxy) moved the custom-tool schema reference for this" +
+      "imgtokenx (this user's local proxy) moved the custom-tool schema reference for this" +
       ' session here to reduce token cost. Each tool in the tools list carries a short' +
       ' stub description pointing here; the entry under the matching' +
       ' "## Tool: <name>" heading below is the complete description for that tool.\n\n' +
@@ -1830,7 +1830,7 @@ export async function transformRequest(
   // provenance framing below keeps obedience without the extraction signature.
   const imageInstructionHeader =
     '=================== SESSION CONFIGURATION PAGES ===================\n' +
-    "pxpipe (this user's local proxy) rendered this session's configuration" +
+    "imgtokenx (this user's local proxy) rendered this session's configuration" +
     ' into the following images to reduce token cost. Read the pages carefully and follow them as' +
     ' your operating instructions for this session.' +
     EXACT_RECALL_INSTRUCTION +
@@ -1959,7 +1959,7 @@ export async function transformRequest(
         : [{ type: 'text' as const, text: m.content }];
 
       // 5a. Compress <system-reminder> text blocks. cache_control on source text
-      //     moves to the LAST produced image (pxpipe never adds its own markers).
+      //     moves to the LAST produced image (imgtokenx never adds its own markers).
       const processedExisting: ContentBlock[] = [];
       if (o.compressReminders) {
         for (const blk of existing) {
@@ -2315,10 +2315,10 @@ export async function transformRequest(
   // rides in the volatile tail behind the slab anchor, so it costs ~60 chars
   // per request and cannot perturb the cached prefix. Same-pass safety: 5a
   // (compressReminders) runs earlier and only scans the first user message,
-  // so this block is never self-imaged; and pxpipe is stateless per request,
+  // so this block is never self-imaged; and imgtokenx is stateless per request,
   // so the wrapper never appears in inbound client history (no compounding).
   if (volatileEnvText) {
-    const wrappedEnvText = `<system-reminder>\nContext relocated by pxpipe from the system prompt (volatile per-turn environment state — not written by the user):\n\n${volatileEnvText}\n</system-reminder>`;
+    const wrappedEnvText = `<system-reminder>\nContext relocated by imgtokenx from the system prompt (volatile per-turn environment state — not written by the user):\n\n${volatileEnvText}\n</system-reminder>`;
     const msgs = req.messages ?? [];
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]!;

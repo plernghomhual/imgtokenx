@@ -8,7 +8,7 @@ V1: boolean;
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
       throw new Error(
-        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (PXPIPE_GATEWAY_BASE_URL)",
+        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
     return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
@@ -20,7 +20,7 @@ V1: boolean;
   };
 }
 
-/** Parse `PXPIPE_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
+/** Parse `IMGTOKENX_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
 export function parseGatewayHeaders(spec: string | undefined): Record<string, string> {
   if (!spec) return {};
   const trimmed = spec.trim();
@@ -255,7 +255,7 @@ export function resolveUpstreams(config: ProxyConfig): {
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
       throw new Error(
-        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (PXPIPE_GATEWAY_BASE_URL)",
+        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
     return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
@@ -267,7 +267,7 @@ export function resolveUpstreams(config: ProxyConfig): {
   };
 }
 
-/** Parse `PXPIPE_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
+/** Parse `IMGTOKENX_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
 export function parseGatewayHeaders(spec: string | undefined): Record<string, string> {
   if (!spec) return {};
   const trimmed = spec.trim();

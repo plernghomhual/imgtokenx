@@ -443,7 +443,7 @@ export function resolveUpstreams(config: ProxyConfig): {
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
       throw new Error(
-        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (PXPIPE_GATEWAY_BASE_URL)",
+        "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
     return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
@@ -455,7 +455,7 @@ export function resolveUpstreams(config: ProxyConfig): {
   };
 }
 
-/** Parse `PXPIPE_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
+/** Parse `IMGTOKENX_GATEWAY_HEADERS` — JSON object or `k=v;k2=v2`. */
 export function parseGatewayHeaders(spec: string | undefined): Record<string, string> {
   if (!spec) return {};
   const trimmed = spec.trim();
@@ -824,13 +824,13 @@ fix only the root cause file.
     // estimation), but the denominator MUST include every request the user
     // actually paid for — including passthrough rows, probe-failed rows,
     // and untransformed turns the gate said no to. Otherwise the headline
-    // answers "did pxpipe help on the rows where it ran" instead of
-    // "did pxpipe move my real bill". The first is a cherry-pick.
+    // answers "did imgtokenx help on the rows where it ran" instead of
+    // "did imgtokenx move my real bill". The first is a cherry-pick.
     const allBaselineEquiv = this.totals.allBaselineEquivalentWeighted;
     const allActual = this.totals.allActualInputWeighted;
     const allOutput = this.totals.allOutputWeighted;
     // Denominator = counterfactual all-rows bill: what the user would have
-    // paid with no pxpipe. Bounded ratio at 100%; a single cold-miss
+    // paid with no imgtokenx. Bounded ratio at 100%; a single cold-miss
     // compressed request on an otherwise empty session shows ~99% saved,
     // not 280%.
     const allCounterfactualBill = allB
@@ -971,7 +971,7 @@ ssage:
  *
  * The synthesized user message uses `role: 'user'` because Anthropic
  * **forbids `image` blocks inside `role: 'assistant'`** (see
- * `/tmp/pxpipe-history-compression.md` line 14 and `types.ts:58`
+ * `/tmp/imgtokenx-history-compression.md` line 14 and `types.ts:58`
  * comments). Self-attribution ("I previously said X") is the price.
  *
  * `thinking` blocks inside the collapsed range are dropped from the
@@ -980,10 +980,10 @@ ssage:
  * and that turn is in the live tail by construction.
  *
  * **Cache-control**: caller controls whether the history-image carries
- * pxpipe's ephemeral breakpoint. This module returns the image blocks
+ * imgtokenx's ephemeral breakpoint. This module returns the image blocks
  * unmarked; the caller in `transform.ts` decides placement.
  *
- * Spec source: `/tmp/pxpipe-history-compression.md` Variant C section
+ * Spec source: `/tmp/imgtokenx-history-compression.md` Variant C section
  * (round 3, lines 346-364 + check-3 cache-control discussion).
  */
 

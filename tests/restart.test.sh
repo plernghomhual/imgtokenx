@@ -20,10 +20,10 @@ set -uo pipefail
 # assert absence — those legitimately return non-zero and we don't want to
 # abort the suite on a successful "did NOT find" assertion.
 
-REPO="${PXPIPE_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO="${IMGTOKENX_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 SCRIPT="$REPO/scripts/restart.sh"
 if [ ! -f "$SCRIPT" ]; then
-  echo "ERROR: cannot find $SCRIPT. Set PXPIPE_REPO env var." >&2
+  echo "ERROR: cannot find $SCRIPT. Set IMGTOKENX_REPO env var." >&2
   exit 1
 fi
 PASS=0

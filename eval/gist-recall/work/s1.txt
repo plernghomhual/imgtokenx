@@ -189,7 +189,7 @@ Noted, xstate it is for the store layer; I will not add nanostores.
 [tool_use Read]
 {"file_path":"src/core/transform.ts"}
 [tool_result]
-  // paid with no pxpipe. Bounded ratio at 100%; a single cold-miss
+  // paid with no imgtokenx. Bounded ratio at 100%; a single cold-miss
     // compressed request on an otherwise empty session shows ~99% saved,
     // not 280%.
     const allCounterfactualBill = allBaselineEquiv + allOutput;
@@ -319,10 +319,10 @@ Will request review from Farid Moreau.
 d += outputEquiv;
     }
     // All-rows COUNTERFACTUAL spend, ungated on the probe — the honest
-    // denominator for "did pxpipe move my real bill". Measured rows
+    // denominator for "did imgtokenx move my real bill". Measured rows
     // contribute their cache-aware baseline (what the unproxied path
     // would have billed); unmeasured/probe-failed/passthrough rows
-    // contribute their actual input (pxpipe either didn't run or we
+    // contribute their actual input (imgtokenx either didn't run or we
     // can't measure the counterfactual, so actual ≈ baseline). This
     // keeps the ratio bounded at 100% — you can't save more than you
     // would have paid.

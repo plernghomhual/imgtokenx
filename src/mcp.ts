@@ -1,9 +1,9 @@
 /**
- * Minimal MCP stdio server exposing one tool: `pxpipe_recover`.
+ * Minimal MCP stdio server exposing one tool: `imgtokenx_recover`.
  *
  * Recovery sidecars (see src/node.ts's `recoverableDir` default-on wiring)
  * hold the verbatim source text for content that got imaged as a PNG. When
- * pxpipe renders such a block, the render banner shows the model a `rec_*`
+ * imgtokenx renders such a block, the render banner shows the model a `rec_*`
  * id it can hand to this tool to get the exact bytes back instead of
  * transcribing them from pixels — see the render banner text in
  * src/core/transform.ts / src/core/render.ts.
@@ -12,12 +12,12 @@
  * the MCP stdio transport (newline-delimited JSON-RPC 2.0 over
  * stdin/stdout) for `initialize`, `tools/list`, and `tools/call` to work
  * with Claude Code / Codex / OpenCode as MCP clients. The tool's core logic
- * lives in `recoverById()` (src/node.ts), reused as-is so this file is pure
+ * lives in `recoverById()` (src/recovery.ts), reused as-is so this file is pure
  * protocol framing and stays unit-testable without spawning a subprocess.
  */
 
 import * as readline from 'node:readline';
-import { recoverById, resolveRecoverableDir } from './node.js';
+import { recoverById, resolveRecoverableDir } from './recovery.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -35,12 +35,12 @@ interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
-const TOOL_NAME = 'pxpipe_recover';
+const TOOL_NAME = 'imgtokenx_recover';
 
 const TOOL_DEFINITION = {
   name: TOOL_NAME,
   description:
-    'Recover the verbatim original source text for a pxpipe rec_* id shown in an ' +
+    'Recover the verbatim original source text for an imgtokenx rec_* id shown in an ' +
     'exact-risk render banner. Use this instead of guessing byte-exact IDs, hashes, ' +
     'paths, or secrets from a rendered image.',
   inputSchema: {
@@ -55,7 +55,7 @@ const TOOL_DEFINITION = {
   },
 };
 
-/** Handle one `tools/call` for `pxpipe_recover`. Pure function of the id and
+/** Handle one `tools/call` for `imgtokenx_recover`. Pure function of the id and
  *  the resolved recovery dir — no protocol framing here, so it's directly
  *  unit-testable. Throws on any lookup failure (bad id, disabled recovery,
  *  missing source); callers translate that into a JSON-RPC / tool error. */
@@ -65,7 +65,7 @@ export function callRecoverTool(recId: unknown): string {
   }
   const dir = resolveRecoverableDir();
   if (!dir) {
-    throw new Error('recovery is disabled (PXPIPE_RECOVERABLE_DIR=off/0/false/no)');
+    throw new Error('recovery is disabled (IMGTOKENX_RECOVERABLE_DIR=off/0/false/no)');
   }
   return recoverById(dir, recId);
 }
@@ -85,7 +85,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse | undefined {
         const result = {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: 'pxpipe-recover', version: '1.0.0' },
+          serverInfo: { name: 'imgtokenx-recover', version: '1.0.0' },
         };
         return respond ? { jsonrpc: '2.0', id, result } : undefined;
       }
@@ -111,7 +111,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse | undefined {
           // result carries isError, per MCP convention — so the client sees
           // a clean error message instead of a transport-level failure.
           const result = {
-            content: [{ type: 'text', text: `pxpipe_recover failed: ${(err as Error).message}` }],
+            content: [{ type: 'text', text: `imgtokenx_recover failed: ${(err as Error).message}` }],
             isError: true,
           };
           return respond ? { jsonrpc: '2.0', id, result } : undefined;

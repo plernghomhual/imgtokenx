@@ -17,7 +17,7 @@ import { toTrackEvent, JsonLogTracker, noopTracker, type Tracker } from './core/
 
 export interface Env {
   /** Optional single upstream base for every API family. Family-specific env vars override it. */
-  PXPIPE_UPSTREAM?: string;
+  IMGTOKENX_UPSTREAM?: string;
   ANTHROPIC_UPSTREAM?: string;
   /** Optional override — if set, replaces whatever x-api-key the client sent. */
   ANTHROPIC_API_KEY?: string;
@@ -41,13 +41,13 @@ export interface Env {
   /** When "0" / "false", disable per-request event JSON logs. Default-on.
    *  Cloudflare ingests console.log as Workers Logs; pipe via Logpush to
    *  R2/S3 for the same JSONL shape Node writes to disk. */
-  PXPIPE_TRACK?: string;
-  /** Shared secret callers must present via the `x-pxpipe-secret` header
+  IMGTOKENX_TRACK?: string;
+  /** Shared secret callers must present via the `x-imgtokenx-secret` header
    *  whenever an API-key override is configured. Without this gate a
    *  discovered workers.dev URL is an open key-spender: the Worker would
    *  attach your key to any stranger's request. Set with:
-   *    npx wrangler secret put PXPIPE_WORKER_SECRET */
-  PXPIPE_WORKER_SECRET?: string;
+   *    npx wrangler secret put IMGTOKENX_WORKER_SECRET */
+  IMGTOKENX_WORKER_SECRET?: string;
 }
 
 /** Compare SHA-256 digests instead of the raw strings so the comparison
@@ -75,27 +75,27 @@ export default {
     // workers.dev URLs are discoverable, and without this gate anyone who
     // finds the URL spends this deployment's API credits.
     if (env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY) {
-      if (!env.PXPIPE_WORKER_SECRET) {
+      if (!env.IMGTOKENX_WORKER_SECRET) {
         return new Response(
           JSON.stringify({
             error:
-              'refusing to proxy: an API key override is configured but PXPIPE_WORKER_SECRET is not, ' +
+              'refusing to proxy: an API key override is configured but IMGTOKENX_WORKER_SECRET is not, ' +
               'which would let anyone who finds this URL spend the configured key. ' +
-              'Run `npx wrangler secret put PXPIPE_WORKER_SECRET` and send the value as the x-pxpipe-secret header.',
+              'Run `npx wrangler secret put IMGTOKENX_WORKER_SECRET` and send the value as the x-imgtokenx-secret header.',
           }),
           { status: 503, headers: { 'content-type': 'application/json' } },
         );
       }
-      const presented = req.headers.get('x-pxpipe-secret') ?? '';
-      if (!(await secretsMatch(presented, env.PXPIPE_WORKER_SECRET))) {
+      const presented = req.headers.get('x-imgtokenx-secret') ?? '';
+      if (!(await secretsMatch(presented, env.IMGTOKENX_WORKER_SECRET))) {
         return new Response(
-          JSON.stringify({ error: 'missing or invalid x-pxpipe-secret header' }),
+          JSON.stringify({ error: 'missing or invalid x-imgtokenx-secret header' }),
           { status: 401, headers: { 'content-type': 'application/json' } },
         );
       }
       // Don't forward the shared secret upstream.
       req = new Request(req);
-      req.headers.delete('x-pxpipe-secret');
+      req.headers.delete('x-imgtokenx-secret');
     }
 
     const transform: TransformOptions = {
@@ -122,13 +122,13 @@ export default {
       // LOSSLESS_EXACT=0/false to disable.
       losslessExact: truthy(env.LOSSLESS_EXACT, true),
     };
-    const trackingOn = truthy(env.PXPIPE_TRACK, true);
+    const trackingOn = truthy(env.IMGTOKENX_TRACK, true);
     // Workers Logs ingests stdout as separate log lines. Emit one JSON line
     // per event so downstream (Logpush → R2/S3) reads the same JSONL shape
     // the Node host writes to disk.
     const tracker: Tracker = trackingOn ? new JsonLogTracker((s) => console.log(s)) : noopTracker;
 
-    const sharedUpstream = env.PXPIPE_UPSTREAM;
+    const sharedUpstream = env.IMGTOKENX_UPSTREAM;
     const config: ProxyConfig = {
       upstream: env.ANTHROPIC_UPSTREAM ?? sharedUpstream ?? 'https://api.anthropic.com',
       apiKey: env.ANTHROPIC_API_KEY,
@@ -146,7 +146,7 @@ export default {
 
         if (e.info?.unknownStaticTags && e.info.unknownStaticTags.length > 0) {
           console.warn(
-            `[pxpipe warn] unknown tag(s) in static slab: ${e.info.unknownStaticTags.join(', ')}`,
+            `[imgtokenx warn] unknown tag(s) in static slab: ${e.info.unknownStaticTags.join(', ')}`,
           );
         }
 

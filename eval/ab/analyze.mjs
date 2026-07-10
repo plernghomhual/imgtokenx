@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// A/B analyzer for pxpipe ON vs OFF (passthrough) arms.
+// A/B analyzer for imgtokenx ON vs OFF (passthrough) arms.
 //
-// Reads two events.jsonl logs — one from a pxpipe-ON proxy, one from a
-// PXPIPE_DISABLE=1 passthrough proxy — and reports the honest comparison in
+// Reads two events.jsonl logs — one from an imgtokenx-ON proxy, one from a
+// IMGTOKENX_DISABLE=1 passthrough proxy — and reports the honest comparison in
 // BOTH accounting views, plus the deterministic per-request compression that
 // is NOT confounded by trajectory divergence.
 //
 // Usage:
-//   node eval/ab/analyze.mjs ~/.pxpipe/ab-on.jsonl ~/.pxpipe/ab-off.jsonl
+//   node eval/ab/analyze.mjs ~/.imgtokenx/ab-on.jsonl ~/.imgtokenx/ab-off.jsonl
 //
 // To capture the two logs the easy way, run the demo: demo/cost-ab/ (setup.sh
 // starts both ON/OFF proxies with separate logs; a.sh/b.sh run the task).
@@ -60,9 +60,9 @@ const off = arm(load(offPath));
 const pct = (a, b) => (b > 0 ? ((b - a) / b) * 100 : 0);
 const f = (x) => x.toLocaleString('en-US');
 
-console.log('\n=== pxpipe A/B: ON vs OFF (passthrough) ===\n');
+console.log('\n=== imgtokenx A/B: ON vs OFF (passthrough) ===\n');
 const col = (label, v) => `${label.padEnd(22)} ${String(v).padStart(14)}`;
-for (const [name, a] of [['OFF (normal)', off], ['ON  (pxpipe)', on]]) {
+for (const [name, a] of [['OFF (normal)', off], ['ON  (imgtokenx)', on]]) {
   console.log(`-- ${name} --  (${a.n} reqs, ${a.compressed} compressed)`);
   console.log('   ' + col('input', f(a.input)));
   console.log('   ' + col('cache_create', f(a.cc)));
@@ -73,7 +73,7 @@ for (const [name, a] of [['OFF (normal)', off], ['ON  (pxpipe)', on]]) {
   console.log('');
 }
 
-console.log('=== VERDICT (lower ON = pxpipe wins) ===');
+console.log('=== VERDICT (lower ON = imgtokenx wins) ===');
 console.log(`  API-$ view : ON $${on.apiUsd.toFixed(4)} vs OFF $${off.apiUsd.toFixed(4)}  ->  ${pct(on.apiUsd, off.apiUsd).toFixed(1)}% ${on.apiUsd <= off.apiUsd ? 'saved' : 'MORE'}`);
 console.log(`  cap?? view : ON ${f(Math.round(on.capTok))} vs OFF ${f(Math.round(off.capTok))} cap-tok  ->  ${pct(on.capTok, off.capTok).toFixed(1)}% ${on.capTok <= off.capTok ? 'saved' : 'MORE'}`);
 console.log('  (cap?? ASSUMES cache_read is free against the Pro/Max cap — UNCONFIRMED rumor, not measured. See CAPW note.)');
@@ -93,9 +93,9 @@ if (Math.abs(divReq - 1) > 0.25 || Math.abs(divOut - 1) > 0.25) {
 }
 
 // Deterministic per-request compression (from the ON arm only): each request's
-// own pre-compression body (baseline_tokens, a real count_tokens) vs what pxpipe
+// own pre-compression body (baseline_tokens, a real count_tokens) vs what imgtokenx
 // actually sent (input+cc+cr). Same body, so NO divergence — this is the clean
-// "does pxpipe send fewer tokens" answer.
+// "does imgtokenx send fewer tokens" answer.
 const onRows = load(onPath).filter((r) => r.compressed && num(r, 'baseline_tokens') > 0);
 let ratios = [];
 for (const r of onRows) {
@@ -105,7 +105,7 @@ for (const r of onRows) {
 ratios.sort((a, b) => a - b);
 const med = ratios.length ? ratios[Math.floor(ratios.length / 2)] : 1;
 console.log('\n=== PER-REQUEST COMPRESSION (deterministic, no divergence) ===');
-console.log(`  pxpipe body / text body, median over ${ratios.length} compressed reqs: ${med.toFixed(2)}`);
-console.log(`  => pxpipe sends ${((1 - med) * 100).toFixed(0)}% fewer tokens per request than the same body as text.`);
+console.log(`  imgtokenx body / text body, median over ${ratios.length} compressed reqs: ${med.toFixed(2)}`);
+console.log(`  => imgtokenx sends ${((1 - med) * 100).toFixed(0)}% fewer tokens per request than the same body as text.`);
 console.log(`     Real compression — but it lands in cache_read, which is ~free against your cap (see cap view).`);
 console.log('');

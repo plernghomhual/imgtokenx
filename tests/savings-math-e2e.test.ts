@@ -1,14 +1,14 @@
 /**
  * END-TO-END savings-MATH contract through the REAL proxy.
  *
- * Cache tests (cache-stability-e2e) prove pxpipe doesn't bust the cache. THIS
- * file proves the prior question: pxpipe's gate gets the MATH right, so it never
+ * Cache tests (cache-stability-e2e) prove imgtokenx doesn't bust the cache. THIS
+ * file proves the prior question: imgtokenx's gate gets the MATH right, so it never
  * makes a request MORE expensive than leaving it as text. A wrong gate is worse
  * than a cache miss — it silently inverts the product (you pay more than not
- * running pxpipe at all), with no error.
+ * running imgtokenx at all), with no error.
  *
  *   fake api  = the upstream output (canned response + count_tokens ground truth)
- *   our input = pxpipe's transform + gate decision, read off the onRequest event
+ *   our input = imgtokenx's transform + gate decision, read off the onRequest event
  *
  * CRITICAL: these run with REALISTIC gate settings (transform: {} → defaults).
  * The cache tests used charsPerToken:1 to FORCE imaging — that would rig this

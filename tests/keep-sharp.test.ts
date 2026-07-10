@@ -185,7 +185,7 @@ describe('keepSharp fidelity hint', () => {
       ),
       model: 'claude-fable-5',
       options: {
-        // multiCol defaults to 1; PxpipeOptions intentionally narrows the
+        // multiCol defaults to 1; ImgtokenxOptions intentionally narrows the
         // library surface to charsPerToken / historyAmortizationHorizon / keepSharp.
         charsPerToken: 2,
         keepSharp: (blk) => blk.kind === 'tool_result',

@@ -1,6 +1,6 @@
 /**
  * Per-model reader-capacity profiles: how densely a given model can be trusted to
- * READ imaged content, decoupled from applicability.ts's "should pxpipe touch this
+ * READ imaged content, decoupled from applicability.ts's "should imgtokenx touch this
  * request at all" gate (see that file's updated comment for the split). Mirrors
  * gpt-model-profiles.ts's structure (prefix-matched BUILTIN_RULES table, first match
  * wins, env override for retuning without a code change).
@@ -13,12 +13,12 @@
  * whether imaging at that (possibly larger, less compressive) density is worth it.
  * To add a model safely, run the repeatable sweep in eval/reader-capacity/.
  *
- * Retune without a code change via PXPIPE_READER_PROFILES (JSON map of model-id
+ * Retune without a code change via IMGTOKENX_READER_PROFILES (JSON map of model-id
  * PREFIX -> partial profile; longest matching prefix wins, checked BEFORE the
  * built-in table). Partial fields fall back to the built-in match:
  *
- *   PXPIPE_READER_PROFILES='{"claude-opus-4-":{"cellWBonus":20,"cellHBonus":30}}'
- *   PXPIPE_READER_PROFILES='{"claude-mythos-5":{"safeToImage":true}}'
+ *   IMGTOKENX_READER_PROFILES='{"claude-opus-4-":{"cellWBonus":20,"cellHBonus":30}}'
+ *   IMGTOKENX_READER_PROFILES='{"claude-mythos-5":{"safeToImage":true}}'
  */
 
 export interface ReaderProfile {
@@ -95,7 +95,7 @@ function resolveBuiltin(m: string): ReaderProfile {
   return DEFAULT_READER_PROFILE;
 }
 
-// --- env override (PXPIPE_READER_PROFILES) --------------------------------
+// --- env override (IMGTOKENX_READER_PROFILES) --------------------------------
 // Parsed lazily and memoized on the raw env string so tests can mutate
 // process.env and have it re-read, without re-parsing on every hot-path call.
 
@@ -135,7 +135,7 @@ function parseEnvProfiles(raw: string): Map<string, ReaderProfile> {
 }
 
 function envProfiles(): Map<string, ReaderProfile> {
-  const raw = (typeof process !== 'undefined' && process.env && process.env.PXPIPE_READER_PROFILES) || '';
+  const raw = (typeof process !== 'undefined' && process.env && process.env.IMGTOKENX_READER_PROFILES) || '';
   if (raw !== envRaw) {
     envRaw = raw;
     envMap = parseEnvProfiles(raw);

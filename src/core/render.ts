@@ -146,7 +146,7 @@ const NL_SENTINEL_CP = 0x21b5; // precomputed for hot-path comparisons
 /** Look-alike (U+23CE ⏎) for a ↵ that was ALREADY in the source content — distinct from
  *  the U+21B5 ↵ we insert for newlines. reflow() bails when its input already contains the
  *  sentinel; that's vanishingly rare for normal content but common when the content is about
- *  pxpipe itself (rendered dumps, OCR, this very transcript). {@link neutralizeSentinel}
+ *  imgtokenx itself (rendered dumps, OCR, this very transcript). {@link neutralizeSentinel}
  *  swaps pre-existing sentinels for this glyph in RENDER-PREP only, so reflow can pack
  *  newlines instead of bailing to a raw, unpacked render. Originals are preserved verbatim
  *  elsewhere (recordRecoverable / cache-stable history), and reflow()'s own round-trip
@@ -910,7 +910,7 @@ export interface RenderDensePagesOptions {
    *  a number forces that count. Collapses to 1 when the canvas shrinks below the cap. */
   readonly multiCol?: number | 'auto';
   /** Reflow (minify + join hard newlines with ↵) before rendering. Default false. Callers
-   *  that pre-reflow (the proxy's maybeReflow / history lockstep) pass false; `pxpipe export`
+   *  that pre-reflow (the proxy's maybeReflow / history lockstep) pass false; `imgtokenx export`
    *  passes true so short lines pack into full-width rows. */
   readonly reflow?: boolean;
   /** Max source chars per page. Default DENSE_CONTENT_CHARS_PER_IMAGE. */
@@ -923,7 +923,7 @@ export interface RenderDensePagesOptions {
 
 /**
  * The single dense-page rendering decision shared by the public SDK primitive
- * `renderTextToImages` (library.ts → `pxpipe export`) AND the proxy's `textToImageBlocks`
+ * `renderTextToImages` (library.ts → `imgtokenx export`) AND the proxy's `textToImageBlocks`
  * (transform.ts): optionally reflow, measure the content width, pack as many side-by-side
  * columns as actually fit the width cap (or honor an explicit count, collapsing the wasted
  * divider column when the canvas shrinks), then render. Both callers route through HERE so

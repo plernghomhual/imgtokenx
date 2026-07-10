@@ -3,7 +3,7 @@
  *
  * `keepSharp` is the *keep-as-text* half of the fidelity contract — it pins a
  * block before it is ever imaged. `emitRecoverable` is the *recover* half: for
- * blocks pxpipe DID render to image(s), it returns a `RecoverableBlock` carrying
+ * blocks imgtokenx DID render to image(s), it returns a `RecoverableBlock` carrying
  * the exact original text + provenance, so a stateful caller (a harness, not a
  * proxy) can re-inject the bytes or re-fetch from source if the model later
  * needs the imaged region verbatim. This is the documented mitigation for the
@@ -61,7 +61,7 @@ describe('emitRecoverable recovery channel', () => {
     );
     // The block WAS imaged...
     expect(info.toolResultImgs ?? 0).toBeGreaterThan(0);
-    // ...but with the option off, pxpipe keeps nothing (a proxy can't anyway).
+    // ...but with the option off, imgtokenx keeps nothing (a proxy can't anyway).
     expect(info.recoverable).toBeUndefined();
   });
 

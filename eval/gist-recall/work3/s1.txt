@@ -70,7 +70,7 @@
       // profitability gate decide whether each block is worth converting.
       // If the source text block had a cache_control marker, it's moved
       // onto the LAST produced image so the cache anchors at the end of
-      // that content. pxpipe never adds its own markers (Task #21) —
+      // that content. imgtokenx never adds its own markers (Task #21) —
       // it only relocates ones the caller already set.
       const processedExisting: ContentBlock[] = [];
       if (o.compressReminders) {
@@ -508,7 +508,7 @@ function safeStringifyLen(v: unknown): number {
   }
 }
 /**
- * The pxpipe proxy as a single Web-standard fetch handler.
+ * The imgtokenx proxy as a single Web-standard fetch handler.
  *
  * Both `src/node.ts` and `src/worker.ts` adapt this to their respective
  * runtimes (node:http server vs CF Worker `fetch` export). The handler
@@ -518,7 +518,7 @@ function safeStringifyLen(v: unknown): number {
 
 import { transformRequest, type TransformOptions, type TransformInfo } from './transform.js';
 import { transformOpenAIChatCompletions } from './openai.js';
-import { isPxpipeSupportedGptModel, isPxpipeSupportedModel } from './applicability.js';
+import { isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,

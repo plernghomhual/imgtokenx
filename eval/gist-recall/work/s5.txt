@@ -187,7 +187,7 @@ E)` to the
    *  TEXT side — the cost of forcing a fresh cache_create on the
    *  un-rewritten text prefix when the rewritten image prefix was warm.
    *  Default 0 (back-compat; existing single-arg callers behave unchanged).
-   *  See PxpipeOptions.priorWarmImageTokens for the foundational rationale. */
+   *  See ImgtokenxOptions.priorWarmImageTokens for the foundational rationale. */
   priorWarmImageTokens: number = 0,
   /** Shrink the rendered canvas width to the longest actual wrapped line.
    *  Default `true` (per-block content: tool_result, reminder, history).
@@ -302,7 +302,7 @@ s prior cache key. Default 0
    *  TEXT side — the cost of forcing a fresh cache_create on the
    *  un-rewritten text prefix when the rewritten image prefix was warm.
    *  Default 0 (back-compat; existing single-arg callers behave unchanged).
-   *  See PxpipeOptions.priorWarmImageTokens for the foundational rationale. */
+   *  See ImgtokenxOptions.priorWarmImageTokens for the foundational rationale. */
   priorWarmImageTokens: number = 0,
   /** Shrink the rendered canvas width to the longest actual wrapped line.
    *  Default `true` (per-block content: tool_result, reminder, history).

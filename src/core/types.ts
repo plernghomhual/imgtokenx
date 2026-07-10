@@ -1,5 +1,5 @@
 /**
- * Minimal Anthropic Messages API request types — only the fields pxpipe
+ * Minimal Anthropic Messages API request types — only the fields imgtokenx
  * actually reads or rewrites. Anything else passes through untouched.
  *
  * Shape reference: https://docs.anthropic.com/en/api/messages

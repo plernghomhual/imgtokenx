@@ -23,7 +23,7 @@ export const OPENAI_GPT5_CACHE_READ_RATE = 0.1;
 /** gpt-5 output/input list ratio: $10 / $1.25 per 1M tokens. */
 export const OPENAI_GPT5_OUTPUT_RATE = 8;
 
-/** Older OpenAI families use a less aggressive cached-input discount. pxpipe's
+/** Older OpenAI families use a less aggressive cached-input discount. imgtokenx's
  * GPT compression gate is currently gpt-5.x-only, but keep the helper explicit
  * so passthrough telemetry does not accidentally get priced at Anthropic rates. */
 export function openAICacheReadRate(model: string | undefined): number {

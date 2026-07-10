@@ -151,7 +151,7 @@ export function renderTextReport(s: Summary): string {
   const sortedDur = [...s.durationMs].sort((a, b) => a - b);
   const sortedFB = [...s.firstByteMs].sort((a, b) => a - b);
 
-  lines.push('━━━ pxpipe stats ━━━');
+  lines.push('━━━ imgtokenx stats ━━━');
   lines.push('');
   lines.push(`requests:       ${fmtN(s.total)}`);
   lines.push(

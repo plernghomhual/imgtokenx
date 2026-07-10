@@ -734,7 +734,7 @@ describe('transform', () => {
       .map((b: any) => b.text as string);
     expect(sysTexts.some((t) => t.includes('=== TOOL REFERENCE ==='))).toBe(false);
     // Classifier regression (169521c; retripped 2026-07-02 by a stub citing "the
-    // system prompt"): pxpipe-authored framing must never read as a replayed or
+    // system prompt"): imgtokenx-authored framing must never read as a replayed or
     // extracted prompt. Ban the trigger wording in the stub and the reference
     // header, and require first-party provenance framing on the reference block.
     // Scoped to the header only — quoted tool docs below it are third-party text.
@@ -1335,7 +1335,7 @@ describe('transform', () => {
   });
 
   it('never adds its own cache_control marker (Task #21)', async () => {
-    // Per Task #21: pxpipe must NEVER add cache_control markers of its
+    // Per Task #21: imgtokenx must NEVER add cache_control markers of its
     // own. If the caller sent zero markers, the rewritten request also
     // carries zero markers — Claude Code's slot budget stays free for its
     // own anchors.
@@ -1394,7 +1394,7 @@ describe('transform', () => {
     const sys =
       'claude.md\n'.repeat(400) +
       "<env>\n" +
-      'Working directory: /Users/me/code/pxpipe\n' +
+      'Working directory: /Users/me/code/imgtokenx\n' +
       'Is directory a git repo: Yes\n' +
       'Platform: darwin\n' +
       'OS Version: Darwin 25.0.0\n' +
@@ -1410,7 +1410,7 @@ describe('transform', () => {
     );
     const { info } = await transformRequest(body);
     expect(info.env).toBeDefined();
-    expect(info.env!.cwd).toBe('/Users/me/code/pxpipe');
+    expect(info.env!.cwd).toBe('/Users/me/code/imgtokenx');
     expect(info.env!.isGitRepo).toBe(true);
     expect(info.env!.platform).toBe('darwin');
     expect(info.env!.osVersion).toBe('Darwin 25.0.0');
@@ -1572,7 +1572,7 @@ describe('transform', () => {
   });
 
   it('adds no cache_control of its own (Task #21: honor caller markers only)', async () => {
-    // Pxpipe must never add cache_control markers. The caller's slot
+    // Imgtokenx must never add cache_control markers. The caller's slot
     // budget (max 4 per Anthropic) belongs entirely to Claude Code. We
     // rewrite text → image byte-stably and leave marker placement alone.
     const body = new TextEncoder().encode(

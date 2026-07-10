@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bench/score.mjs — score pxpipe events.jsonl for cache health + cost.
+// bench/score.mjs — score imgtokenx events.jsonl for cache health + cost.
 //
 //   node bench/score.mjs <run-dir | events.jsonl>            # single run
 //   node bench/score.mjs <runA> <runB>                       # A/B diff (B - A)

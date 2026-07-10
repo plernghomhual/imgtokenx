@@ -1,6 +1,6 @@
-# FINDINGS — pxpipe (text→PNG token compression)
+# FINDINGS — imgtokenx (text→PNG token compression)
 
-**Status:** ⚠️ **VERDICT REVERSED — see correction below.** Originally ruled "dead"; live measurement shows pxpipe is a working *lossy gist-compressor* saving ~68% on real (dense) Claude Code traffic, with a known verbatim-recall gap.
+**Status:** ⚠️ **VERDICT REVERSED — see correction below.** Originally ruled "dead"; live measurement shows imgtokenx is a working *lossy gist-compressor* saving ~68% on real (dense) Claude Code traffic, with a known verbatim-recall gap.
 **Date:** 2026-05-28 (original) · 2026-05-29 (correction) · 2026-06-09 (Fable 5 update) · 2026-06-10 (gist-recall A/B, SWE-bench pilot) · 2026-06-12 (field observation, n=1) · 2026-06-23 (reframe: correct baseline = /compact)
 **Models tested:** `claude-opus-4-5` (original run), `claude-opus-4-8` (re-test after a model bump), `claude-fable-5` (2026-06-09)
 **Model scope (current):** Fable 5 only, enforced in library + proxy (Opus disabled 2026-06-09 — see update below).
@@ -58,7 +58,7 @@ recalled the hash wrong" are the same mechanism.
 Same thesis, opposite mechanism, different era. DeepSeek-OCR trained a
 dedicated optical encoder (~380M) plus a ~3B decoder to compress text as
 images, reporting ~97% decoding precision below 10× compression and ~60%
-near 20×. pxpipe trains nothing; the reader is the stock production model,
+near 20×. imgtokenx trains nothing; the reader is the stock production model,
 and the margin comes from the channel's real per-token density (image
 tokens are priced by pixel area; dense text packs more per token). The reason
 this repo could not have existed when that paper shipped: no production
@@ -66,7 +66,7 @@ frontier model then read dense renders at profitable density. The sweep
 dates the crossing inside one vendor generation: Opus 4.8 reads the 5×8
 production cell at 10% exact, while Fable 5 reads production density at
 13/15 verbatim and 100/100 on novel arithmetic (N=100). The new thing is
-the capability; pxpipe is a consumer of it, and that same
+the capability; imgtokenx is a consumer of it, and that same
 trajectory is the reason to park rather than out-engineer the encoder
 (below).
 
@@ -110,7 +110,7 @@ is superseded and can retire.
 
 ### The wrong bar we were using
 
-Every previous entry here — including the "verdict reversed" correction — implicitly compared pxpipe against perfect verbatim recall. That was the wrong baseline. The status quo users already accept is `/compact`: a lossy, mostly irreversible LLM prose summary of everything older than the working window. Users work → hit the limit → `/compact` → continue; they can't retrieve their earlier exact prompts or tool outputs either. Holding pxpipe to a higher standard than the alternative people already use is the wrong bar.
+Every previous entry here — including the "verdict reversed" correction — implicitly compared imgtokenx against perfect verbatim recall. That was the wrong baseline. The status quo users already accept is `/compact`: a lossy, mostly irreversible LLM prose summary of everything older than the working window. Users work → hit the limit → `/compact` → continue; they can't retrieve their earlier exact prompts or tool outputs either. Holding imgtokenx to a higher standard than the alternative people already use is the wrong bar.
 
 ### How open-source harnesses compact (codex, opencode)
 
@@ -124,27 +124,27 @@ The baseline is a spectrum from a single prompt to a full reducer. Claude Code's
 
 ### compact vs our gist: same job, opposite loss profiles
 
-Both keep a recent text tail; they differ only on the old region (`/compact` → prose, pxpipe → images). `/compact` loses **content** but keeps **fidelity** (accurate text, model knows its limits); pxpipe loses **fidelity** but keeps **content** (it's all in the pixels, just not exactly readable).
+Both keep a recent text tail; they differ only on the old region (`/compact` → prose, imgtokenx → images). `/compact` loses **content** but keeps **fidelity** (accurate text, model knows its limits); imgtokenx loses **fidelity** but keeps **content** (it's all in the pixels, just not exactly readable).
 
-Where pxpipe ties or beats `/compact`:
+Where imgtokenx ties or beats `/compact`:
 - **Recoverable, not discarded.** Bytes are in the PNGs — near-verbatim on Fable (13/15 exact, 2026-06-11 n=15 expansion; 3/4 on 06-09), and even on Opus a harness can re-OCR/re-fetch. `/compact` replaces the raw in-context.
 - **Slope, not cliff**, and no re-summarizing-a-summary compounding (codex's own code warns of that).
 - **No summarization inference**, and ~68% input saved on dense traffic.
-- **Gist parity, measured:** at the gist tier `/compact` targets, pxpipe is 98/98 (zero loss, 2026-06-10) and SWE-bench 10/10 on both arms at half cost ($27 vs $53).
+- **Gist parity, measured:** at the gist tier `/compact` targets, imgtokenx is 98/98 (zero loss, 2026-06-10) and SWE-bench 10/10 on both arms at half cost ($27 vs $53).
 
-Where pxpipe-on-Opus is worse — the one real difference:
-- **Failure shape.** `/compact` degrades gracefully (accurate text → abstains). pxpipe-on-Opus degrades into **confident confabulation** — detail looks present in the image, so it misreads and asserts (0/15 Opus haystack; 7/10 exact in the 2026-06-12 field session, 4 char-level errors / 120 chars). This is why Opus was disabled. Fix = abstention prompting ("images are recognition-only; re-fetch for exact bytes") → then Opus degrades like `/compact`.
+Where imgtokenx-on-Opus is worse — the one real difference:
+- **Failure shape.** `/compact` degrades gracefully (accurate text → abstains). imgtokenx-on-Opus degrades into **confident confabulation** — detail looks present in the image, so it misreads and asserts (0/15 Opus haystack; 7/10 exact in the 2026-06-12 field session, 4 char-level errors / 120 chars). This is why Opus was disabled. Fix = abstention prompting ("images are recognition-only; re-fetch for exact bytes") → then Opus degrades like `/compact`.
 
-Net: on **Fable**, pxpipe-gist beats `/compact` for gist-tolerant work; on **Opus** it's peer-or-worse until abstention prompting is added. Neither gives verbatim of the old region.
+Net: on **Fable**, imgtokenx-gist beats `/compact` for gist-tolerant work; on **Opus** it's peer-or-worse until abstention prompting is added. Neither gives verbatim of the old region.
 
 ### Connection to the agent-memory direction
 
-Codex's rollout-trace proves the principled path is buildable: an event-sourced reducer folding typed events into a derived state graph with verbatim payload preservation and deterministic replay. It maps onto the pxpipe agent-memory direction — the reducer decides what gets imaged (gist-bulk) vs kept as text (IDs, paths, values); image = cheap recoverable gist store, text = source of truth. Codex builds it for diagnostics only; pxpipe's compression ratio is the argument for making it the live memory.
+Codex's rollout-trace proves the principled path is buildable: an event-sourced reducer folding typed events into a derived state graph with verbatim payload preservation and deterministic replay. It maps onto the imgtokenx agent-memory direction — the reducer decides what gets imaged (gist-bulk) vs kept as text (IDs, paths, values); image = cheap recoverable gist store, text = source of truth. Codex builds it for diagnostics only; imgtokenx's compression ratio is the argument for making it the live memory.
 
 **Caveats (honest scope):**
-- pxpipe behavioral claims (Opus failure shape, field session) are n=1; gist 98/98 and SWE-bench 10/10 are controlled evals with receipts; the abstention fix is not yet measured.
+- imgtokenx behavioral claims (Opus failure shape, field session) are n=1; gist 98/98 and SWE-bench 10/10 are controlled evals with receipts; the abstention fix is not yet measured.
 - Net session tokens on long Opus sessions still need checking — the re-read loop can claw back per-request savings (out-of-proxy-scope for GPT; Opus+abstention unmeasured).
-- Some users want the explicit `/compact` checkpoint as a workflow signal; pxpipe's gradual slope isn't a drop-in for that.
+- Some users want the explicit `/compact` checkpoint as a workflow signal; imgtokenx's gradual slope isn't a drop-in for that.
 
 ---
 
@@ -243,7 +243,7 @@ narrowed the production gate from Opus 4.7+ to `claude-fable-5` only.
 | arm | opus-4-8 | fable-5 |
 |---|---:|---:|
 | text baseline | 100/100 | 100/100 |
-| pxpipe image | 93/100 | **100/100** |
+| imgtokenx image | 93/100 | **100/100** |
 
 The ~7% Opus read tax — the main per-read cost of imaging — is gone on Fable.
 
@@ -273,7 +273,7 @@ that must round-trip byte-exact stays text.
 
 **4. Economics.** Fable is $10/$50 per MTok (2× Opus 4.8). Token-for-token
 savings are identical (same tokenizer), so every saved token is worth 2× the
-dollars — pxpipe is more valuable on Fable in absolute terms.
+dollars — imgtokenx is more valuable on Fable in absolute terms.
 
 **Decision:** support Fable 5 only. Opus 4.7/4.8 disabled — with a tax-free
 reader available, shipping a known 7% misread rate is the wrong default.
@@ -288,22 +288,22 @@ The "Dead" verdict below rested on three stacked mistakes. Naming them, because 
 
 1. **Wrong cost model.** The economics were computed on English prose (~3.5 chars/token), where images lose. Real Claude Code traffic is token-*dense* — JSON, code, tool output, hashes at ~1 char/token (this repo's own `MEMORY.md` recorded a 1.17 char/token median and warned against the prose default; I pasted that warning in as a caveat and then used prose anyway). On a live, multi-session run the proxy measured **856k → 277k input tokens (~68% fewer)**, at **3.1 chars per image-token vs ~1.0 as text** — images win ~3× on the real workload.
 
-2. **Generalized the worst case to the whole product.** The 0/15 needle eval is the single hardest thing you can ask a lossy gist compressor: exact recovery of a random 12-char hex. That is not pxpipe's job — its job is letting the model skim bulk history by gist. The worst-case sub-task failing was a real finding; calling the *product* dead from it was not.
+2. **Generalized the worst case to the whole product.** The 0/15 needle eval is the single hardest thing you can ask a lossy gist compressor: exact recovery of a random 12-char hex. That is not imgtokenx's job — its job is letting the model skim bulk history by gist. The worst-case sub-task failing was a real finding; calling the *product* dead from it was not.
 
 3. **Never checked it was actually running.** The investigation theorized "if you sent this to Opus…" while a successful, transparent A/B was running underneath the whole time (`ANTHROPIC_BASE_URL=127.0.0.1:47821`; event log showing `compressed:true, 152 images/request`). I asserted the interactive session bypassed the proxy without looking. It didn't.
 
 **What still stands (unchanged, and the important caveat):** verbatim retrieval is **0/15** on both model generations, and the failure mode is **silent confabulation** — imaged content returns a plausible *wrong* value, not an error. Therefore:
 
-* pxpipe is a **lossy, recency-graded gist tier**: recent turns stay text, older bulk history becomes images. Safe to navigate by gist; **unsafe as the sole copy of anything needed byte-exact** (IDs, hashes, secrets, exact numbers).
+* imgtokenx is a **lossy, recency-graded gist tier**: recent turns stay text, older bulk history becomes images. Safe to navigate by gist; **unsafe as the sole copy of anything needed byte-exact** (IDs, hashes, secrets, exact numbers).
 * the one **open item** before this is production-ready is a **verbatim-risk guard** in the gate — never image blocks carrying unique IDs / hashes / exact values. Not yet built.
 
-**Corrected one-liner:** the encoder limit kills *verbatim*; it does **not** kill the product. On dense traffic pxpipe is a real ~68% gist compressor with one fixable silent-confabulation gap — measured live, apples-to-apples, on Opus 4.8. Everything below this line is the original (superseded) "dead" writeup, preserved.
+**Corrected one-liner:** the encoder limit kills *verbatim*; it does **not** kill the product. On dense traffic imgtokenx is a real ~68% gist compressor with one fixable silent-confabulation gap — measured live, apples-to-apples, on Opus 4.8. Everything below this line is the original (superseded) "dead" writeup, preserved.
 
 ---
 
 ## Original TL;DR (superseded 2026-05-29 — see verdict above)
 
-pxpipe rewrites Claude Code tool-result text into compact PNGs before they reach
+imgtokenx rewrites Claude Code tool-result text into compact PNGs before they reach
 the model, betting that vision tokens for a dense image are cheaper than the same
 content delivered as transcript text. **The tokens are cheaper. The model cannot
 read the content back.** That is the whole story.
@@ -319,7 +319,7 @@ round numbers (two-proportion test across the model bump: z≈0.76, **p≈0.45**
 its failure mode is **silent confabulation** — which is worse than an error,
 because the caller can't tell.
 
-pxpipe is theater. The image *is* sent and the model *acknowledges seeing it*,
+imgtokenx is theater. The image *is* sent and the model *acknowledges seeing it*,
 but it cannot extract either verbatim strings or specific facts from it. The token
 "savings" come from Opus quietly throwing the content away.
 
@@ -353,7 +353,7 @@ is decorative and the savings are fake.
   - **verbatim** — a random 12-char hex needle (`VARIABLE x IS ASSIGNED THE VALUE
     <hex>`), asked back exactly. This is the OCR-hard case.
   - **semantic** — a specific fact stated in the rendered tool-reference doc (e.g.
-    "what is the default timeout for `net.fetch`?"). This is pxpipe's *actual*
+    "what is the default timeout for `net.fetch`?"). This is imgtokenx's *actual*
     sales pitch: "comprehension over bulky docs."
 
 **Controlled:** identical needle/haystack across ON and OFF; image is 1568×1276
@@ -401,7 +401,7 @@ image at all. Verbatim stayed at a hard zero across both versions.
 
 Before writing the tombstone we isolated **encoder incapability** from a
 **rendering/density** problem by feeding Opus custom images directly (same vision
-path, bypassing pxpipe's specific renderer; `eval/needle-haystack/crux.py`).
+path, bypassing imgtokenx's specific renderer; `eval/needle-haystack/crux.py`).
 
 | tier | rendering | result |
 |---|---|---|
@@ -410,12 +410,12 @@ path, bypassing pxpipe's specific renderer; `eval/needle-haystack/crux.py`).
 
 **The encoder is not fundamentally hex-blind.** When glyphs are large and isolated
 it nails them. So the 0/15 was never an encoder wall — it is a
-**density / resolution-per-character** problem. pxpipe's ~8pt wall-to-wall
+**density / resolution-per-character** problem. imgtokenx's ~8pt wall-to-wall
 filler was simply below the glyph-resolution floor.
 
 ### Phase 4 — Density sweep: where does it break, and is the readable zone economical?
 
-We swept font size **down** from "clean" at fixed pxpipe dimensions
+We swept font size **down** from "clean" at fixed imgtokenx dimensions
 (`eval/needle-haystack/sweep.py`, ~2,668 image tokens throughout):
 
 | font | retrieval | chars/image | failure mode |
@@ -501,7 +501,7 @@ outstanding for semantic."
 ## What this proves / doesn't prove
 
 **Proven:**
-- pxpipe **as built** does not work. Verbatim retrieval is zero across two model
+- imgtokenx **as built** does not work. Verbatim retrieval is zero across two model
   versions; prose-density compression loses money in the readable zone.
 - The failure is architectural (encoder is a summarizer, not an OCR; image cost is a
   fixed token canvas), not a tuning parameter. Font size, resolution, and "try
@@ -564,7 +564,7 @@ Preserved under `eval/needle-haystack/` (copied from the volatile `/tmp/needle_e
 | `crux.py` | direct-to-Opus billboard/clean encoder test (Phase 3) |
 | `sweep.py` | fixed-dimension font-size density sweep (Phase 4) |
 
-Run: start the pxpipe proxy (`127.0.0.1:47821`), then
+Run: start the imgtokenx proxy (`127.0.0.1:47821`), then
 `cd eval/needle-haystack && ./run3.sh`. Requires a `claude` CLI on a MAX plan
 (no API key needed) and PIL + a monospace TTF for the Python tiers.
 
@@ -575,7 +575,7 @@ rows. The `4-8` raw rows are in `results2.tsv` and Appendix B.
 ## Appendix B — Raw `opus-4-8` data (Phase 2)
 
 **verbatim / ON:** 15/15 returned **empty** — not garbled, not a near-miss. The
-encoder never resolved character-level glyphs at pxpipe's density; it saw "a
+encoder never resolved character-level glyphs at imgtokenx's density; it saw "a
 block of code-like texture" and gave up.
 
 **semantic / ON — the confabulations** (expected → got; the dangerous part is these

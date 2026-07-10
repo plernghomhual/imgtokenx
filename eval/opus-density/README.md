@@ -1,6 +1,6 @@
 # Opus 4.8 lower-density / larger-cell read sweep
 
-**Question (issue #6):** the known Opus misread rate on pxpipe images was measured
+**Question (issue #6):** the known Opus misread rate on imgtokenx images was measured
 at the production **5×8** cell density. If the same text is rendered *less dense*
 (bigger cells → fewer chars/page → more pages), does Opus 4.8 read exact strings
 reliably enough to be worth enabling — and at what token cost?

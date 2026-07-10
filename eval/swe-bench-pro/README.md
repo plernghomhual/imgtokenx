@@ -1,4 +1,4 @@
-# SWE-bench Pro - pxpipe ON vs OFF
+# SWE-bench Pro - imgtokenx ON vs OFF
 
 ## Expansion to 19 pairs + navidrome replication (2026-06-11)
 
@@ -49,7 +49,7 @@ and dropped out; 9 pairs completed.
 
 | arm | resolved | API calls | compressed | images | request size vs own uncompressed body |
 |---|---|---|---|---|---|
-| pxpipe ON | 6/9 | 136 | 117 | 987 | **-61%** |
+| imgtokenx ON | 6/9 | 136 | 117 | 987 | **-61%** |
 | OFF | 7/9 | 152 | 0 | 0 | ±0 |
 
 - The -61% is per-request: each body's free `count_tokens` probe vs what
@@ -80,7 +80,7 @@ Instance: `future-architect__vuls-36456cb...` (Go - implement
 
 | arm | resolved | API calls | image count | token-equivalent |
 |---|---|---|---|---|
-| pxpipe ON (47821) | 1/1 (both tests PASSED) | 10 | 45 | 116,690 |
+| imgtokenx ON (47821) | 1/1 (both tests PASSED) | 10 | 45 | 116,690 |
 | OFF (47822, compress=false) | 1/1 (both tests PASSED) | 7 | 0 | 207,840 |
 
 - Per-request compression on the ON arm (clean number, no turn-count
@@ -91,7 +91,7 @@ Instance: `future-architect__vuls-36456cb...` (Go - implement
   `searchCache` and passed `TestSearchCache` + `TestRemoveInactive` under
   the official grader.
 
-### Verifying the ON arm actually went through pxpipe
+### Verifying the ON arm actually went through imgtokenx
 
 The ON proxy (47821) is shared with the operator's own Claude Code
 session, so the event window was contaminated; arm rows were separated by

@@ -1,6 +1,6 @@
-# How pxpipe sizes rendered images
+# How imgtokenx sizes rendered images
 
-This is the current source-of-truth note for pxpipe image geometry. Historical
+This is the current source-of-truth note for imgtokenx image geometry. Historical
 experiments are intentionally summarized at the bottom so future tuning does not
 reuse old 1928px / `px/750` assumptions.
 
@@ -36,7 +36,7 @@ Anthropic image token estimates use the documented visual-patch formula:
 tokens = ceil(width / 28) * ceil(height / 28)
 ```
 
-pxpipe gates compression with a 10% safety margin, so a full 1568x728 page is
+imgtokenx gates compression with a 10% safety margin, so a full 1568x728 page is
 estimated as:
 
 ```text

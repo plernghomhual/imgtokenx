@@ -1,10 +1,10 @@
 {
-  "name": "pxpipe-proxy",
+  "name": "imgtokenx",
   "version": "0.8.0",
   "description": "Token-saving proxy for Claude Code: renders bulky context (system prompt, tool docs, old history) as dense PNGs to cut input tokens. Runs on Node and Cloudflare Workers.",
   "type": "module",
   "bin": {
-    "pxpipe": "bin/cli.js"
+    "imgtokenx": "bin/cli.js"
   },
   "exports": {
     ".": {
@@ -97,10 +97,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/teamchong/pxpipe.git"
+    "url": "git+https://github.com/teamchong/imgtokenx.git"
   },
-  "homepage": "https://github.com/teamchong/pxpipe#readme",
+  "homepage": "https://github.com/teamchong/imgtokenx#readme",
   "bugs": {
-    "url": "https://github.com/teamchong/pxpipe/issues"
+    "url": "https://github.com/teamchong/imgtokenx/issues"
   }
 }

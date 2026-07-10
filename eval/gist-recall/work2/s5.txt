@@ -159,7 +159,7 @@ Note: the cache TTL is 8300ms, unrelated to the retry budget discussion.
                   await textToImageBlocks(paged.text, o.cols, numCols);
                 // Preserve any cache_control the caller set on this inner
                 // text block (inside a tool_result) by re-attaching it to the
-                // LAST produced image. pxpipe never adds new markers (Task #21).
+                // LAST produced image. imgtokenx never adds new markers (Task #21).
                 const srcCacheControl = (ib as { cache_control?: unknown }).cache_control;
                 for (let i = 0; i < imgs.length; i++) {
                   const img = imgs[i]!;
@@ -403,7 +403,7 @@ TE_RATE − CACHE_READ_RATE)`
    *  TEXT side — the cost of forcing a fresh cache_create on the
    *  un-rewritten text prefix when the rewritten image prefix was warm.
    *  Default 0 (back-compat; existing single-arg callers behave unchanged).
-   *  See PxpipeOptions.priorWarmImageTokens for the foundational rationale. */
+   *  See ImgtokenxOptions.priorWarmImageTokens for the foundational rationale. */
   priorWarmImageTokens: number = 0,
   /** Shrink the rendered canvas width to the longest actual wrapped line.
    *  Default `true` (per-block content: tool_result, reminder, history).
@@ -622,8 +622,8 @@ export const SLAB_CHARS_PER_TOKEN = 2.0;
  *  so the 2.5 → 2.0 move here is doubly conservative.
  *
  *  Diagnostic that drove this change: 283/391 = 72% of measured Opus 4.7
- *  pxpipe rows in the last 7 days carried
- *  pxpipe_history_reason='not_profitable'. The break-even gate was
+ *  imgtokenx rows in the last 7 days carried
+ *  imgtokenx_history_reason='not_profitable'. The break-even gate was
  *  rejecting most history-collapse opportunities because it was
  *  comparing real image costs against a 30%-under-counted text cost.
  *
@@ -853,7 +853,7 @@ Confirmed: USE_BROTLI OFF in prod, ON only in staging.
       // profitability gate decide whether each block is worth converting.
       // If the source text block had a cache_control marker, it's moved
       // onto the LAST produced image so the cache anchors at the end of
-      // that content. pxpipe never adds its own markers (Task #21) —
+      // that content. imgtokenx never adds its own markers (Task #21) —
       // it only relocates ones the caller already set.
       const processedExisting: ContentBlock[] = [];
       if (o.compressReminders) {
@@ -891,7 +891,7 @@ Confirmed: USE_BROTLI OFF in prod, ON only in staging.
             await textToImageBlocks(reminderText, o.cols, numCols);
           // Preserve any cache_control the caller set on this text block by
           // re-attaching it to the LAST produced image (cache anchors at the
-          // end of the content). pxpipe never adds new markers — only
+          // end of the content). imgtokenx never adds new markers — only
           // moves existing ones across the text→image flip (Task #21).
           const srcCacheControl = (blk as { cache_control?: unknown }).cache_control;
           for (let i = 0; i < imgs.length; i++) {

@@ -5,7 +5,7 @@
 > 10% safety margin; keep the resize/legibility findings, but do not copy the
 > old `px/750` billing shorthand into current code.
 
-Motivated by a demo failure: the pxpipe arm of `demo/effective-context` read all
+Motivated by a demo failure: the imgtokenx arm of `demo/effective-context` read all
 files but could not report the `AUDIT-ZX9` line count, and hedged that imaged text
 was uncertain. This audit measured **why**, with data, and shipped the fixes that
 follow from it.
@@ -32,7 +32,7 @@ follow from it.
 ## Method
 
 `count_tokens` sweep (claude-sonnet-4-5) on synthetic PNGs at controlled dims;
-14,935-row regression on real proxy traffic (`~/.pxpipe/events.jsonl`) for the
+14,935-row regression on real proxy traffic (`~/.imgtokenx/events.jsonl`) for the
 unresized slope; pixel-level Hamming matrix over the Spleen 5×8 atlas; and a 24-token
 blind read where transcriptions were committed *before* revealing ground truth.
 

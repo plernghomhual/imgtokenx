@@ -1,2 +1,2 @@
-   15140 /Users/dev/.pxpipe/events.jsonl
-       3 /Users/dev/.pxpipe/events-pilot-off.jsonl
+   15140 /Users/dev/.imgtokenx/events.jsonl
+       3 /Users/dev/.imgtokenx/events-pilot-off.jsonl

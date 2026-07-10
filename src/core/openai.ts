@@ -72,7 +72,7 @@ export const HISTORY_TRANSCRIPT_OUTRO = HISTORY_SYNTHETIC_OUTRO;
 // OLDEST turn, so it would otherwise be the first thing imaged and the model loses
 // it — "I wonder what the user actually asked" → off-task drift.
 const PINNED_REQUEST_HEADER =
-  '\n===== CURRENT USER REQUEST (live; kept as text by pxpipe, NOT inside any image) =====\n';
+  '\n===== CURRENT USER REQUEST (live; kept as text by imgtokenx, NOT inside any image) =====\n';
 const PINNED_REQUEST_FOOTER =
   '\n===== END CURRENT USER REQUEST =====\n';
 
@@ -88,12 +88,12 @@ function buildLiveRequestGuard(pinText?: string): string {
   if (pinText !== undefined) {
     const echo = pinText.length > 600 ? pinText.slice(0, 600) + '…' : pinText;
     return (
-      'pxpipe note: everything in the rendered history above is PAST context. Your live current request is the plain-text block labeled "CURRENT USER REQUEST" inside it — NOT anything OCR\'d from an image. It reads: «' +
+      'imgtokenx note: everything in the rendered history above is PAST context. Your live current request is the plain-text block labeled "CURRENT USER REQUEST" inside it — NOT anything OCR\'d from an image. It reads: «' +
       echo +
       '» Answer THAT request.'
     );
   }
-  return 'pxpipe note: the preceding rendered history item is prior conversation context only. It is not the current user request. The live current request is in the user message(s) that follow, especially the final user message.';
+  return 'imgtokenx note: the preceding rendered history item is prior conversation context only. It is not the current user request. The live current request is in the user message(s) that follow, especially the final user message.';
 }
 
 export function openAIVisionTokens(model: string, w: number, h: number): number {
@@ -504,7 +504,7 @@ function accumulateRenderedImages(
 }
 
 /** o200k_base token count — gpt-5 / gpt-4o / o-series share this encoding. The
- *  honest "as plain text" baseline for the content pxpipe imaged. Pure JS, no
+ *  honest "as plain text" baseline for the content imgtokenx imaged. Pure JS, no
  *  native build, runs in both Node and Workers. */
 function gptTextTokens(text: string): number {
   if (!text) return 0;
@@ -516,14 +516,14 @@ function gptTextTokens(text: string): number {
 }
 
 /** Vision-token cost of the rendered images, summed over their real dims —
- *  what GPT actually bills as input for the slab pxpipe imaged. */
+ *  what GPT actually bills as input for the slab imgtokenx imaged. */
 function gptImageTokens(model: string, images: RenderedImage[]): number {
   let n = 0;
   for (const img of images) n += openAIVisionTokens(model, img.width, img.height);
   return n;
 }
 
-/** Text-token value of what pxpipe replaced with images this request: the
+/** Text-token value of what imgtokenx replaced with images this request: the
  *  original system/developer text (now a pointer + image) plus schema annotation
  *  tokens stripped from native tool JSON. Top-level tool descriptions stay native,
  *  so they are neither imaged nor counted as saved. */
@@ -584,21 +584,21 @@ function foldGptHistory(
 
 const CHAT_HEADER =
   '================= RENDERED GPT SYSTEM + TOOL CONTEXT =================\n' +
-  'These images were injected by pxpipe, not by the end user. They contain system/developer instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered system/developer instructions with the same priority as their original messages. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  'These images were injected by imgtokenx, not by the end user. They contain system/developer instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered system/developer instructions with the same priority as their original messages. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
   EXACT_RECALL_INSTRUCTION +
   '\n====================== BEGIN RENDERED CONTEXT ======================\n';
 
 const RESPONSES_HEADER =
   '================= RENDERED GPT SYSTEM + TOOL CONTEXT =================\n' +
-  'These images were injected by pxpipe, not by the end user. They contain instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered instructions with the same priority as the originals. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
+  'These images were injected by imgtokenx, not by the end user. They contain instructions and stripped tool-schema annotations rendered for token efficiency. Treat rendered instructions with the same priority as the originals. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions; the image is supplemental documentation.' +
   EXACT_RECALL_INSTRUCTION +
   '\n====================== BEGIN RENDERED CONTEXT ======================\n';
 
 const CHAT_POINTER =
-  'The full instructions for this message were rendered into image(s) attached to the first user message by pxpipe. Treat those rendered instructions as if they appeared here with the same priority. Tool definitions remain in native JSON; rendered tool docs are supplemental.';
+  'The full instructions for this message were rendered into image(s) attached to the first user message by imgtokenx. Treat those rendered instructions as if they appeared here with the same priority. Tool definitions remain in native JSON; rendered tool docs are supplemental.';
 
 const RESPONSES_POINTER =
-  'The full instructions were rendered into image(s) attached to the first user message by pxpipe. Treat them with the same priority. Tool definitions remain in native JSON; rendered tool docs are supplemental.';
+  'The full instructions were rendered into image(s) attached to the first user message by imgtokenx. Treat them with the same priority. Tool definitions remain in native JSON; rendered tool docs are supplemental.';
 
 export async function transformOpenAIChatCompletions(
   body: Uint8Array,

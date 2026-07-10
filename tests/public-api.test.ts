@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildCountTokensBodies,
   getAllowedModelBases,
-  isPxpipeSupportedGptModel,
-  isPxpipeSupportedModel,
+  isImgtokenxSupportedGptModel,
+  isImgtokenxSupportedModel,
   setAllowedModelBases,
   shouldTransformAnthropicMessages,
   transformAnthropicMessages,
@@ -13,62 +13,62 @@ import {
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-// Tests below assert DEFAULT model-scope behavior, which assumes PXPIPE_MODELS is unset.
-// Snapshot and clear any ambient value (e.g. a dev shell that still exports PXPIPE_MODELS)
+// Tests below assert DEFAULT model-scope behavior, which assumes IMGTOKENX_MODELS is unset.
+// Snapshot and clear any ambient value (e.g. a dev shell that still exports IMGTOKENX_MODELS)
 // before each test so the suite is deterministic regardless of the environment it runs in,
 // then restore the original afterward. The per-test override cases still work: they see an
 // unset var, set their own value, and clean up.
-let ambientPxpipeModels: string | undefined;
+let ambientImgtokenxModels: string | undefined;
 beforeEach(() => {
-  ambientPxpipeModels = process.env.PXPIPE_MODELS;
-  delete process.env.PXPIPE_MODELS;
+  ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
+  delete process.env.IMGTOKENX_MODELS;
 });
 afterEach(() => {
-  if (ambientPxpipeModels === undefined) delete process.env.PXPIPE_MODELS;
-  else process.env.PXPIPE_MODELS = ambientPxpipeModels;
+  if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
+  else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
 });
 
 describe('public library API', () => {
   it('is eligible for every Claude model by default — reader-profiles.ts gates imaging safety, not this', () => {
-    expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-fable-5-high')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-fable-5-high')).toBe(true);
     // Opus 4.8 (and any other Claude model) is eligible to enter transformRequest by
     // default now — reader-profiles.ts decides at what density (or whether at all) to
     // image its content, defaulting unmeasured models to text passthrough. This
-    // function only answers "should pxpipe touch the request," not "is it safe to image."
-    expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-opus-4-7')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-opus-4-6')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-mythos-5')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-fable-50')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-sonnet-4-7')).toBe(true);
-    expect(isPxpipeSupportedModel(null)).toBe(false);
+    // function only answers "should imgtokenx touch the request," not "is it safe to image."
+    expect(isImgtokenxSupportedModel('claude-opus-4-8')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-opus-4-7')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-opus-4-6')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-mythos-5')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-fable-50')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-sonnet-4-7')).toBe(true);
+    expect(isImgtokenxSupportedModel(null)).toBe(false);
   });
 
   it('strips bracketed variant tags like [1m] before matching (still eligible by default)', () => {
-    expect(isPxpipeSupportedModel('claude-fable-5[1m]')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-fable-5-high[1m]')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-opus-4-8[1m]')).toBe(true);
-    expect(isPxpipeSupportedModel('claude-opus-4-7[1m]')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-fable-5[1m]')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-fable-5-high[1m]')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-opus-4-8[1m]')).toBe(true);
+    expect(isImgtokenxSupportedModel('claude-opus-4-7[1m]')).toBe(true);
   });
 
-  it('honors PXPIPE_MODELS to explicitly narrow the default scope', () => {
-    const prev = process.env.PXPIPE_MODELS;
+  it('honors IMGTOKENX_MODELS to explicitly narrow the default scope', () => {
+    const prev = process.env.IMGTOKENX_MODELS;
     try {
       // narrow to Fable only — explicit override always wins, unlike the open default
-      process.env.PXPIPE_MODELS = 'claude-fable-5';
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
-      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false);
+      process.env.IMGTOKENX_MODELS = 'claude-fable-5';
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
+      expect(isImgtokenxSupportedModel('claude-opus-4-8')).toBe(false);
       // re-point to a different set
-      process.env.PXPIPE_MODELS = 'claude-fable-5,claude-opus-4-7';
-      expect(isPxpipeSupportedModel('claude-opus-4-7')).toBe(true);
-      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(false); // not in this set
+      process.env.IMGTOKENX_MODELS = 'claude-fable-5,claude-opus-4-7';
+      expect(isImgtokenxSupportedModel('claude-opus-4-7')).toBe(true);
+      expect(isImgtokenxSupportedModel('claude-opus-4-8')).toBe(false); // not in this set
       // explicit off kill-switch still works
-      process.env.PXPIPE_MODELS = 'off';
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(false);
+      process.env.IMGTOKENX_MODELS = 'off';
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(false);
     } finally {
-      if (prev === undefined) delete process.env.PXPIPE_MODELS;
-      else process.env.PXPIPE_MODELS = prev;
+      if (prev === undefined) delete process.env.IMGTOKENX_MODELS;
+      else process.env.IMGTOKENX_MODELS = prev;
     }
   });
 
@@ -77,58 +77,58 @@ describe('public library API', () => {
       // override takes precedence over the open default
       setAllowedModelBases(['claude-fable-5', 'claude-opus-4-8']);
       expect(getAllowedModelBases()).toEqual(['claude-fable-5', 'claude-opus-4-8']);
-      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true); // opted in at runtime
-      expect(isPxpipeSupportedModel('claude-sonnet-4-7')).toBe(false); // narrowed out
+      expect(isImgtokenxSupportedModel('claude-opus-4-8')).toBe(true); // opted in at runtime
+      expect(isImgtokenxSupportedModel('claude-sonnet-4-7')).toBe(false); // narrowed out
       // empty list = compress nothing
       setAllowedModelBases([]);
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(false);
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(false);
       // null clears the override → back to the open default (every Claude model eligible)
       setAllowedModelBases(null);
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
-      expect(isPxpipeSupportedModel('claude-opus-4-8')).toBe(true);
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
+      expect(isImgtokenxSupportedModel('claude-opus-4-8')).toBe(true);
     } finally {
       setAllowedModelBases(null); // never leak the override into other tests
     }
   });
 
   it('recognizes GPT 5.6 as the default OpenAI imaging scope (5.5 opt-in)', () => {
-    expect(isPxpipeSupportedGptModel('gpt-5')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
     // gpt-5.5 degrades on imaged context, so it is off by default now.
-    expect(isPxpipeSupportedGptModel('gpt-5.5')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.5-codex')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.5-2026-06-01')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.6')).toBe(true);
-    expect(isPxpipeSupportedGptModel('gpt-5-mini')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-5.6-nano')).toBe(true);
-    expect(isPxpipeSupportedGptModel('gpt-5.6[1m]')).toBe(true);
-    expect(isPxpipeSupportedGptModel('gpt-4o')).toBe(false);
-    expect(isPxpipeSupportedGptModel('gpt-50')).toBe(false);
-    expect(isPxpipeSupportedGptModel('')).toBe(false);
-    expect(isPxpipeSupportedGptModel('claude-opus-4-8')).toBe(false);
-    expect(isPxpipeSupportedGptModel(null)).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.5-codex')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.5-2026-06-01')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-4o')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-50')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('claude-opus-4-8')).toBe(false);
+    expect(isImgtokenxSupportedGptModel(null)).toBe(false);
   });
 
-  it('honors the single PXPIPE_MODELS scope for GPT families', () => {
-    const prev = process.env.PXPIPE_MODELS;
+  it('honors the single IMGTOKENX_MODELS scope for GPT families', () => {
+    const prev = process.env.IMGTOKENX_MODELS;
     try {
       // Explicit Claude-only scope disables GPT imaging.
-      process.env.PXPIPE_MODELS = 'claude-fable-5';
-      expect(isPxpipeSupportedGptModel('gpt-5.5')).toBe(false);
-      expect(isPxpipeSupportedGptModel('gpt-5.6')).toBe(false);
+      process.env.IMGTOKENX_MODELS = 'claude-fable-5';
+      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
 
       // Mixed CSV selects exactly those bases across families.
-      process.env.PXPIPE_MODELS = 'claude-fable-5,gpt-5.6';
-      expect(isPxpipeSupportedGptModel('gpt-5.5')).toBe(false);
-      expect(isPxpipeSupportedGptModel('gpt-5.6')).toBe(true);
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(true);
+      process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
 
       // `off` disables everything.
-      process.env.PXPIPE_MODELS = 'off';
-      expect(isPxpipeSupportedGptModel('gpt-5.6')).toBe(false);
-      expect(isPxpipeSupportedModel('claude-fable-5')).toBe(false);
+      process.env.IMGTOKENX_MODELS = 'off';
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+      expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(false);
     } finally {
-      if (prev === undefined) delete process.env.PXPIPE_MODELS;
-      else process.env.PXPIPE_MODELS = prev;
+      if (prev === undefined) delete process.env.IMGTOKENX_MODELS;
+      else process.env.IMGTOKENX_MODELS = prev;
     }
   });
 
@@ -254,18 +254,18 @@ describe('public library API', () => {
   it('wraps the transformer with model gating and cache ownership metadata', async () => {
     // claude-sonnet-4-6 is eligible by default post-Phase-2 (applicability no longer
     // gates Claude imaging safety — reader-profiles.ts does), so exercise the
-    // wrapper's `unsupported_model` gating path via an explicit PXPIPE_MODELS
+    // wrapper's `unsupported_model` gating path via an explicit IMGTOKENX_MODELS
     // narrowing instead, which still gates unconditionally per family.
-    const prevModels = process.env.PXPIPE_MODELS;
-    process.env.PXPIPE_MODELS = 'claude-fable-5';
+    const prevModels = process.env.IMGTOKENX_MODELS;
+    process.env.IMGTOKENX_MODELS = 'claude-fable-5';
     const unsupported = enc.encode(JSON.stringify({
       model: 'claude-sonnet-4-6',
       system: 'x'.repeat(20_000),
       messages: [{ role: 'user', content: 'hello' }],
     }));
     const skipped = await transformAnthropicMessages({ body: unsupported, model: 'claude-sonnet-4-6' });
-    if (prevModels === undefined) delete process.env.PXPIPE_MODELS;
-    else process.env.PXPIPE_MODELS = prevModels;
+    if (prevModels === undefined) delete process.env.IMGTOKENX_MODELS;
+    else process.env.IMGTOKENX_MODELS = prevModels;
     expect(skipped.applied).toBe(false);
     expect(skipped.reason).toBe('unsupported_model');
     expect(skipped.body).toBe(unsupported);
@@ -285,7 +285,7 @@ describe('public library API', () => {
     expect(transformed.reason).toBe('applied');
     expect(transformed.info.compressedChars).toBeGreaterThan(0);
     expect(transformed.info.imageCount).toBeGreaterThan(0);
-    // Task #21: pxpipe never adds its own cache_control markers.
+    // Task #21: imgtokenx never adds its own cache_control markers.
     // The caller sent zero markers, so the rewritten body also has zero.
     expect(transformed.cache.ownsCacheControl).toBe(false);
     expect(transformed.cache.markerCount).toBe(0);

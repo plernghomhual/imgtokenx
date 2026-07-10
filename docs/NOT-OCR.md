@@ -99,11 +99,11 @@ This repo measured the expiry. Same harnesses, both models:
 | novel arithmetic over imaged context (N=100) | 93% | 100% |
 | verbatim 12-char hex, dense render (n=15) | 0/15 | 13/15 |
 | 5×8 production glyph cell | 10% exact; needs ~4x area for 95% | reads it (the 13/15 row) |
-| status in pxpipe | opt-in (misreads ~7% of renders) | default reader |
+| status in imgtokenx | opt-in (misreads ~7% of renders) | default reader |
 
 One vendor generation moved the readable-density knee ~4x in glyph area.
 That is the whole story behind objection 2: the capability crossed the
-profitability threshold after the discourse formed, and pxpipe simply
+profitability threshold after the discourse formed, and imgtokenx simply
 ships on the far side of it. It is also why Opus stays opt-in and why the
 README reports per-model numbers instead of one blended claim.
 
@@ -111,7 +111,7 @@ README reports per-model numbers instead of one blended claim.
 
 Computer use already ships models reading screenshots to operate
 software, so text-from-pixels is a first-party, supported use of the
-channel. pxpipe runs the same channel at far higher text density than a
+channel. imgtokenx runs the same channel at far higher text density than a
 UI screenshot, and the capacity bound above is the cost of that density.
 
 The trajectory that made this possible is the one being ridden now. On

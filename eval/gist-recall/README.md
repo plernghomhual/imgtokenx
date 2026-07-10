@@ -7,7 +7,7 @@ settings: the proxy's production constants (`DENSE_CONTENT_COLS=180`,
 
 ## Question
 
-pxpipe's cost story is settled ($100 of uncompressed traffic costs ~$28
+imgtokenx's cost story is settled ($100 of uncompressed traffic costs ~$28
 through the proxy, caching held equal on both sides). The open question was
 quality: when old session history is delivered as rendered PNGs instead of
 text, does the model misremember decisions, values, paths, names, state?

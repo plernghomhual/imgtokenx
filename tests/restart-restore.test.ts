@@ -13,7 +13,7 @@ import type { TrackEvent } from '../src/core/tracker.js';
  * Regression guard for "old rows lose save + details after restart".
  */
 function makeTmp(): SessionsPaths {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxpipe-restart-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-restart-'));
   return { eventsFile: path.join(dir, 'events.jsonl'), sidecarDir: path.join(dir, '4xx') };
 }
 function writeEvents(paths: SessionsPaths, events: unknown[]): void {
@@ -102,7 +102,7 @@ describe('restart restore (replay)', () => {
 
     const recent = (await dash.serveRecent().json()) as { recent: Array<Record<string, unknown>> };
     const row = recent.recent[0]!;
-    // No baseline column, no Saved delta — pxpipe didn't move this bill.
+    // No baseline column, no Saved delta — imgtokenx didn't move this bill.
     expect(row.baseline_input).toBeUndefined();
     expect(row.session_saved_so_far_delta).toBeUndefined();
   });

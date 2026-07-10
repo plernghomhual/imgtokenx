@@ -10,7 +10,7 @@ import { renderTextToImages } from '../../src/core/library.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// Anthropic bills 28-px patches; pxpipe pages are ≤1568×728 (both tiers, no
+// Anthropic bills 28-px patches; imgtokenx pages are ≤1568×728 (both tiers, no
 // downscale), so the raw patch count is the exact per-image cost.
 const patchTokens = (w, h) => Math.ceil(w / 28) * Math.ceil(h / 28);
 

@@ -58,10 +58,10 @@ psed range are dropped from the
  * and that turn is in the live tail by construction.
  *
  * **Cache-control**: caller controls whether the history-image carries
- * pxpipe's ephemeral breakpoint. This module returns the image blocks
+ * imgtokenx's ephemeral breakpoint. This module returns the image blocks
  * unmarked; the caller in `transform.ts` decides placement.
  *
- * Spec source: `/tmp/pxpipe-history-compression.md` Variant C section
+ * Spec source: `/tmp/imgtokenx-history-compression.md` Variant C section
  * (round 3, lines 346-364 + check-3 cache-control discussion).
  */
 

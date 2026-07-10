@@ -16,24 +16,24 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 describe('install artifacts', () => {
-  it('renders a launchd plan with absolute node/cli paths and logs under ~/.pxpipe', () => {
+  it('renders a launchd plan with absolute node/cli paths and logs under ~/.imgtokenx', () => {
     const plan = buildInstallPlan({
       home: '/tmp/home',
-      repoRoot: '/repo/pxpipe',
+      repoRoot: '/repo/imgtokenx',
       nodePath: '/usr/local/bin/node',
       port: 47899,
     });
 
     expect(plan.launchAgentPath).toBe(`/tmp/home/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`);
-    expect(plan.envPath).toBe('/tmp/home/.pxpipe/env.sh');
+    expect(plan.envPath).toBe('/tmp/home/.imgtokenx/env.sh');
     expect(plan.plist).toContain(`<string>${LAUNCHD_LABEL}</string>`);
     expect(plan.plist).toContain('<string>/usr/local/bin/node</string>');
-    expect(plan.plist).toContain('<string>/repo/pxpipe/bin/cli.js</string>');
+    expect(plan.plist).toContain('<string>/repo/imgtokenx/bin/cli.js</string>');
     expect(plan.plist).toContain('<string>47899</string>');
-    expect(plan.plist).toContain('<string>/tmp/home/.pxpipe/proxy.out.log</string>');
+    expect(plan.plist).toContain('<string>/tmp/home/.imgtokenx/proxy.out.log</string>');
   });
 
-  it('renders wrappers that route each harness through the right local base URL and keep PXPIPE_DISABLE as bypass', () => {
+  it('renders wrappers that route each harness through the right local base URL and keep IMGTOKENX_DISABLE as bypass', () => {
     const env = renderShellEnv({
       nodePath: '/node',
       cliPath: '/repo/bin/cli.js',
@@ -41,42 +41,42 @@ describe('install artifacts', () => {
       port: 47821,
     });
 
-    expect(env).toContain('curl -fsS "$PXPIPE_BASE_URL/healthz"');
-    expect(env).toContain('launchctl kickstart -k "gui/$(id -u)/com.pxpipe.proxy"');
-    expect(env).toContain('HOST=127.0.0.1 PORT="$PXPIPE_PORT" nohup "$PXPIPE_NODE" "$PXPIPE_CLI"');
-    expect(env).toContain('ANTHROPIC_BASE_URL="$PXPIPE_BASE_URL" command claude "$@"');
-    expect(env).toContain('OPENAI_BASE_URL="$PXPIPE_BASE_URL/v1" command codex "$@"');
-    expect(env).toContain('ANTHROPIC_BASE_URL="$PXPIPE_BASE_URL/anthropic" OPENAI_BASE_URL="$PXPIPE_BASE_URL/openai" command opencode "$@"');
-    expect(env).toContain('if [ "${PXPIPE_DISABLE:-}" = "1" ]; then command claude "$@"; return $?; fi');
+    expect(env).toContain('curl -fsS "$IMGTOKENX_BASE_URL/healthz"');
+    expect(env).toContain('launchctl kickstart -k "gui/$(id -u)/com.imgtokenx.proxy"');
+    expect(env).toContain('HOST=127.0.0.1 PORT="$IMGTOKENX_PORT" nohup "$IMGTOKENX_NODE" "$IMGTOKENX_CLI"');
+    expect(env).toContain('ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL" command claude "$@"');
+    expect(env).toContain('OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/v1" command codex "$@"');
+    expect(env).toContain('ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL/anthropic" OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/openai" command opencode "$@"');
+    expect(env).toContain('if [ "${IMGTOKENX_DISABLE:-}" = "1" ]; then command claude "$@"; return $?; fi');
   });
 
   it('adds and removes exactly one zshrc source block idempotently', () => {
-    const plan = buildInstallPlan({ home: '/tmp/home', repoRoot: '/repo/pxpipe' });
+    const plan = buildInstallPlan({ home: '/tmp/home', repoRoot: '/repo/imgtokenx' });
     const original = 'export PATH=/usr/bin\n';
     const once = applyZshrcInstall(original, plan.zshrcBlock);
     const twice = applyZshrcInstall(once, plan.zshrcBlock);
 
     expect(twice).toBe(once);
-    expect(once).toContain('# >>> pxpipe auto-start >>>');
-    expect(once).toContain("[ -r '/tmp/home/.pxpipe/env.sh' ] && . '/tmp/home/.pxpipe/env.sh'");
+    expect(once).toContain('# >>> imgtokenx auto-start >>>');
+    expect(once).toContain("[ -r '/tmp/home/.imgtokenx/env.sh' ] && . '/tmp/home/.imgtokenx/env.sh'");
     expect(applyZshrcUninstall(once)).toBe(original);
   });
 
   it('prepares MCP registrations for Claude, Codex, and OpenCode', () => {
     const plan = buildInstallPlan({
       home: '/tmp/home',
-      repoRoot: '/repo/pxpipe',
+      repoRoot: '/repo/imgtokenx',
       nodePath: '/node',
     });
 
     expect(plan.mcpCommands).toEqual([
-      `claude mcp add --scope user ${MCP_SERVER_NAME} -- '/node' '/repo/pxpipe/bin/cli.js' mcp`,
-      `codex mcp add ${MCP_SERVER_NAME} -- '/node' '/repo/pxpipe/bin/cli.js' mcp`,
+      `claude mcp add --scope user ${MCP_SERVER_NAME} -- '/node' '/repo/imgtokenx/bin/cli.js' mcp`,
+      `codex mcp add ${MCP_SERVER_NAME} -- '/node' '/repo/imgtokenx/bin/cli.js' mcp`,
     ]);
     expect(plan.opencodeMcp).toEqual({
       enabled: true,
       type: 'local',
-      command: ['/node', '/repo/pxpipe/bin/cli.js', 'mcp'],
+      command: ['/node', '/repo/imgtokenx/bin/cli.js', 'mcp'],
     });
   });
 
@@ -87,9 +87,9 @@ describe('install artifacts', () => {
   });
 
   it('doctor verifies installed files, health, launchd, and MCP wiring without mutating state', async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pxpipe-doctor-'));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-doctor-'));
     try {
-      const plan = buildInstallPlan({ home, repoRoot: '/repo/pxpipe', nodePath: '/node' });
+      const plan = buildInstallPlan({ home, repoRoot: '/repo/imgtokenx', nodePath: '/node' });
       fs.mkdirSync(path.dirname(plan.launchAgentPath), { recursive: true });
       fs.mkdirSync(path.dirname(plan.envPath), { recursive: true });
       fs.mkdirSync(path.join(home, '.config', 'opencode'), { recursive: true });
@@ -102,7 +102,7 @@ describe('install artifacts', () => {
       );
 
       const result = await runDoctor(
-        { home, repoRoot: '/repo/pxpipe', nodePath: '/node' },
+        { home, repoRoot: '/repo/imgtokenx', nodePath: '/node' },
         {
           fetch: (async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch,
           spawnSync: ((cmd: string) => ({

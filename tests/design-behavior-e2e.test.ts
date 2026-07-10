@@ -2,7 +2,7 @@
  * END-TO-END design-behaviour contract through the REAL proxy.
  *
  * After "don't bust the cache" (cache-stability-e2e) and "don't overclaim"
- * (savings-honesty / savings-math), this asserts the three things pxpipe is
+ * (savings-honesty / savings-math), this asserts the three things imgtokenx is
  * actually FOR behave per design, end to end:
  *
  *   1. SYSTEM PROMPT  — the bulky system/slab is imaged out of the request
@@ -14,7 +14,7 @@
  *                              from its tool_use across the image boundary.
  *
  *   fake api  = upstream output (canned response + count_tokens)
- *   our input = pxpipe's transform of the request
+ *   our input = imgtokenx's transform of the request
  *
  * Run just this file:  pnpm vitest run tests/design-behavior-e2e.test.ts
  */

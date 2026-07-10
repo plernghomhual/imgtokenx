@@ -1,6 +1,6 @@
 # Effective-context needle test — attempt log
 
-Goal: model reads the imaged (pxpipe-compressed) context and answers
+Goal: model reads the imaged (imgtokenx-compressed) context and answers
 `balance=<n>, count=<m>, final=<n+m>` correctly. Iterate on render crispness
 until it passes. Keep every failure here so we don't repeat dead ends.
 
@@ -16,10 +16,10 @@ until it passes. Keep every failure here so we don't repeat dead ends.
   messages ran `claude-opus-4-8`, not fable — the CLI's main loop switched to
   Opus despite `--model` (aux requests still fable; probes reproduce this with
   and without `[1m]`). The :47824 proxy at the time was the cost-ab instance
-  (`PXPIPE_MODELS=claude-fable-5`), so every opus request **passed through
+  (`IMGTOKENX_MODELS=claude-fable-5`), so every opus request **passed through
   uncompressed** → "perfect recall" was of raw text, proves nothing.
 - Fix: `setup.sh opus` → compress scope fable+opus, fresh ec logs
-  (`~/.pxpipe/ec-on.jsonl`) + PNG dumps (`/tmp/ec-png`), reseeded /tmp copies.
+  (`~/.imgtokenx/ec-on.jsonl`) + PNG dumps (`/tmp/ec-png`), reseeded /tmp copies.
 - Lesson: always verify per-request `compressed=true` for the *session that
   answered* (match `first_user_sha8`, don't trust tail-of-log).
 
@@ -27,7 +27,7 @@ until it passes. Keep every failure here so we don't repeat dead ends.
 
 - Recorded side-by-side (`Fable-AB-Demo.mp4`, Drive id
   `1pmI3quwv7uuNQ2Z7KMW-78OUOE30AzmU`): LEFT = a.sh plain passthrough,
-  RIGHT = b.sh via pxpipe :47824, both `claude-fable-5[1m]`, prompt with the
+  RIGHT = b.sh via imgtokenx :47824, both `claude-fable-5[1m]`, prompt with the
   filler-000 fix from attempt 1.
 - **Both arms content-correct:** count=10 (segment tallies 6/2/1/1 — matches
   attempt-1 grep ground truth line-for-line, incl. filler-000 line 221) and

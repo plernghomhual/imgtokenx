@@ -31,20 +31,20 @@ describe('resolveReaderProfile (built-in table)', () => {
   });
 });
 
-describe('resolveReaderProfile (PXPIPE_READER_PROFILES env override)', () => {
-  const prev = process.env.PXPIPE_READER_PROFILES;
+describe('resolveReaderProfile (IMGTOKENX_READER_PROFILES env override)', () => {
+  const prev = process.env.IMGTOKENX_READER_PROFILES;
   afterEach(() => {
-    if (prev === undefined) delete process.env.PXPIPE_READER_PROFILES;
-    else process.env.PXPIPE_READER_PROFILES = prev;
+    if (prev === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+    else process.env.IMGTOKENX_READER_PROFILES = prev;
   });
 
   it('opts an unknown model in via env, partial fields falling back to its built-in match', () => {
-    process.env.PXPIPE_READER_PROFILES = JSON.stringify({ 'claude-mythos-5': { safeToImage: true } });
+    process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({ 'claude-mythos-5': { safeToImage: true } });
     expect(resolveReaderProfile('claude-mythos-5')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
   });
 
   it('longest matching prefix wins', () => {
-    process.env.PXPIPE_READER_PROFILES = JSON.stringify({
+    process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({
       'claude-opus-4-': { cellWBonus: 1, cellHBonus: 1 },
       'claude-opus-4-8': { cellWBonus: 99, cellHBonus: 99 },
     });
@@ -53,7 +53,7 @@ describe('resolveReaderProfile (PXPIPE_READER_PROFILES env override)', () => {
   });
 
   it('malformed JSON never throws — silently falls back to the built-in table', () => {
-    process.env.PXPIPE_READER_PROFILES = '{not valid json';
+    process.env.IMGTOKENX_READER_PROFILES = '{not valid json';
     expect(() => resolveReaderProfile('claude-fable-5')).not.toThrow();
     expect(resolveReaderProfile('claude-fable-5')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
   });

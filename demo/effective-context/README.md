@@ -1,12 +1,12 @@
 # Demo 2 — effective context (recall at scale)
 
-**What it measures:** does pxpipe stay *sharp* in a context big enough to overload
+**What it measures:** does imgtokenx stay *sharp* in a context big enough to overload
 the plain column? This is the **capability** story, not cost — and it's the one that
 matters, because the cost A/B ([`../cost-ab/`](../cost-ab/README.md)) came out
 ~break-even.
 
 The idea: a context too large for the plain column to track reliably (a "dumb
-zone"). pxpipe images the bulky filler (compressing it) but keeps the small
+zone"). imgtokenx images the bulky filler (compressing it) but keeps the small
 **needle** as *text* — so it reads the needle perfectly while carrying a much
 smaller active context. The plain column carries everything as text and may lose
 the needle in the noise. `setup.sh` floods ≈200k tokens of inert logs around a
@@ -24,7 +24,7 @@ bash demo/effective-context/setup.sh   # Fable only (Opus off); 'setup.sh opus' 
 # Terminal 2 — LEFT  = normal   (interactive Claude — may drown and answer wrong)
 bash demo/effective-context/a.sh   # defaults to Fable; `a.sh opus` to use Opus
 
-# Terminal 3 — RIGHT = pxpipe   (interactive Claude — should answer correctly)
+# Terminal 3 — RIGHT = imgtokenx   (interactive Claude — should answer correctly)
 bash demo/effective-context/b.sh   # use the SAME model as a.sh
 ```
 
@@ -47,11 +47,11 @@ on the dashboard "compress models" chips.
 
 | column | expectation |
 |---|---|
-| **RIGHT — pxpipe** (`b.sh`) | matches the ground truth (needle stays text) |
+| **RIGHT — imgtokenx** (`b.sh`) | matches the ground truth (needle stays text) |
 | LEFT — plain (`a.sh`) | **may be wrong** at this size (drowns in filler) |
 
-**pxpipe correct + plain wrong = the effective-context win.** Each proxy also serves
-a live dashboard ([:47824](http://127.0.0.1:47824/) pxpipe, [:47823](http://127.0.0.1:47823/)
+**imgtokenx correct + plain wrong = the effective-context win.** Each proxy also serves
+a live dashboard ([:47824](http://127.0.0.1:47824/) imgtokenx, [:47823](http://127.0.0.1:47823/)
 plain) showing the context/token reduction — the same number `/context` reports.
 
 ---
@@ -60,20 +60,20 @@ plain) showing the context/token reduction — the same number `/context` report
 
 - **The premise is UNVALIDATED.** "Plain drowns at this size and answers wrong" is an
   assumption — modern Claude has strong long-context retrieval, so plain may **also**
-  get it right. If it does, this demo shows **no pxpipe advantage**. Run it and report
+  get it right. If it does, this demo shows **no imgtokenx advantage**. Run it and report
   *both* integers; don't assume the outcome.
-- **The needle stays text on purpose.** pxpipe is lossy on imaged content (it misreads
+- **The needle stays text on purpose.** imgtokenx is lossy on imaged content (it misreads
   exact strings), so this demo only works because the needle is small enough to stay
-  text. It does **not** show pxpipe recalling imaged exact values.
+  text. It does **not** show imgtokenx recalling imaged exact values.
 
 ## What IS already validated (from the cost A/B)
 
 In the Rust-rewrite run, **both** columns ported the whole pricing library to Rust and
 **both passed all 5 tests with the exact expected integers** (`2468 / 8316 / 216 /
-9975 / 45181`) preserved — pxpipe through imaged spec + source. So *"compression
+9975 / 45181`) preserved — imgtokenx through imaged spec + source. So *"compression
 doesn't corrupt precision work"* is supported. This demo tests the complementary
 claim: *"compression keeps you sharp where raw context overloads."*
 
 ## The other demo
-This is the **capability** demo. The **cost** demo ("does pxpipe cost less on a real
+This is the **capability** demo. The **cost** demo ("does imgtokenx cost less on a real
 task?", ~break-even) is in [`../cost-ab/`](../cost-ab/README.md).

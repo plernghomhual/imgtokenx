@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Eval v2: verbatim retrieval vs semantic comprehension, pxpipe ON vs OFF.
+# Eval v2: verbatim retrieval vs semantic comprehension, imgtokenx ON vs OFF.
 # 15 trials per (mode, cond) = 60 calls total.
 set -u
 cd "$(dirname "$0")"

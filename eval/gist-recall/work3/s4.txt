@@ -15,7 +15,7 @@
  *
  * The synthesized user message uses `role: 'user'` because Anthropic
  * **forbids `image` blocks inside `role: 'assistant'`** (see
- * `/tmp/pxpipe-history-compression.md` line 14 and `types.ts:58`
+ * `/tmp/imgtokenx-history-compression.md` line 14 and `types.ts:58`
  * comments). Self-attribution ("I previously said X") is the price.
  *
  * `thinking` blocks inside the collapsed range are dropped from the
@@ -24,10 +24,10 @@
  * and that turn is in the live tail by construction.
  *
  * **Cache-control**: caller controls whether the history-image carries
- * pxpipe's ephemeral breakpoint. This module returns the image blocks
+ * imgtokenx's ephemeral breakpoint. This module returns the image blocks
  * unmarked; the caller in `transform.ts` decides placement.
  *
- * Spec source: `/tmp/pxpipe-history-compression.md` Variant C section
+ * Spec source: `/tmp/imgtokenx-history-compression.md` Variant C section
  * (round 3, lines 346-364 + check-3 cache-control discussion).
  */
 
@@ -936,7 +936,7 @@ export function isCompressionProfitable(
    *  TEXT side — the cost of forcing a fresh cache_create on the
    *  un-rewritten text prefix when the rewritten image prefix was warm.
    *  Default 0 (back-compat; existing single-arg callers behave unchanged).
-   *  See PxpipeOptions.priorWarmImageTokens for the foundational rationale. */
+   *  See ImgtokenxOptions.priorWarmImageTokens for the foundational rationale. */
   priorWarmImageTokens: number = 0,
   /** Shrink the rendered canvas width to the longest actual wrapped line.
    *  Default `true` (per-block content: tool_result, reminder, history).

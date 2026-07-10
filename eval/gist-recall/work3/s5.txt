@@ -212,7 +212,7 @@ export interface TransformOptions {
    *  always-collapse (rejected), cache-bust-driven (rejected). */
   historyAmortizationHorizon?: number;
   /** Tokens that the *un-rewritten* request would have hit Anthropic's cache
-   *  on (cache_read at 0.10×). When pxpipe rewrites the cacheable prefix
+   *  on (cache_read at 0.10×). When imgtokenx rewrites the cacheable prefix
    *  (slab compression, image substitution, history collapse), the new
    *  prefix has a different cache key — Anthropic charges cache_create
    *  (1.25×) on the new prefix's first turn, destroying the prior warm
@@ -234,7 +234,7 @@ export interface TransformOptions {
   /** Symmetric counterpart of `priorWarmTokens` for the IMAGE-mode side.
    *
    *  When the prior turn rendered the static prefix as image blocks
-   *  (pxpipe applied), Anthropic's prompt cache holds the IMAGE prefix,
+   *  (imgtokenx applied), Anthropic's prompt cache holds the IMAGE prefix,
    *  not the text prefix. Declining compression on this turn — sending
    *  plain text — invalidates the image-prefix cache key and forces a
    *  fresh `cache_create` on the un-rewritten text prefix. Symmetric to
@@ -398,10 +398,10 @@ tals.requests += 1;
       this.totals.outputWeighted += outputEquiv;
     }
     // All-rows COUNTERFACTUAL spend, ungated on the probe — the honest
-    // denominator for "did pxpipe move my real bill". Measured rows
+    // denominator for "did imgtokenx move my real bill". Measured rows
     // contribute their cache-aware baseline (what the unproxied path
     // would have billed); unmeasured/probe-failed/passthrough rows
-    // contribute their actual input (pxpipe either didn't run or we
+    // contribute their actual input (imgtokenx either didn't run or we
     // can't measure the counterfactual, so actual ≈ baseline). This
     // keeps the ratio bounded at 100% — you can't save more than you
     // would have paid.
@@ -657,13 +657,13 @@ tals.requests += 1;
     // estimation), but the denominator MUST include every request the user
     // actually paid for — including passthrough rows, probe-failed rows,
     // and untransformed turns the gate said no to. Otherwise the headline
-    // answers "did pxpipe help on the rows where it ran" instead of
-    // "did pxpipe move my real bill". The first is a cherry-pick.
+    // answers "did imgtokenx help on the rows where it ran" instead of
+    // "did imgtokenx move my real bill". The first is a cherry-pick.
     const allBaselineEquiv = this.totals.allBaselineEquivalentWeighted;
     const allActual = this.totals.allActualInputWeighted;
     const allOutput = this.totals.allOutputWeighted;
     // Denominator = counterfactual all-rows bill: what the user would have
-    // paid with no pxpipe. Bounded ratio at 100%; a single cold-miss
+    // paid with no imgtokenx. Bounded ratio at 100%; a single cold-miss
     // compressed request on an otherwise empty session shows ~99% saved,
     // not 280%.
     const allCounterfactualBill = allBaselineEquiv + allOutput;

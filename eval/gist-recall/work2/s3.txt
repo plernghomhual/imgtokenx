@@ -884,7 +884,7 @@ function safeStringifyLen(v: unknown): number {
   }
 }
 /**
- * The pxpipe proxy as a single Web-standard fetch handler.
+ * The imgtokenx proxy as a single Web-standard fetch handler.
  *
  * Both `src/node.ts` and `src/worker.ts` adapt this to their respective
  * runtimes (node:http server vs CF Worker `fetch` export). The handler
@@ -894,7 +894,7 @@ function safeStringifyLen(v: unknown): number {
 
 import { transformRequest, type TransformOptions, type TransformInfo } from './transform.js';
 import { transformOpenAIChatCompletions } from './openai.js';
-import { isPxpipeSupportedGptModel, isPxpipeSupportedModel } from './applicability.js';
+import { isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,

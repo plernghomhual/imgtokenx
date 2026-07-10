@@ -86,7 +86,7 @@ export function deriveBaselineWarmth(
  *   warm turn (a prior turn cached the prefix within TTL):
  *     text append-caches ⇒ reused×CACHE_READ_RATE + grown×CACHE_CREATE_RATE + coldTail×1.0
  *     where reused = min(prevCacheable, cacheable), grown = cacheable − reused.
- *     This is what TEXT pays regardless of whether pxpipe's image busted its
+ *     This is what TEXT pays regardless of whether imgtokenx's image busted its
  *     own cache on a growth turn — so the real growth loss is preserved.
  *
  * Saving = baseline_eff − actual_eff; can be negative (honestly reported, not floored).
@@ -122,7 +122,7 @@ export function computeBaselineInputEff(
   return cacheable * CACHE_CREATE_RATE + coldTail * 1.0;
 }
 
-/** Weighted input cost pxpipe actually paid this turn. */
+/** Weighted input cost imgtokenx actually paid this turn. */
 export function computeActualInputEff(
   inputTokens: number,
   cc: number,

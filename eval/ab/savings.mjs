@@ -2,14 +2,14 @@
 // Real per-request token compression for the A/B run, straight from the proxy log.
 //
 //   real tokens = input_tokens + cache_create_tokens + cache_read_tokens   (what the
-//                 server actually processed for pxpipe's request)
+//                 server actually processed for imgtokenx's request)
 //   as-text     = baseline_tokens                                          (a real
 //                 count_tokens of the SAME body, uncompressed)
 //
 // Same body -> no trajectory divergence. This is the genuine compression. What it
 // SAVES depends on token pricing (cache_read is 0.1x at $; its cap weight is unknown).
 //
-//   node eval/ab/savings.mjs              # reads ab-on.jsonl (pxpipe) + ab-off.jsonl (plain)
+//   node eval/ab/savings.mjs              # reads ab-on.jsonl (imgtokenx) + ab-off.jsonl (plain)
 //   node eval/ab/savings.mjs <file>       # one specific log
 
 import fs from 'node:fs';
@@ -21,8 +21,8 @@ const arg = process.argv[2];
 const targets = arg
   ? [{ label: 'log', file: arg }]
   : [
-      { label: 'pxpipe', file: path.join(home, '.pxpipe', 'ab-on.jsonl') },
-      { label: 'plain ', file: path.join(home, '.pxpipe', 'ab-off.jsonl') },
+      { label: 'imgtokenx', file: path.join(home, '.imgtokenx', 'ab-on.jsonl') },
+      { label: 'plain ', file: path.join(home, '.imgtokenx', 'ab-off.jsonl') },
     ];
 
 const load = (f) => {
