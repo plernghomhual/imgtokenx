@@ -8,6 +8,21 @@
 
 ---
 
+## Update (2026-07-09) — GPT 5.6 Sol profile remains text-only
+
+An exact-model `gpt-5.6-sol` render profile was added with JetBrains Mono 10,
+a 6x11 cell, 126 columns, and a 1932px height cap. Its raw-image pilot failed
+the acceptance bar at both tested densities: the 6x11 and shared 5x8 calls each
+returned 0/4 exact identifiers with four confabulations. Gist and guard behavior
+alone are insufficient for silent exact-context rewriting.
+
+The renderer and guarded evaluator remain available for retuning, but the reader
+profile is text-only by default. Enabling imaging requires an explicit
+`IMGTOKENX_READER_PROFILES` override. Receipts:
+[`eval/sol-profile/RESULTS.md`](eval/sol-profile/RESULTS.md).
+
+---
+
 ## Update (2026-07-05) — parked: verbatim misreads are capacity-bound; research documented for successors
 
 Closed out a research pass over the exotic-rendering proposal space (ViT

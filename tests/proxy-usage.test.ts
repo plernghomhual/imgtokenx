@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { createProxy, type ProxyEvent } from '../src/core/proxy.js';
+
+// These proxy contracts intentionally exercise the opt-in generic GPT path.
+// Preserve the developer shell while making the suite independent of it.
+let ambientImgtokenxModels: string | undefined;
+beforeAll(() => {
+  ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+});
+afterAll(() => {
+  if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
+  else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+});
 
 /** Tiny in-process mock upstream — accepts any request and returns whatever
  *  the test fixture configured. Lets us assert that the proxy correctly

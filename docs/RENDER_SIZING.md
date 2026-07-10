@@ -6,7 +6,7 @@ reuse old 1928px / `px/750` assumptions.
 
 ## Current behavior
 
-Anthropic-facing dense pages use one 5x8 glyph cell per character:
+The default Anthropic-facing dense page uses one 5x8 glyph cell per character:
 
 - `PAD_X = PAD_Y = 4`
 - `CELL_W = 5`
@@ -27,6 +27,13 @@ chars  = 312 * 90 = 28,080
 
 That fits Anthropic's standard 1568px edge and the roughly 1.15 MP fidelity
 threshold measured in the July 2026 legibility audit.
+
+Reader and transport profiles may select a different cell and column count.
+Opus 4.x uses its calibrated 20x32 cell; OpenAI-shaped GPT traffic can select a
+different atlas and geometry by exact model id. `gpt-5.6-sol`, for example, has
+a 6x11 JetBrains Mono profile at 126 columns, but remains text-only until its
+reader profile is explicitly enabled. See
+[`MODEL_RENDER_PROFILES.md`](MODEL_RENDER_PROFILES.md).
 
 ## Billing model
 
@@ -49,12 +56,14 @@ Use `ANTHROPIC_PATCH_PX` and `IMAGE_COST_SAFETY_MARGIN` from
 
 ## Width behavior
 
-The shared renderer can shrink a page to the measured content width and can pack
+The shared renderer can select a font atlas, derive its cell dimensions, shrink
+a page to the measured content width, and pack
 multiple columns when asked. The proxy's dense default is a single column capped
 at `DENSE_CONTENT_COLS`.
 
 Relevant entry points:
 
+- `renderCellWidth` / `renderCellHeight` in `src/core/render.ts`
 - `renderTextToPngsWithCharLimit` in `src/core/render.ts`
 - `renderDensePages` in `src/core/render.ts`
 - `renderTextToImages` in `src/core/library.ts`

@@ -140,7 +140,7 @@ Environment:
   IMGTOKENX_GATEWAY_BASE_URL gateway base URL (required with IMGTOKENX_PROVIDER)
   IMGTOKENX_GATEWAY_HEADERS  extra upstream headers: JSON object or k=v;k2=v2
   IMGTOKENX_MODELS           comma-separated model bases to image (Claude + GPT);
-                          default claude-fable-5,gpt-5.6; off disables
+                          default claude-fable-5; off disables
   IMGTOKENX_CONFIG           JSON config path (default ~/.config/imgtokenx/config.json)
                           supports {"models": [...]} or {"models": "off"}
   IMGTOKENX_LOG              JSONL events path (default ~/.imgtokenx/events.jsonl)

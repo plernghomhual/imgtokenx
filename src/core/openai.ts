@@ -10,14 +10,16 @@ import {
   renderTextToPngs,
   reflow,
   shrinkColsToContent,
+  renderCellHeight,
+  renderCellWidth,
   PAD_X,
-  CELL_W,
+  PAD_Y,
+  READABLE_CHARS_PER_IMAGE,
   DENSE_CONTENT_CHARS_PER_IMAGE,
   type RenderedImage,
 } from './render.js';
 import {
   resolveGptProfile,
-  DEFAULT_GPT_STRIP_COLS,
   type GptVisionCost,
 } from './gpt-model-profiles.js';
 import { bytesToBase64 } from './png.js';
@@ -209,7 +211,7 @@ interface OpenAIResolvedOptions {
   compress: boolean;
   compressTools: boolean;
   minCompressChars: number;
-  cols: number;
+  cols?: number;
   multiCol: number;
   charsPerToken: number;
   reflow: boolean;
@@ -223,7 +225,7 @@ const DEFAULTS: OpenAIResolvedOptions = {
   compress: true,
   compressTools: true,
   minCompressChars: 2000,
-  cols: DEFAULT_GPT_STRIP_COLS,
+  cols: undefined,
   multiCol: 1,
   charsPerToken: 4, // conservative OpenAI default; override after telemetry
   reflow: true,
@@ -237,7 +239,7 @@ function resolveOptions(opts: TransformOptions): OpenAIResolvedOptions {
     compress: opts.compress ?? DEFAULTS.compress,
     compressTools: opts.compressTools ?? DEFAULTS.compressTools,
     minCompressChars: opts.minCompressChars ?? DEFAULTS.minCompressChars,
-    cols: opts.cols ?? DEFAULTS.cols,
+    cols: opts.cols,
     multiCol: opts.multiCol ?? DEFAULTS.multiCol,
     charsPerToken: opts.charsPerToken ?? DEFAULTS.charsPerToken,
     reflow: opts.reflow ?? DEFAULTS.reflow,
@@ -495,10 +497,23 @@ function evalOpenAIGate(
   cols: number,
   charsPerToken: number,
 ): { imageTokens: number; textTokens: number; profitable: boolean } {
-  const stripW = 2 * PAD_X + cols * CELL_W;
-  const estImages = estimateImageCount(renderedText, cols, 1);
-  const perStrip = visionTokensForModel(model, stripW, resolveGptProfile(model).maxHeightPx);
-  const imageTokens = estImages * perStrip;
+  const profile = resolveGptProfile(model);
+  const cellW = renderCellWidth(profile.style);
+  const cellH = renderCellHeight(profile.style);
+  const stripW = 2 * PAD_X + cols * cellW;
+  const maxLines = Math.max(1, Math.floor((profile.maxHeightPx - 2 * PAD_Y) / cellH));
+  const maxCharsPerImage = Math.min(
+    READABLE_CHARS_PER_IMAGE,
+    Math.max(1, cols) * maxLines,
+  );
+  const estImages = estimateImageCount(
+    renderedText,
+    cols,
+    1,
+    maxCharsPerImage,
+    maxLines,
+  );
+  const imageTokens = estImages * visionTokensForModel(model, stripW, profile.maxHeightPx);
   const textTokens = renderedText.length / charsPerToken;
   return { imageTokens, textTokens, profitable: imageTokens < textTokens };
 }
@@ -687,7 +702,12 @@ export async function transformOpenAIChatCompletions(
     : '';
   const header = CHAT_HEADER.replace('\n====', reflowNote + '\n====');
   const renderedText = header + combined;
-  const cols = Math.min(shrinkColsToContent(renderedText, o.cols), resolveGptProfile(req.model).stripCols);
+  const profile = resolveGptProfile(req.model);
+  const maxCols = o.cols ?? profile.stripCols;
+  const cols = Math.min(
+    shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
+    profile.stripCols,
+  );
 
   const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken);
   info.gateEval = {
@@ -705,7 +725,7 @@ export async function transformOpenAIChatCompletions(
     return { body, info };
   }
 
-  const images = await renderTextToPngs(renderedText, cols, {}, resolveGptProfile(req.model).maxHeightPx);
+  const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
   if (images.length === 0) {
     info.reason = 'render_empty';
     return { body, info };
@@ -773,8 +793,9 @@ export async function transformOpenAIChatCompletions(
     const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
       ...o.gptHistory,
       reflow: o.reflow,
-      cols: o.gptHistory?.cols ?? resolveGptProfile(req.model).stripCols,
-      maxHeightPx: o.gptHistory?.maxHeightPx ?? resolveGptProfile(req.model).maxHeightPx,
+      cols: o.gptHistory?.cols ?? profile.stripCols,
+      maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
+      style: o.gptHistory?.style ?? profile.style,
     });
     foldGptHistory(info, req.model, plan);
     const allImages = [...plan.images, ...plan.imagesAfter];
@@ -914,7 +935,12 @@ export async function transformOpenAIResponses(
     : '';
   const header = RESPONSES_HEADER.replace('\n====', reflowNote + '\n====');
   const renderedText = header + combined;
-  const cols = Math.min(shrinkColsToContent(renderedText, o.cols), resolveGptProfile(req.model).stripCols);
+  const profile = resolveGptProfile(req.model);
+  const maxCols = o.cols ?? profile.stripCols;
+  const cols = Math.min(
+    shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
+    profile.stripCols,
+  );
 
   const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken);
   info.gateEval = {
@@ -932,7 +958,7 @@ export async function transformOpenAIResponses(
     return { body, info };
   }
 
-  const images = await renderTextToPngs(renderedText, cols, {}, resolveGptProfile(req.model).maxHeightPx);
+  const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
   if (images.length === 0) {
     info.reason = 'render_empty';
     return { body, info };
@@ -1034,8 +1060,9 @@ export async function transformOpenAIResponses(
     const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
       ...o.gptHistory,
       reflow: o.reflow,
-      cols: o.gptHistory?.cols ?? resolveGptProfile(req.model).stripCols,
-      maxHeightPx: o.gptHistory?.maxHeightPx ?? resolveGptProfile(req.model).maxHeightPx,
+      cols: o.gptHistory?.cols ?? profile.stripCols,
+      maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
+      style: o.gptHistory?.style ?? profile.style,
     });
     foldGptHistory(info, req.model, plan);
     const allImages = [...plan.images, ...plan.imagesAfter];

@@ -4,7 +4,9 @@
 import { HTMX_JS, ALPINE_JS } from './vendor.js';
 import { CACHE_CREATE_RATE, CACHE_READ_RATE } from '../core/baseline.js';
 import { ATLAS_CELL_H, ATLAS_CELL_W } from '../core/atlas.js';
+import { resolveGptProfile } from '../core/gpt-model-profiles.js';
 import { resolveReaderProfile } from '../core/reader-profiles.js';
+import { renderCellHeight, renderCellWidth } from '../core/render.js';
 import type {
   StatsPayload,
   RecentPayload,
@@ -88,6 +90,7 @@ const MODEL_CATALOG: ReadonlyArray<{ id: string; label: string }> = [
 
 const GPT_MODEL_CATALOG: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'gpt-5.6', label: 'GPT 5.6' },
+  { id: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
   { id: 'gpt-5.5', label: 'GPT 5.5' },
 ];
 
@@ -101,12 +104,18 @@ export function renderModelsFragment(
     [...MODEL_CATALOG, ...GPT_MODEL_CATALOG].map((m) => [m.id, m.label]),
   );
   const readerMode = (id: string): { safe: boolean; label: string } => {
-    const profile = resolveReaderProfile(id);
+    const reader = resolveReaderProfile(id);
+    if (!reader.safeToImage) return { safe: false, label: 'text only' };
+    if (id.startsWith('gpt')) {
+      const profile = resolveGptProfile(id);
+      return {
+        safe: true,
+        label: `image ${renderCellWidth(profile.style)}×${renderCellHeight(profile.style)}`,
+      };
+    }
     return {
-      safe: profile.safeToImage,
-      label: profile.safeToImage
-        ? `image ${ATLAS_CELL_W + profile.cellWBonus}×${ATLAS_CELL_H + profile.cellHBonus}`
-        : 'text only',
+      safe: true,
+      label: `image ${ATLAS_CELL_W + reader.cellWBonus}×${ATLAS_CELL_H + reader.cellHBonus}`,
     };
   };
   const policyBadge = (id: string, label: string): string => {

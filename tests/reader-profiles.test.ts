@@ -9,6 +9,11 @@ describe('resolveReaderProfile (built-in table)', () => {
     expect(resolveReaderProfile('gpt-5.6')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
   });
 
+  it('keeps the unvalidated GPT 5.6 Sol profile text-only by default', () => {
+    expect(resolveReaderProfile('gpt-5.6-sol')).toEqual(DEFAULT_READER_PROFILE);
+    expect(resolveReaderProfile('gpt-5.6-sol-codex[1m]')).toEqual(DEFAULT_READER_PROFILE);
+  });
+
   it('claude-opus-4-* gets the measured 20x32 cell bonus (cellWBonus:15, cellHBonus:24)', () => {
     expect(resolveReaderProfile('claude-opus-4-8')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
     expect(resolveReaderProfile('claude-opus-4-7')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
@@ -41,6 +46,17 @@ describe('resolveReaderProfile (IMGTOKENX_READER_PROFILES env override)', () => 
   it('opts an unknown model in via env, partial fields falling back to its built-in match', () => {
     process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({ 'claude-mythos-5': { safeToImage: true } });
     expect(resolveReaderProfile('claude-mythos-5')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
+  });
+
+  it('requires an explicit reader override before enabling Sol imaging', () => {
+    process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({
+      'gpt-5.6-sol': { safeToImage: true },
+    });
+    expect(resolveReaderProfile('gpt-5.6-sol-codex')).toEqual({
+      safeToImage: true,
+      cellWBonus: 0,
+      cellHBonus: 0,
+    });
   });
 
   it('longest matching prefix wins', () => {

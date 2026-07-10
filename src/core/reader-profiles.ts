@@ -5,7 +5,7 @@
  * gpt-model-profiles.ts's structure (prefix-matched BUILTIN_RULES table, first match
  * wins, env override for retuning without a code change).
  *
- * `safeToImage: false` means transform.ts must not render anything for this model —
+ * `safeToImage: false` means the transform path must not render anything for this model —
  * full text passthrough (reason `reader_profile_unsafe`) — because we have no
  * evidence the model reads imaged content reliably at any profitable density.
  * `safeToImage: true` means it's safe to image at the given cell-size bonus (added
@@ -57,7 +57,7 @@ function isBaseOrAlias(m: string, base: string): boolean {
 /**
  * Built-in profiles, evaluated in order (first match wins).
  *
- * - claude-fable-5 / gpt-5.6: the production default pipeline models. Proven safe at
+ * - claude-fable-5 / generic gpt-5.6: calibrated pipeline models. Proven safe at
  *   the bare 5×8 production cell (no bonus) — see docs/RENDER_SIZING.md /
  *   FINDINGS.md's Fable 5 measurements.
  * - claude-opus-4- (any Opus 4.x): the ONLY non-default density point with a
@@ -65,12 +65,17 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   the 2026-07-05 capacity-argument update): "Opus 4.8: 10% exact at the 5×8
  *   production cell, 95% at 10×16, 100% at 20×32; n=20 ids/size". 20×32 = 5+15 ×
  *   8+24, hence cellWBonus:15, cellHBonus:24.
+ * - gpt-5.6-sol: text-only until its raw-image profile clears the exact-recall bar.
  * - everything else: DEFAULT_READER_PROFILE (never imaged; no measurement exists).
  */
 const BUILTIN_RULES: ProfileRule[] = [
   {
     test: (m) => isBaseOrAlias(m, 'claude-fable-5'),
     profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0 },
+  },
+  {
+    test: (m) => isBaseOrAlias(m, 'gpt-5.6-sol'),
+    profile: DEFAULT_READER_PROFILE,
   },
   {
     test: (m) => isBaseOrAlias(m, 'gpt-5.6'),

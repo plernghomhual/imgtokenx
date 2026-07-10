@@ -20,6 +20,14 @@ charges one visual token per 28px patch after standard image resizing. A full
 1602 tokens with its 10% safety margin. The trade is real text tokens for a few
 image tokens we cache once.
 
+OpenAI-shaped Chat/Responses traffic resolves geometry, font, vision billing,
+and cache rates from the model id rather than the endpoint alone. Model scope
+and reader safety are separate gates: a model must be selected by
+`IMGTOKENX_MODELS` and have `safeToImage: true` in its reader profile. Otherwise
+the original request remains text with reason `unsupported_model` or
+`reader_profile_unsafe`. See
+[`MODEL_RENDER_PROFILES.md`](MODEL_RENDER_PROFILES.md).
+
 ## 2. The static / dynamic split
 
 Claude Code does not send one monolithic system prompt. It stitches a handful
@@ -183,7 +191,8 @@ contains extracted exact-risk strings, imgtokenx leaves that block as native tex
 instead of rendering it. Telemetry lands in JSONL as `fact_sheet_items`,
 `fact_sheet_chars`, `recoverable_refs`, `lossless_exact_kept`,
 `lossless_exact_chars`, and `break_even_misses`; `passthrough_reasons` now
-also includes `kept_sharp` and `lossless_exact` when those branches fire.
+also includes `kept_sharp`, `lossless_exact`, and `reader_profile_unsafe` when
+those branches fire.
 
 ## 6. Determinism and fingerprints
 

@@ -91,21 +91,25 @@ describe('public library API', () => {
     }
   });
 
-  it('recognizes GPT 5.6 as the default OpenAI imaging scope (5.5 opt-in)', () => {
+  it('keeps GPT off by default and preserves exact Sol opt-in aliases', () => {
+    expect(getAllowedModelBases()).toEqual(['claude-fable-5']);
     expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
-    // gpt-5.5 degrades on imaged context, so it is off by default now.
     expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
     expect(isImgtokenxSupportedGptModel('gpt-5.5-codex')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.5-2026-06-01')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-terra')).toBe(false);
     expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true);
     expect(isImgtokenxSupportedGptModel('gpt-4o')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-50')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('claude-opus-4-8')).toBe(false);
-    expect(isImgtokenxSupportedGptModel(null)).toBe(false);
+
+    process.env.IMGTOKENX_MODELS = 'gpt-5.6-sol';
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol[1m]')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex[1m]')).toBe(true);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+    expect(isImgtokenxSupportedGptModel('gpt-5.6-terra')).toBe(false);
   });
 
   it('honors the single IMGTOKENX_MODELS scope for GPT families', () => {
@@ -114,17 +118,17 @@ describe('public library API', () => {
       // Explicit Claude-only scope disables GPT imaging.
       process.env.IMGTOKENX_MODELS = 'claude-fable-5';
       expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
-      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(false);
 
       // Mixed CSV selects exactly those bases across families.
-      process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+      process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-sol';
       expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
-      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(true);
       expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
 
       // `off` disables everything.
       process.env.IMGTOKENX_MODELS = 'off';
-      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(false);
       expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.IMGTOKENX_MODELS;

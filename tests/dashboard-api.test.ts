@@ -188,7 +188,7 @@ describe('serveFragment', () => {
     try {
       delete process.env.IMGTOKENX_MODELS;
       delete process.env.IMGTOKENX_READER_PROFILES;
-      setAllowedModelBases(null); // reset to built-in default (Fable 5 + GPT 5.6)
+      setAllowedModelBases(null); // reset to built-in Fable-only scope
       const on = await (await dash.serveFragment('models', url, 1234)).text();
       expect(on).toContain('Reader policy');
       expect(on).toContain('Every model stays usable');
@@ -200,23 +200,26 @@ describe('serveFragment', () => {
       expect(on).not.toContain('Cloudflare gateway');
       expect(on).toContain('OpenAI scope');
       expect(on).not.toContain('style="display:none"');
-      // GPT 5.6 is on by default; GPT 5.5 is opt-in (off until toggled).
-      expect(on).toContain('GPT 5.6 ✓</span><span class="chip-mode">image 5×8');
+      // GPT profiles are visible, but no GPT model is silently enabled.
+      expect(on).toContain('GPT 5.6</span><span class="chip-mode">image 5×8');
+      expect(on).toContain('GPT 5.6 Sol</span><span class="chip-mode">text only');
       expect(on).toContain('GPT 5.5</span><span class="chip-mode">text only');
       expect(on).toContain('Opus 4.8');
       expect(on).toContain('image 20×32');
       expect(on).toContain('Sonnet 5');
-      // GPT 5.6 renders to the left of GPT 5.5.
-      expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.5'));
-      expect(getAllowedModelBases()).toContain('gpt-5.6');
+      // Generic GPT 5.6, its Sol profile, then GPT 5.5.
+      expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.6 Sol'));
+      expect(on.indexOf('GPT 5.6 Sol')).toBeLessThan(on.indexOf('GPT 5.5'));
+      expect(getAllowedModelBases()).not.toContain('gpt-5.6');
       expect(getAllowedModelBases()).not.toContain('gpt-5.5');
 
+      dash.handleModelsToggle('gpt-5.6-sol', true);
       dash.handleModelsToggle('gpt-5.5', true);
       const onBoth = await (await dash.serveFragment('models', url, 1234)).text();
       expect(onBoth).toContain('GPT 5.5 ✓</span><span class="chip-mode">text only');
-      expect(onBoth).toContain('GPT 5.6 ✓</span><span class="chip-mode">image 5×8');
+      expect(onBoth).toContain('GPT 5.6 Sol ✓</span><span class="chip-mode">text only');
       expect(getAllowedModelBases()).toContain('gpt-5.5');
-      expect(getAllowedModelBases()).toContain('gpt-5.6');
+      expect(getAllowedModelBases()).toContain('gpt-5.6-sol');
 
       dash.handleModelsToggle('custom-"model', true);
       const custom = await (await dash.serveFragment('models', url, 1234)).text();

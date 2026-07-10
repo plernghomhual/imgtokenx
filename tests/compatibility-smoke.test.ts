@@ -186,6 +186,16 @@ describe('client compatibility smoke matrix', () => {
       expectImage: true,
     },
     {
+      name: 'Codex OpenAI Responses unvalidated Sol profile',
+      config: { openAIUpstream: 'http://openai.test', openAIApiKey: 'fake-openai-key', transform: FORCE_TRANSFORM },
+      url: 'http://localhost/v1/responses',
+      headers: { 'content-type': 'application/json' },
+      body: { model: 'gpt-5.6-sol', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
+      upstream: 'http://openai.test/v1/responses',
+      kind: 'openai-responses' as const,
+      expectImage: false,
+    },
+    {
       name: 'OpenCode OpenAI weak GPT',
       config: { upstream: 'http://ocproxy.test', openAIUpstream: 'http://openai.test', transform: FORCE_TRANSFORM },
       url: 'http://localhost/openai/chat/completions',
@@ -219,21 +229,27 @@ describe('client compatibility smoke matrix', () => {
     kind: 'anthropic' | 'openai-chat' | 'openai-responses';
     expectImage: boolean;
   }>)('$name routes with the expected image/pass-through decision', async ({ config, url, headers, body, upstream, kind, expectImage }) => {
+    const prevModels = process.env.IMGTOKENX_MODELS;
+    process.env.IMGTOKENX_MODELS = String(body.model);
     const capture: FetchCapture = { calls: [], bodies: [] };
     stubFetch(capture);
+    try {
+      const res = await createProxy(config)(
+        new Request(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+      await res.text();
 
-    const res = await createProxy(config)(
-      new Request(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      }),
-    );
-    await res.text();
-
-    const sent = sentJson(capture);
-    expect(capture.calls).toContain(upstream);
-    expect(hasImagePart(sent, kind)).toBe(expectImage);
-    expect(JSON.stringify(sent).includes(BIG_CONTEXT.slice(0, 80))).toBe(!expectImage);
+      const sent = sentJson(capture);
+      expect(capture.calls).toContain(upstream);
+      expect(hasImagePart(sent, kind)).toBe(expectImage);
+      expect(JSON.stringify(sent).includes(BIG_CONTEXT.slice(0, 80))).toBe(!expectImage);
+    } finally {
+      if (prevModels === undefined) delete process.env.IMGTOKENX_MODELS;
+      else process.env.IMGTOKENX_MODELS = prevModels;
+    }
   });
 });

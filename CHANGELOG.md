@@ -6,7 +6,21 @@ behavioral changes, patch = fixes).
 
 ## Unreleased
 
+### Added
+- OpenAI-shaped requests now resolve render geometry, font, vision billing, and
+  cache rates by model id. Claude traffic on `/v1/responses` no longer inherits
+  GPT geometry or pricing.
+- Added model-selectable font atlases and an exact `gpt-5.6-sol` JetBrains Mono
+  10 profile. Sol remains text-only until a reader override is explicitly set;
+  its first raw-image pilot failed exact recall.
+- Dashboard model choices include GPT 5.6 Sol and report its calibrated/text-only
+  reader state without enabling imaging implicitly.
+
 ### Security / Correctness
+- Reflow markers are now counted as inline glyphs by the profitability gate,
+  matching the renderer and preventing inflated history page estimates.
+- OpenAI-shaped traffic now requires both model scope and a reader-safe profile;
+  selected but uncalibrated models remain byte-preserving text passthrough.
 - **Fixed: lossless-exact and recovery-sidecar emission were wrongly mutually
   exclusive.** `shouldKeepLosslessExact` disabled lossless-exact whenever
   `emitRecoverable` was also on, so exact-risk blocks got imaged instead of

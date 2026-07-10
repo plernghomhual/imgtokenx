@@ -6,6 +6,7 @@
 import { transformRequest, type TransformOptions, type TransformInfo } from './transform.js';
 import { transformOpenAIChatCompletions, transformOpenAIResponses } from './openai.js';
 import { isAnthropicMessagesPath, isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
+import { resolveReaderProfile } from './reader-profiles.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,
@@ -753,9 +754,11 @@ export function createProxy(config: ProxyConfig = {}) {
         // Fail-closed: unreadable model → no compression, not a risky guess.
         const model = readModelField(bodyIn);
         requestModel = model ?? undefined;
-        const modelOk = isMessages
+        const inScope = isMessages
           ? isImgtokenxSupportedModel(model)
           : isImgtokenxSupportedGptModel(model);
+        const readerSafe = isMessages || resolveReaderProfile(model).safeToImage;
+        const modelOk = inScope && readerSafe;
         // Unsupported model → a true passthrough: no break-even compression
         // (a text-only model may not accept injected image blocks at all).
         const effectiveOpts = modelOk
@@ -766,7 +769,10 @@ export function createProxy(config: ProxyConfig = {}) {
           : isOpenAIChat
             ? await transformOpenAIChatCompletions(bodyIn, effectiveOpts)
             : await transformOpenAIResponses(bodyIn, effectiveOpts);
-        if (!modelOk) r.info.reason = 'unsupported_model';
+        if (!modelOk) {
+          r.info.reason = inScope ? 'reader_profile_unsafe' : 'unsupported_model';
+          if (inScope) r.info.passthroughReasons = { reader_profile_unsafe: 1 };
+        }
         bodyOut = r.body as unknown as BodyInit; // TS narrows Uint8Array away from BodyInit
         info = r.info;
         reqBodyBytes = r.body;

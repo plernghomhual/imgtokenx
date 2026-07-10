@@ -20,13 +20,23 @@ const dec = new TextDecoder();
 // ── Task 1: applicability gate ──────────────────────────────────────────────
 
 describe('isImgtokenxSupportedGptModel', () => {
-  it('matches GPT 5.6 by default; GPT 5.5 is opt-in only', () => {
-    expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false); // off by default — degrades on imaged context
-    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true); // variant tag stripped
+  it('keeps GPT off by default and honors an explicit generic 5.6 scope', () => {
+    const prev = process.env.IMGTOKENX_MODELS;
+    try {
+      delete process.env.IMGTOKENX_MODELS;
+      expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
+
+      process.env.IMGTOKENX_MODELS = 'gpt-5.6';
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.IMGTOKENX_MODELS;
+      else process.env.IMGTOKENX_MODELS = prev;
+    }
   });
 
   it('rejects non-GPT-5 models', () => {
@@ -84,7 +94,12 @@ describe('Claude models on OpenAI Responses', () => {
 
   it('uses Anthropic geometry and patch pricing by model id', () => {
     const profile = resolveGptProfile('claude-opus-4-8');
-    expect(profile).toMatchObject({ stripCols: 312, maxHeightPx: 728 });
+    expect(profile).toMatchObject({
+      stripCols: 78,
+      maxHeightPx: 728,
+      style: { cellWBonus: 15, cellHBonus: 24 },
+    });
+    expect(resolveGptProfile('claude-fable-5')).toMatchObject({ stripCols: 312, maxHeightPx: 728 });
     expect(resolveGptProfile('gpt-5.6')).toMatchObject({ stripCols: 152, maxHeightPx: 1932 });
 
     const expectedClaudeTokens = Math.ceil(Math.ceil(1568 / 28) * Math.ceil(728 / 28) * 1.10);
@@ -845,5 +860,64 @@ describe('image parts request detail = "original" (avoid downscale of dense text
     const imgs = parts.filter((p) => p.type === 'input_image');
     expect(imgs.length).toBeGreaterThan(0);
     for (const p of imgs) expect(p.detail).toBe('original');
+  });
+});
+
+describe('GPT 5.6 Sol render profile', () => {
+  it('selects the compact JetBrains profile only for Sol ids and aliases', () => {
+    for (const model of [
+      'gpt-5.6-sol',
+      'gpt-5.6-sol[1m]',
+      'gpt-5.6-sol-codex',
+      'gpt-5.6-sol-codex[1m]',
+    ]) {
+      expect(resolveGptProfile(model)).toMatchObject({
+        stripCols: 126,
+        maxHeightPx: 1932,
+        style: { font: 'jetbrains-mono-10' },
+      });
+    }
+
+    for (const model of ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-terra[1m]']) {
+      expect(resolveGptProfile(model)).toMatchObject({
+        stripCols: 152,
+        style: { font: 'spleen-5x8' },
+      });
+    }
+  });
+
+  it('renders Sol below the OpenAI 768px short-side resize floor', async () => {
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6-sol',
+      instructions: BIG_INSTRUCTIONS,
+      input: [{ role: 'user', content: 'hello' }],
+    }));
+    const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
+    expect(result.info.compressed).toBe(true);
+    expect(result.info.firstImageWidth).toBe(764);
+  });
+
+  it('merges IMGTOKENX_GPT_PROFILES style overrides with the Sol defaults', () => {
+    const previous = process.env.IMGTOKENX_GPT_PROFILES;
+    try {
+      process.env.IMGTOKENX_GPT_PROFILES = JSON.stringify({
+        'gpt-5.6-sol': {
+          stripCols: 100,
+          style: { font: 'spleen-5x8', cellWBonus: 2, grid: true, gridCols: 4 },
+        },
+      });
+      expect(resolveGptProfile('gpt-5.6-sol-codex')).toMatchObject({
+        stripCols: 100,
+        style: {
+          font: 'spleen-5x8',
+          cellWBonus: 2,
+          grid: true,
+          gridCols: 4,
+        },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.IMGTOKENX_GPT_PROFILES;
+      else process.env.IMGTOKENX_GPT_PROFILES = previous;
+    }
   });
 });

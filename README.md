@@ -121,9 +121,14 @@ are imaged.
   a small saving until history collapse fires. Codex App sessions authenticated
   through ChatGPT bypass this proxy. See
   [Responses caching and savings](docs/CACHING_AND_SAVINGS.md#openai-responses-codex-and-opencode).
-- **Model scope:** default `IMGTOKENX_MODELS=claude-fable-5,gpt-5.6`. Opus
-  4.7/4.8 misread ~7% of renders and GPT 5.5 degrades on imaged context, so
-  both are opt-in via `IMGTOKENX_MODELS` or the dashboard chips.
+- **Model scope:** the saved/configured scope starts with
+  `IMGTOKENX_MODELS=claude-fable-5`. Additional Claude and GPT ids are opt-in
+  via `IMGTOKENX_MODELS` or the dashboard chips, and reader safety remains an
+  independent gate. Opus 4.x uses its calibrated 20x32 profile; GPT 5.5 and
+  uncalibrated models remain text-only.
+  The exact `gpt-5.6-sol` renderer is available but remains text-only until a
+  reader override is explicitly supplied because its first raw-image pilot
+  failed exact recall. See [model render profiles](docs/MODEL_RENDER_PROFILES.md).
   `IMGTOKENX_MODELS=off` disables imaging. Everything else passes through
   byte-identical. On the GPT path, tool definitions stay native JSON and no
   Anthropic `cache_control` markers are used.
@@ -237,11 +242,11 @@ Three kinds of *input* blocks, each behind a profitability gate:
 
 Everything else passes through byte-identical: your messages, recent turns,
 the model's output (it is the response, the proxy never touches it), sparse
-prose, and anything too small to win. Models outside the allowlist pass
-through entirely — the default scope is Fable 5 and GPT 5.6 only. Opus 4.8
-and GPT 5.5 read imaged content measurably worse (FINDINGS.md 2026-06-16),
-so they are deliberately opt-in via the dashboard or `IMGTOKENX_MODELS`, never
-silently imaged.
+prose, and anything too small to win. The configured scope starts with Fable
+5 only; additional ids require the dashboard or `IMGTOKENX_MODELS`, and the
+independent reader profile can still force text passthrough. Opus 4.x uses its
+calibrated 20x32 profile. GPT 5.6 Sol remains text-only unless explicitly
+overridden because its first raw-image pilot failed exact recall.
 
 **Has it ever failed for real, outside the benchmarks?**
 Yes, once in weeks of daily use: the model recalled a person's name from

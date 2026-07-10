@@ -24,22 +24,13 @@ function baseModelId(model: string): string {
 /** Host runtime override; null = fall back to IMGTOKENX_MODELS env / built-in default. */
 let runtimeModelBases: readonly string[] | null = null;
 
-/** Built-in default scope, consulted in two different ways depending on family
- *  (Phase 2 reader-profiles split, see isImgtokenxSupportedModel below):
- *
- *  - GPT: still THE correctness gate. GPT models have no reader-capacity-profile
- *    system yet (that only exists for Anthropic — see reader-profiles.ts /
- *    transform.ts), so this fixed allowlist remains their only imaging-safety
- *    backstop. GPT 5.5 is intentionally excluded — measurably worse at reading
- *    imaged content (FINDINGS.md 2026-06-16 sweep) — so silently imaging it would
- *    be the wrong default; opt in via the dashboard chips or IMGTOKENX_MODELS.
- *  - Anthropic (Claude): now ONLY a fallback used when IMGTOKENX_MODELS is explicitly
- *    set (back-compat) or the dashboard runtime override is active. It is NOT
- *    consulted for the default (unset-env) case anymore — see
- *    isImgtokenxSupportedModel's comment for why Opus 4.8 no longer needs a mention
- *    here (the FINDINGS.md 2026-06-16 sweep numbers now live in
- *    reader-profiles.ts, which is the real correctness gate for Claude). */
-const DEFAULT_MODEL_BASES = ['claude-fable-5', 'gpt-5.6'];
+/** Built-in dashboard/OpenAI scope. Fable is the only default: GPT 5.6 Sol's
+ * raw-image pilot scored 0/4 exact at both tested profiles, and other GPT variants
+ * lack equivalent reader evidence. Explicit IMGTOKENX_MODELS scope and the
+ * independent reader profile must both permit OpenAI-shaped traffic before it is
+ * imaged. Claude still enters its transformer by default and is gated there by its
+ * reader profile. */
+const DEFAULT_MODEL_BASES = ['claude-fable-5'];
 
 function falsey(v: string): boolean {
   return /^(0|false|no|off|none)$/i.test(v.trim());
@@ -47,9 +38,9 @@ function falsey(v: string): boolean {
 
 /** IMGTOKENX_MODELS env / built-in default, ignoring the runtime override. One CSV
  *  controls every family (Claude + GPT). Resolution (read per-call so scope flips LIVE):
- *  - unset or empty        → built-in default (Fable 5 + GPT 5.6)
+ *  - unset or empty        → built-in default (Fable 5 only)
  *  - `off`/`0`/`false`/... → compress nothing
- *  - CSV of model bases    → exactly those families (e.g. `claude-fable-5,gpt-5.6`) */
+ *  - CSV of model bases    → exactly those families (e.g. `claude-fable-5,gpt-5.6-sol`) */
 function envOrDefaultBases(): string[] {
   // Edge-safe: `process` is undefined off-Node; `typeof` avoids a ReferenceError.
   const raw = typeof process !== 'undefined' ? process.env?.IMGTOKENX_MODELS : undefined;
@@ -111,10 +102,8 @@ export function isImgtokenxSupportedModel(model: string | null | undefined): boo
   return true;
 }
 
-/** True when imgtokenx may transform this GPT model. GPT has no reader-capacity-profile
- *  system yet (see reader-profiles.ts's module comment), so this fixed allowlist
- *  remains its only imaging-safety gate — unlike Claude, GPT is NOT unconditionally
- *  eligible by default. Shares the single IMGTOKENX_MODELS scope for explicit overrides. */
+/** True when this GPT model is in imgtokenx's configured scope. The proxy also
+ * requires its independent reader profile to be safe before rendering an image. */
 export function isImgtokenxSupportedGptModel(model: string | null | undefined): boolean {
   return isAllowed(model);
 }

@@ -1207,10 +1207,12 @@ export function estimateImageCount(
   cols: number,
   numCols: number = 1,
   maxCharsPerImage: number = READABLE_CHARS_PER_IMAGE,
+  maxLinesPerColumn: number = LINES_PER_IMAGE,
 ): number {
   const n = Math.max(1, numCols | 0);
   const readableLinesPerCol = Math.max(1, Math.floor(maxCharsPerImage / Math.max(1, cols)));
-  const linesPerImage = Math.min(LINES_PER_IMAGE, readableLinesPerCol) * n;
+  const hardLinesPerCol = Math.max(1, Math.floor(maxLinesPerColumn));
+  const linesPerImage = Math.min(hardLinesPerCol, readableLinesPerCol) * n;
   const charBudget = Math.max(1, maxCharsPerImage * n);
   if (typeof textOrLen === 'number') {
     // Back-compat shim — numeric arg gets the looser chars-based estimate.

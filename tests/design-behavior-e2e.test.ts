@@ -18,8 +18,20 @@
  *
  * Run just this file:  pnpm vitest run tests/design-behavior-e2e.test.ts
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createProxy } from '../src/core/proxy.js';
+
+// These proxy contracts intentionally exercise the opt-in generic GPT path.
+// Preserve the developer shell while making the suite independent of it.
+let ambientImgtokenxModels: string | undefined;
+beforeAll(() => {
+  ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+});
+afterAll(() => {
+  if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
+  else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+});
 
 function fakeUpstream() {
   const main: string[] = [];

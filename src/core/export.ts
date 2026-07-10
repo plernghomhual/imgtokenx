@@ -18,8 +18,8 @@ import {
 // consumers import (imgtokenx/transform → renderTextToImages), not the
 // internal leaf renderer.
 import { renderTextToImages } from './library.js';
-import { estimateImageCount, ANTHROPIC_PATCH_PX, IMAGE_COST_SAFETY_MARGIN, REPORT_CHARS_PER_TOKEN } from './transform.js';
-import { openAIVisionTokens } from './openai.js';
+import { estimateImageCount, REPORT_CHARS_PER_TOKEN } from './transform.js';
+import { visionTokensForModel } from './openai.js';
 import {
   factSheetTextFromEntries,
   extractFactSheetTokensAllPages,
@@ -247,18 +247,11 @@ export function parseExportArgv(
 /**
  * Per-image vision-token cost for a rendered PNG at the given pixel dimensions.
  *
- * - **Claude / Anthropic models** (`model.startsWith('claude')` or
- *   `model.includes('anthropic')`): uses Anthropic's 28px patch billing formula
- *   with the same safety margin as `imageTokensForRows` in transform.ts.
- * - **GPT / o-series models**: delegates to `openAIVisionTokens` which uses the
- *   GPT-4o tile-pricing formula (85 + 170 × tiles after scaling).
+ * Delegates to the same model-id router used by the proxy so Claude Responses
+ * traffic and GPT/o-series traffic cannot drift from export reporting.
  */
 export function exportImageTokens(model: string, width: number, height: number): number {
-  if (model.startsWith('claude') || model.includes('anthropic')) {
-    const patches = Math.ceil(width / ANTHROPIC_PATCH_PX) * Math.ceil(height / ANTHROPIC_PATCH_PX);
-    return Math.ceil(patches * IMAGE_COST_SAFETY_MARGIN);
-  }
-  return openAIVisionTokens(model, width, height);
+  return visionTokensForModel(model, width, height);
 }
 
 // ---------------------------------------------------------------------------
