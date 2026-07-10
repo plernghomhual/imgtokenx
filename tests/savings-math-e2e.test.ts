@@ -19,9 +19,21 @@
  *
  * Run just this file:  pnpm vitest run tests/savings-math-e2e.test.ts
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createProxy, type ProxyEvent } from '../src/core/proxy.js';
 import { countTokens as o200k } from 'gpt-tokenizer/encoding/o200k_base';
+
+// The GPT cases intentionally exercise an opt-in model. Preserve the developer
+// shell while pinning this file's scope so CI and local runs behave identically.
+let ambientImgtokenxModels: string | undefined;
+beforeAll(() => {
+  ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+});
+afterAll(() => {
+  if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
+  else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+});
 
 const PROBE_TOKENS = 9999; // canned count_tokens result from the fake upstream
 
