@@ -10,6 +10,8 @@ geometry, font, style, and billing from the exact model id.
 |---|---|---|---:|---:|
 | `claude-fable-5` | image | Spleen + Unifont, 5x8 | 312 | 728 px |
 | `claude-opus-4-*` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
+| `claude-sonnet-5` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
+| `claude-haiku-4-5` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
 | other Claude models | text only until calibrated | Spleen + Unifont, 5x8 | 312 | 728 px |
 | generic `gpt-5.6` | image | Spleen + Unifont, 5x8 | 152 | 1932 px |
 | `gpt-5.6-sol` | **text only until calibrated** | JetBrains Mono 10 + Unifont fallback, 6x11 | 126 | 1932 px |
@@ -19,6 +21,17 @@ Model scope and reader safety are separate gates. `IMGTOKENX_MODELS` decides
 which model ids may reach the transformer. `IMGTOKENX_READER_PROFILES` decides
 whether an imaged profile is trusted. A model that fails either gate remains
 ordinary text.
+
+## Sonnet 5 / Haiku 4.5 evidence (2026-07-10)
+
+Calibrated keylessly: the `eval/reader-capacity/` fixture was rendered to PNG
+pages by the production renderer at four densities and read blind by
+subscription-side subagents (one per model x density, so answers cannot leak
+across variants). Both models scored 6/6 on the exact/gist/guard battery only
+at 20x32; every smaller density (5x8, 7x10, 9x12) confabulated at least one
+exact value (invented ports, an invented field name, a wrong hex digit). The
+guard question was refused correctly at all densities on both models. Pages
+were kept within 1568x728, matching what the proxy emits.
 
 ## GPT 5.6 Sol evidence
 

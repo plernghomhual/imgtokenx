@@ -85,6 +85,7 @@ const MODEL_CATALOG: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
 ];
 
 const GPT_MODEL_CATALOG: ReadonlyArray<{ id: string; label: string }> = [
@@ -160,6 +161,8 @@ export function renderModelsFragment(
     `<div class="policy-badges">` +
     policyBadge('claude-fable-5', 'Fable 5') +
     policyBadge('claude-opus-4-8', 'Opus 4.x') +
+    policyBadge('claude-sonnet-5', 'Sonnet 5') +
+    policyBadge('claude-haiku-4-5', 'Haiku 4.5') +
     policyBadge('gpt-5.6', 'GPT 5.6') +
     `<span class="policy-badge text"><span class="policy-dot"></span>Uncalibrated models · text only</span>` +
     `</div></div>` +

@@ -7,6 +7,11 @@ behavioral changes, patch = fixes).
 ## Unreleased
 
 ### Added
+- Calibrated reader profiles for `claude-sonnet-5*` and `claude-haiku-4-5*` at
+  the 20x32 cell (same as Opus 4.x). 2026-07-10 keyless sweep: both models read
+  the reader-capacity fixture 6/6 only at 20x32; every smaller density
+  confabulated at least one exact value. Dashboard chips/badges and docs
+  updated; Haiku 4.5 added to the chip catalog.
 - OpenAI-shaped requests now resolve render geometry, font, vision billing, and
   cache rates by model id. Claude traffic on `/v1/responses` no longer inherits
   GPT geometry or pricing.

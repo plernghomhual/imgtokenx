@@ -242,7 +242,11 @@ describe('serveFragment', () => {
       expect(on).toContain('GPT 5.5</span><span class="chip-mode">text only');
       expect(on).toContain('Opus 4.8');
       expect(on).toContain('image 20×32');
-      expect(on).toContain('Sonnet 5');
+      // Calibrated 2026-07-10 (keyless sweep): Sonnet 5 + Haiku 4.5 image at 20×32.
+      expect(on).toContain('Sonnet 5</span><span class="chip-mode">image 20×32');
+      expect(on).toContain('Haiku 4.5</span><span class="chip-mode">image 20×32');
+      // Sonnet 4.6 stays uncalibrated.
+      expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">text only');
       // Generic GPT 5.6, its Sol profile, then GPT 5.5.
       expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.6 Sol'));
       expect(on.indexOf('GPT 5.6 Sol')).toBeLessThan(on.indexOf('GPT 5.5'));

@@ -129,8 +129,8 @@ are imaged.
 - **Model scope:** the saved/configured scope starts with
   `IMGTOKENX_MODELS=claude-fable-5`. Additional Claude and GPT ids are opt-in
   via `IMGTOKENX_MODELS` or the dashboard chips, and reader safety remains an
-  independent gate. Opus 4.x uses its calibrated 20x32 profile; GPT 5.5 and
-  uncalibrated models remain text-only.
+  independent gate. Opus 4.x, Sonnet 5, and Haiku 4.5 use their calibrated
+  20x32 profile; GPT 5.5 and uncalibrated models remain text-only.
   The exact `gpt-5.6-sol` renderer is available but remains text-only until a
   reader override is explicitly supplied because its first raw-image pilot
   failed exact recall. See [model render profiles](docs/MODEL_RENDER_PROFILES.md).
@@ -249,8 +249,8 @@ Everything else passes through byte-identical: your messages, recent turns,
 the model's output (it is the response, the proxy never touches it), sparse
 prose, and anything too small to win. The configured scope starts with Fable
 5 only; additional ids require the dashboard or `IMGTOKENX_MODELS`, and the
-independent reader profile can still force text passthrough. Opus 4.x uses its
-calibrated 20x32 profile. GPT 5.6 Sol remains text-only unless explicitly
+independent reader profile can still force text passthrough. Opus 4.x, Sonnet
+5, and Haiku 4.5 use their calibrated 20x32 profile. GPT 5.6 Sol remains text-only unless explicitly
 overridden because its first raw-image pilot failed exact recall.
 
 **Has it ever failed for real, outside the benchmarks?**
