@@ -211,3 +211,62 @@ The live dashboard and replay path both use `deriveBaselineWarmth`, `computeBase
 ## Summary
 
 imgtokenx stays cache-aligned by replacing stable text context with stable image context and relocating the caller's existing cache marker to the end of the rewritten content. Savings are measured by comparing the real transformed request with a `/count_tokens` text counterfactual under the same observed cache state. If the actual request read cache, both sides are warm. If it did not, both sides are cold. Therefore the provider cache discount is not counted as imgtokenx savings; the reported savings are only the token reduction from text to images.
+
+---
+
+## OpenAI Responses: Codex And OpenCode
+
+imgtokenx supports `/v1/responses` and OpenAI-compatible chat-completions
+traffic. This includes Codex in API/OpenAI-compatible mode and OpenCode when
+their base URL points at the proxy. Codex App sessions authenticated through a
+ChatGPT subscription bypass the terminal wrapper and do not appear here.
+
+The OpenAI-shaped transform can image two buckets: the static slab (system,
+tool documentation, and other stable context) and, when its closed prefix is
+large and profitable, older history. OpenAI reports `cached_tokens` as a subset
+of `input_tokens`, rather than Anthropic's separate cache-create and cache-read
+fields. The accounting in `src/core/openai-savings.ts` is:
+
+```text
+actual_eff   = uncached + cached * cache_read_rate(model)
+baseline_eff = actual_eff + (baseline_imaged_tokens - image_tokens)
+               * (cache_read_rate(model) if cached > 0 else 1.0)
+```
+
+The shared Responses endpoint does not determine pricing by itself. The model
+id selects the render profile and cache rate: Claude and GPT-5 currently both
+use a `0.1` cache-read multiplier, sourced from their respective provider
+rules. The same cache discount is applied to the actual and counterfactual
+requests, so it is never counted as an imgtokenx saving.
+
+### What Drives Savings
+
+Savings depend on how much uncached bulk the client re-sends, not the client
+name alone.
+
+| Client shape | What imgtokenx sees | Expected result |
+|---|---|---|
+| Claude Code on `/anthropic/messages` | System, tools, and history re-sent with Anthropic cache markers | Usually high savings on dense traffic |
+| Codex/OpenAI Responses with a warm prompt cache | Most input already appears in `cached_tokens` | Small slab-only saving can be correct |
+| Responses after history collapse | A large closed prefix becomes model-priced images | Larger saving when the gate clears |
+| OpenCode or another client re-sending a full text transcript | Large uncached context on each request | Similar opportunity to Claude Code |
+
+Upstream measurements on warm Responses rows found roughly 98% cached input
+for a Claude/Opus session and roughly 73% for GPT-5. Those observations explain
+why a supported Codex API session can show a low percentage before history
+collapse; they are not universal performance promises.
+
+### Reading Dashboard Rows
+
+OpenAI-shaped rows populate **As text**, **Sent**, and **Saved** only when a
+request was compressed and both `image_tokens` and
+`baseline_imaged_tokens` were recorded. A passthrough row correctly shows an
+empty saving. The path selects the usage-field shape; the model selects the
+pricing and render profile.
+
+For a low Saved percentage:
+
+1. Check that the path is `/v1/responses` or another supported OpenAI alias.
+2. Compare `cached_tokens` with `input_tokens`; near 100% leaves little uncached text to beat.
+3. Check `history_reason`; `collapsed` is where larger history savings begin.
+4. Compare like client shapes. A warm Responses session and Claude Code can use the same model while sending materially different requests.

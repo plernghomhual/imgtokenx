@@ -114,6 +114,13 @@ are imaged.
 - **Workload-dependent.** Wins on token-dense content (~1 char/token),
   loses money on sparse prose (~3.5 chars/token); a profitability gate
   (calibrated on N=391 production rows) images only where the math wins.
+- **Client-dependent, not product-name-dependent.** Savings track uncached
+  bulk the client still re-sends as text. Claude Code usually re-sends system,
+  tools, and history; OpenAI-compatible Codex or OpenCode sessions may already
+  have most input in `cached_tokens`, so a slab-only request can honestly show
+  a small saving until history collapse fires. Codex App sessions authenticated
+  through ChatGPT bypass this proxy. See
+  [Responses caching and savings](docs/CACHING_AND_SAVINGS.md#openai-responses-codex-and-opencode).
 - **Model scope:** default `IMGTOKENX_MODELS=claude-fable-5,gpt-5.6`. Opus
   4.7/4.8 misread ~7% of renders and GPT 5.5 degrades on imaged context, so
   both are opt-in via `IMGTOKENX_MODELS` or the dashboard chips.
