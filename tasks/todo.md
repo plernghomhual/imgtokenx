@@ -517,3 +517,25 @@ Verification:
 
 Remaining boundary:
 - To bypass the proxy, Claude must be exited and relaunched after sourcing in its parent terminal. Running the source command inside Claude's tool subprocess or merely refreshing the dashboard cannot change the current Claude process environment.
+
+## Final Review - 2026-07-10 (Sonnet 5 + Haiku 4.5 reader calibration, keyless)
+
+Files changed:
+- `src/core/reader-profiles.ts` — `claude-sonnet-5*` and `claude-haiku-4-5*` added to BUILTIN_RULES at the 20x32 cell (cellWBonus 15, cellHBonus 24, same as Opus 4.x), with the calibration method + Read-tool resample caveat documented in the table comment.
+- `tests/reader-profiles.test.ts` — new test: both models resolve to 20x32, dated-suffix aliases match, `claude-sonnet-50`/`claude-haiku-4-50` do NOT false-match.
+
+Behavior changed:
+- Sonnet 5 and Haiku 4.5 requests are now imaged (at 20x32) instead of text-passthrough. All other models unchanged.
+
+Calibration evidence (2026-07-10, keyless — no API key on machine):
+- eval/reader-capacity fixture rendered to PNGs by production renderer (dist build) at 5x8/7x10/9x12/20x32; read blind by subscription-side subagents, one per model x density.
+- Both models: 6/6 exact+guard ONLY at 20x32. Every smaller density confabulated >=1 exact value (Sonnet: port "7821" at 7x10+9x12; Haiku: wrong hex at 5x8, invented field name + port "9821" at 7x10, port "7821" at 9x12). Guard (fake DB password) refused correctly everywhere.
+- Caveat: harness Read tool may resample; pages kept <=1568x728 matching proxy output.
+
+Verification:
+- typecheck exit 0; full suite 40 files / 725 tests passed; build exit 0, version smoke 0.8.0.
+- Commit `f64136d` pushed to origin/main.
+
+Remaining risks / notes:
+- Daemon deliberately NOT restarted (user has the tool switched off). dist rebuilt, so the next start serves the calibrated profiles.
+- 20x32 is the coarsest calibrated cell — savings on Sonnet/Haiku are real but smaller than Fable's 5x8; profitability gate still decides per request.
