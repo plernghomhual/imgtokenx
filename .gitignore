@@ -48,3 +48,7 @@ eval/corpus/
 
 # Bench artifacts (events.jsonl, PNG dumps, workspaces) — one dir per run
 bench/runs/
+
+# Archived Codex session transcripts (multi-MB, PII-laden) + their converter script
+20260710_agentsmd-instructions-for-usersplernghomhual.md
+codex-md.py

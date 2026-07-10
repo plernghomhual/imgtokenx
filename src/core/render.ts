@@ -925,37 +925,47 @@ const MAX_WIDTH_PX = 1568;
 const GUTTER_DIVIDER_INK = 64; // pre-invert → 191 post-invert: light gray column separator
 const GUTTER_DIVIDER_INSET_PX = 2; // keep divider clear of padding rows
 
-/** Pixel width of a multi-col canvas. */
-export function multiColWidth(cols: number, numCols: number): number {
+/** Pixel width of a multi-col canvas. `cellW` defaults to the production cell;
+ *  reader-profile callers pass renderCellWidth(style) — mirror of transform.ts multiColWidthPx. */
+export function multiColWidth(cols: number, numCols: number, cellW: number = CELL_W): number {
   const n = Math.max(1, numCols | 0);
-  return 2 * PAD_X + n * cols * CELL_W + (n - 1) * GUTTER_CELLS * CELL_W;
+  return 2 * PAD_X + n * cols * cellW + (n - 1) * GUTTER_CELLS * cellW;
 }
 
 /** Largest numCols fitting within MAX_WIDTH_PX. Used to clamp over-large CLI flags. */
-export function maxFittingCols(cols: number): number {
+export function maxFittingCols(cols: number, cellW: number = CELL_W): number {
   let n = 1;
-  while (multiColWidth(cols, n + 1) <= MAX_WIDTH_PX) n++;
+  while (multiColWidth(cols, n + 1, cellW) <= MAX_WIDTH_PX) n++;
   return n;
 }
 
+// Geometry (cellW/cellH bonuses), font, aa, and markerScale are honored; the RGB-only
+// extras (markerRed, colorCycle, colorByRole) and grid are not — multi-col stays a gray
+// PNG and no caller passes those here (proxy renderStyle is bonuses-only; history's
+// colorByRole path is single-col by design).
 async function renderMultiColChunkFromLines(
   lines: string[],
   cols: number,
   numCols: number,
   charsCovered: number,
   linesPerCol: number,
+  style: RenderStyle = {},
 ): Promise<RenderedImage> {
-  const width = multiColWidth(cols, numCols);
+  const useAA = style.aa === true;
+  const markerScale = Math.max(1, Math.floor(style.markerScale ?? 1));
+  const cellW = renderCellWidth(style);
+  const cellH = renderCellHeight(style);
+  const width = multiColWidth(cols, numCols, cellW);
   // Column 0 is always the tallest in column-major packing.
   const rowsPerCol = Math.max(1, linesPerCol | 0);
   const usedRows = Math.min(lines.length, rowsPerCol);
-  const height = 2 * PAD_Y + usedRows * CELL_H;
+  const height = 2 * PAD_Y + usedRows * cellH;
 
   const fb = new Uint8Array(width * height);
   let droppedChars = 0;
   const droppedCodepoints = new Map<number, number>();
 
-  const colStride = cols * CELL_W + GUTTER_CELLS * CELL_W; // pixel stride per column including gutter
+  const colStride = cols * cellW + GUTTER_CELLS * cellW; // pixel stride per column including gutter
   for (let c = 0; c < numCols; c++) {
     const colBaseX = PAD_X + c * colStride;
     const colStart = c * rowsPerCol;
@@ -963,13 +973,20 @@ async function renderMultiColChunkFromLines(
     const colEnd = Math.min(colStart + rowsPerCol, lines.length);
     for (let r = 0; r < colEnd - colStart; r++) {
       const line = lines[colStart + r]!;
-      const baseY = PAD_Y + r * CELL_H;
+      const baseY = PAD_Y + r * cellH;
       let col = 0;
       for (const ch of line) {
         if (col >= cols) break;
         const codepoint = ch.codePointAt(0)!;
-        const baseX = colBaseX + col * CELL_W;
-        const advance = blitGlyph(fb, width, baseX, baseY, codepoint);
+        const baseX = colBaseX + col * cellW;
+        let advance: number;
+        if (codepoint === NL_SENTINEL_CP && markerScale > 1) {
+          advance = blitGlyphScaled(fb, null, width, height, baseX, baseY, codepoint, markerScale, style.font);
+        } else if (useAA) {
+          advance = blitGlyphGray(fb, width, baseX, baseY, codepoint, style.font);
+        } else {
+          advance = blitGlyph(fb, width, baseX, baseY, codepoint, style.font);
+        }
         if (advance === 0) {
           droppedChars++;
           droppedCodepoints.set(codepoint, (droppedCodepoints.get(codepoint) ?? 0) + 1);
@@ -983,11 +1000,11 @@ async function renderMultiColChunkFromLines(
 
   // Draw faint vertical divider in each gutter before the invert pass (DEFLATE cost ≈ 3-5 bytes).
   if (numCols >= 2) {
-    const gutterPxPerSide = GUTTER_CELLS * CELL_W;
+    const gutterPxPerSide = GUTTER_CELLS * cellW;
     const yStart = GUTTER_DIVIDER_INSET_PX;
     const yEnd = height - GUTTER_DIVIDER_INSET_PX;
     for (let c = 0; c < numCols - 1; c++) {
-      const colEndX = PAD_X + c * colStride + cols * CELL_W;
+      const colEndX = PAD_X + c * colStride + cols * cellW;
       const dividerX = colEndX + Math.floor(gutterPxPerSide / 2);
       for (let y = yStart; y < yEnd; y++) {
         const idx = y * width + dividerX;
@@ -1015,16 +1032,20 @@ export async function renderTextToPngsMultiCol(
   text: string,
   cols: number = DEFAULT_COLS,
   numCols: number = 2,
+  style: RenderStyle = {},
 ): Promise<RenderedImage[]> {
-  if (numCols <= 1) return renderTextToPngs(text, cols);
-  if (multiColWidth(cols, numCols) > MAX_WIDTH_PX) {
+  const cellW = renderCellWidth(style);
+  const cellH = renderCellHeight(style);
+  if (numCols <= 1) return renderTextToPngs(text, cols, style);
+  if (multiColWidth(cols, numCols, cellW) > MAX_WIDTH_PX) {
     // Clamp to widest fitting count rather than throw (bad CLI flag recovery).
-    numCols = maxFittingCols(cols);
-    if (numCols <= 1) return renderTextToPngs(text, cols);
+    numCols = maxFittingCols(cols, cellW);
+    if (numCols <= 1) return renderTextToPngs(text, cols, style);
   }
 
-  const lines = wrapLines(text, cols);
-  const hardLinesPerImg = Math.max(1, Math.floor((MAX_HEIGHT_PX - 2 * PAD_Y) / CELL_H));
+  const markerScale = Math.max(1, Math.floor(style.markerScale ?? 1));
+  const lines = wrapLines(text, cols, markerScale, style.font);
+  const hardLinesPerImg = Math.max(1, Math.floor((MAX_HEIGHT_PX - 2 * PAD_Y) / cellH));
   const linesPerImg = Math.min(hardLinesPerImg, readableLinesPerColumn(cols));
   const linesPerImage = linesPerImg * numCols;
 
@@ -1052,7 +1073,7 @@ export async function renderTextToPngsMultiCol(
       chars = n;
     }
     coveredChars += chars;
-    images.push(await renderMultiColChunkFromLines(slice, cols, numCols, chars, linesPerImg));
+    images.push(await renderMultiColChunkFromLines(slice, cols, numCols, chars, linesPerImg, style));
   }
   return images;
 }
@@ -1062,9 +1083,10 @@ export async function renderTextToPngsReflowMultiCol(
   text: string,
   cols: number = DEFAULT_COLS,
   numCols: number = 2,
+  style: RenderStyle = {},
 ): Promise<RenderedImage[]> {
   const packed = reflow(text);
-  return renderTextToPngsMultiCol(packed ?? text, cols, numCols);
+  return renderTextToPngsMultiCol(packed ?? text, cols, numCols, style);
 }
 
 export interface RenderDensePagesOptions {
@@ -1109,17 +1131,17 @@ export async function renderDensePages(
   opts: RenderDensePagesOptions = {},
 ): Promise<RenderedImage[]> {
   const source = opts.reflow ? reflow(text) ?? text : text;
+  const style = opts.style ?? DENSE_RENDER_STYLE;
   const maxCols = Math.max(1, (opts.cols ?? DENSE_CONTENT_COLS) | 0);
   const cols = opts.shrink === false ? maxCols : measureContentCols(source, maxCols);
   const requestedCols =
     opts.multiCol === undefined || opts.multiCol === 'auto'
-      ? Math.max(1, maxFittingCols(cols))
+      ? Math.max(1, maxFittingCols(cols, renderCellWidth(style)))
       : Math.max(1, opts.multiCol | 0);
   const numCols = cols < maxCols ? 1 : requestedCols;
-  const style = opts.style ?? DENSE_RENDER_STYLE;
   const maxChars = opts.maxCharsPerImage ?? DENSE_CONTENT_CHARS_PER_IMAGE;
   const maxHeightPx = opts.maxHeightPx ?? MAX_HEIGHT_PX;
   return numCols > 1
-    ? renderTextToPngsMultiCol(source, cols, numCols)
+    ? renderTextToPngsMultiCol(source, cols, numCols, style)
     : renderTextToPngsWithCharLimit(source, cols, maxChars, style, maxHeightPx);
 }

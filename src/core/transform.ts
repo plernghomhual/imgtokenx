@@ -272,12 +272,10 @@ function imageTokensCost(
 
 /** Gate geometry for the single-col dense path (tool_result, reminder, history).
  *  Dense single-col scales the 312-column base to the reader's cell width and uses
- *  a `cellH`-aware char budget; multi-col uses configured `cols` at the fixed READABLE budget. Slab uses
- *  its own path. Multi-col intentionally ignores `cellH`: renderTextToPngsMultiCol
- *  (render.ts) has no RenderStyle param today, so a reader-profile cell bonus can't
- *  reach the multi-col renderer yet — gating it as if it could would just make the
- *  gate wrong relative to what actually renders. Scope limit, not a bug; see
- *  reader-profiles.ts and the textToImageBlocks multi-col branch below. */
+ *  a `cellH`-aware char budget; multi-col uses configured `cols` at the fixed READABLE
+ *  budget — its cellW/cellH sensitivity lives in imageTokensForRows, which mirrors
+ *  renderTextToPngsMultiCol's style-aware height/paging math exactly. Slab uses its
+ *  own path. */
 function denseGateGeometry(
   cols: number,
   numCols: number,
@@ -1422,12 +1420,9 @@ export async function textToImageBlocks(
   /** Shrink canvas to the longest wrapped line. `false` for the slab path
    *  (fills full `cols` for multi-col packing). Default `true`. */
   shrinkWidth: boolean = true,
-  /** Per-model render style (reader-profiles.ts): cell-size bonus applied to the
-   *  single-col dense render so the actual PNG matches what the gate priced.
-   *  Default DENSE_RENDER_STYLE preserves prior behavior for callers that don't
-   *  pass one. NOT applied to the multi-col branch below — renderTextToPngsMultiCol
-   *  (render.ts) has no RenderStyle param today, so a cell bonus can't reach it yet.
-   *  Scope limit, not a bug; see denseGateGeometry's matching comment. */
+  /** Per-model render style (reader-profiles.ts): cell-size bonus applied to BOTH
+   *  branches below so the actual PNG matches what the gate priced. Default
+   *  DENSE_RENDER_STYLE preserves prior behavior for callers that don't pass one. */
   style: RenderStyle = DENSE_RENDER_STYLE,
 ): Promise<{
   blocks: ImageBlock[];
@@ -1450,7 +1445,7 @@ export async function textToImageBlocks(
     : denseCols;
   const imgs =
     effectiveNumCols > 1
-      ? await renderTextToPngsMultiCol(text, effectiveCols, effectiveNumCols)
+      ? await renderTextToPngsMultiCol(text, effectiveCols, effectiveNumCols, style)
       // Single-col dense: cap the reader-specific base to 1568px, then shrink to content.
       : await renderTextToPngsWithCharLimit(text, singleCols, DENSE_CONTENT_CHARS_PER_IMAGE, style);
   let droppedChars = 0;
@@ -1811,7 +1806,7 @@ export async function transformRequest(
   // numCols clamped to 2000 px width cap; falls back to 1 if even 2 cols would exceed it.
   const numCols = Math.min(
     Math.max(1, (o.multiCol | 0) || 1),
-    Math.max(1, maxFittingCols(o.cols)),
+    Math.max(1, maxFittingCols(o.cols, cellW)),
   );
   // Gate geometry for dense single-col paths: 312 columns at 5px, scaled down
   // for larger reader cells, with the row cap derived from cellH.
@@ -1888,12 +1883,10 @@ export async function transformRequest(
   // single-modal framing keeps encoder in image-reading mode for both header + content).
   // Header text is continuous prose (no hard \n) so the renderer soft-wraps densely.
   // 3. Render to PNGs at slabCols width (banner sets natural floor). renderStyle
-  // only reaches the single-col branch — renderTextToPngsMultiCol (render.ts) has
-  // no RenderStyle param today, so a reader-profile cell bonus can't apply to
-  // multi-col slabs yet (same scope limit as denseGateGeometry/textToImageBlocks).
+  // reaches both branches, so a reader-profile cell bonus applies to multi-col slabs too.
   const images =
     numCols > 1
-      ? await renderTextToPngsMultiCol(combinedWithHeader, slabCols, numCols)
+      ? await renderTextToPngsMultiCol(combinedWithHeader, slabCols, numCols, renderStyle)
       : await renderTextToPngs(combinedWithHeader, slabCols, renderStyle);
   const imageBlocks: ImageBlock[] = [];
   for (let i = 0; i < images.length; i++) {

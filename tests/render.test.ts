@@ -241,6 +241,25 @@ describe('renderer', () => {
     for (const img of imgs) expect(img.width).toBeLessThanOrEqual(2000);
   });
 
+  it('multi-col honors RenderStyle cell bonuses (Opus 20x32 geometry reaches the renderer)', async () => {
+    // Reader-profile bonus cells (reader-profiles.ts, Opus 20x32) must reach the
+    // multi-col renderer too — before threading, a bonus-cell model with multiCol
+    // enabled silently rendered at the unsafe 5x8 density.
+    const style = { cellWBonus: 15, cellHBonus: 24 }; // 5x8 -> 20x32
+    const text = 'lorem ipsum dolor sit amet\n'.repeat(200);
+    const imgs = await renderTextToPngsMultiCol(text, 30, 2, style);
+    expect(imgs[0]!.width).toBe(multiColWidth(30, 2, 20));
+    // Bonus cell quadruples row height: every page respects the height cap at 32px rows.
+    for (const img of imgs) {
+      expect(img.width).toBeLessThanOrEqual(1568);
+      expect(img.height).toBeLessThanOrEqual(MAX_HEIGHT_PX);
+    }
+    // Clamp math is cellW-aware: an over-wide numCols flag clamps against 20px cells.
+    const clamped = await renderTextToPngsMultiCol(text, 30, 10, style);
+    for (const img of clamped) expect(img.width).toBeLessThanOrEqual(1568);
+    expect(maxFittingCols(30, 20)).toBeLessThan(maxFittingCols(30));
+  });
+
   it('multi-col preserves CJK wide-glyph wrap math (no dropped chars on Chinese input)', async () => {
     // Wide glyphs are 2 cells in both layouts; multi-col must not regress
     // the wrap math or atlas lookup.

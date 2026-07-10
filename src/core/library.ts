@@ -5,6 +5,7 @@ import {
   renderTextToPngsMultiCol,
   measureContentCols,
   maxFittingCols,
+  renderCellWidth,
   reflow,
   DENSE_CONTENT_COLS,
   DENSE_CONTENT_CHARS_PER_IMAGE,
@@ -217,13 +218,13 @@ export async function renderTextToImages(
   const cols = opts.shrink === false ? maxCols : measureContentCols(source, maxCols);
   const requestedCols =
     opts.multiCol === undefined || opts.multiCol === 'auto'
-      ? Math.max(1, maxFittingCols(cols))
+      ? Math.max(1, maxFittingCols(cols, renderCellWidth(style)))
       : Math.max(1, opts.multiCol | 0);
   const numCols = cols < maxCols ? 1 : requestedCols;
 
   const imgs =
     numCols > 1
-      ? await renderTextToPngsMultiCol(source, cols, numCols)
+      ? await renderTextToPngsMultiCol(source, cols, numCols, style)
       : await renderTextToPngsWithCharLimit(source, cols, maxChars, style, maxHeightPx);
 
   let droppedChars = 0;

@@ -416,3 +416,39 @@ Remaining risks:
 - Multi-col path still has no RenderStyle param (pre-existing, documented scope limit).
 - The Codex session transcript (`20260710_agentsmd-instructions-for-usersplernghomhual.md`,
   5.1MB) and `codex-md.py` sit untracked in the repo root; left uncommitted deliberately.
+
+## Final Review - 2026-07-10 (multi-col RenderStyle threading — closes the last reader-profile gap)
+
+Files changed:
+- `src/core/render.ts` — `multiColWidth`/`maxFittingCols` take `cellW` (default CELL_W);
+  `renderMultiColChunkFromLines`/`renderTextToPngsMultiCol`/`renderTextToPngsReflowMultiCol`
+  take `style: RenderStyle` (geometry via renderCellWidth/Height, font/aa-aware blit,
+  markerScale-aware wrap; RGB extras + grid stay unsupported on multi-col — documented);
+  `renderDensePages` passes its style to the multi-col branch and the auto-fit clamp.
+- `src/core/transform.ts` — style threaded at all three multi-col call sites
+  (`textToImageBlocks` branch, `numCols` clamp, slab render); stale "no RenderStyle
+  param today" scope-limit comments rewritten (`denseGateGeometry`, `textToImageBlocks`
+  doc, slab).
+- `src/core/library.ts` — `renderTextToImages` threads style into `maxFittingCols` +
+  `renderTextToPngsMultiCol`.
+- `tests/render.test.ts` — new test: Opus 20x32 bonus cell reaches the multi-col
+  renderer (width = `multiColWidth(30, 2, 20)`, every page ≤1568×728, cellW-aware clamp).
+- `.gitignore` — Codex transcript (`20260710_agentsmd-…md`) + `codex-md.py` ignored.
+
+Behavior changed:
+- Bonus-cell models (Opus 20×32) with `multiCol > 1` now render at their calibrated
+  density instead of silently reverting to 5×8. Gate side needed no math change —
+  `imageTokensForRows`/`multiColWidthPx` were already cellW/cellH-parameterized and
+  mirror the renderer exactly.
+- `renderDensePages`/`renderTextToImages` multi-col output now honors the dense style's
+  `aa: true` (AA glyphs, consistent with single-col dense pages) — export multi-col
+  PNG bytes change; direct `renderTextToPngsMultiCol` calls with default style are
+  byte-identical (determinism/parity tests pass unchanged).
+
+Verification: `npm run typecheck` exit 0; focused render/parity/reader-profile tests
+3 files / 160 pass; full `npm test` 40 files / 716 tests all pass; `npm run build`
+exit 0, version smoke `0.8.0`; `git diff --check` exit 0; `git status` confirms the
+transcript + converter no longer appear untracked.
+
+Remaining risks: none known for this pass. Live daemon restart still pending for this
+commit (kickstart after push).
