@@ -392,6 +392,40 @@ describe('proxy usage extraction', () => {
     expect(upstreamRequests[1]!.url).toBe('https://api.anthropic.test/models');
   });
 
+  it('routes /v1/models with OAuth Bearer + anthropic-version to Anthropic (upstream #71)', async () => {
+    // Claude Code subscription OAuth sends `authorization: Bearer` with NO
+    // x-api-key — auth style alone would misread that as OpenAI. The
+    // anthropic-version header pins the Anthropic route.
+    const upstreamRequests: Request[] = [];
+    const restore = mockUpstream(async (req) => {
+      upstreamRequests.push(req.clone());
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const proxy = createProxy({
+      upstream: 'https://api.anthropic.test',
+      openAIUpstream: 'https://api.openai.test',
+    });
+
+    const res = await proxy(
+      new Request('http://localhost/v1/models', {
+        method: 'GET',
+        headers: {
+          authorization: 'Bearer oauth-subscription-token',
+          'anthropic-version': '2023-06-01',
+        },
+      }),
+    );
+    await res.text();
+    restore();
+
+    expect(upstreamRequests).toHaveLength(1);
+    expect(upstreamRequests[0]!.url).toBe('https://api.anthropic.test/v1/models');
+  });
+
   it('transforms OpenCode /openai/responses requests and records the model', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
@@ -623,11 +657,14 @@ describe('proxy usage extraction', () => {
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
 
-  it('captures the FULL gzipped transformed body on 4xx + sets reqBodySha8', async () => {
+  it('captures the FULL gzipped transformed body on 4xx + sets reqBodySha8 (opt-in)', async () => {
     // Pair with errorBody so a future debugger can reconstruct
     // "we sent X, Anthropic said Y" from the JSONL alone. We gzip the body
     // so even a 170 KiB transformed payload fits inline once base64'd
     // (typical PNG-heavy bodies compress to <10% of source).
+    // Body persistence is privacy-sensitive (full prompts on disk), so it is
+    // gated behind IMGTOKENX_CAPTURE_BODIES=1 — see the default-off test below.
+    process.env.IMGTOKENX_CAPTURE_BODIES = '1';
     const restore = mockUpstream(
       () =>
         new Response(JSON.stringify({ error: { type: 'bad' } }), {
@@ -673,6 +710,44 @@ describe('proxy usage extraction', () => {
     const parsed = JSON.parse(decoded);
     expect(parsed.model).toBe('claude-3-5-haiku-latest');
     expect(parsed.messages[0].role).toBe('user');
+    delete process.env.IMGTOKENX_CAPTURE_BODIES;
+  });
+
+  it('does NOT persist the 4xx request body by default (privacy: prompts stay off disk)', async () => {
+    delete process.env.IMGTOKENX_CAPTURE_BODIES;
+    const restore = mockUpstream(
+      () =>
+        new Response(JSON.stringify({ error: { type: 'bad' } }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+
+    let captured: ProxyEvent | undefined;
+    const proxy = createProxy({
+      transform: {},
+      onRequest: (e) => {
+        captured = e;
+      },
+    });
+
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: SAMPLE_REQ_BODY,
+      }),
+    );
+    await res.text();
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    expect(captured).toBeDefined();
+    expect(captured!.status).toBe(400);
+    // sha8 + short upstream error sample stay on (identify the failure)…
+    expect(captured!.reqBodySha8).toMatch(/^[0-9a-f]{8}$/);
+    // …but the full prompt body does not persist without the opt-in.
+    expect(captured!.reqBodyGz).toBeUndefined();
   });
 
   it('does NOT gzip the request body on 2xx (but still sets reqBodySha8)', async () => {

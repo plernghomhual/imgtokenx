@@ -532,7 +532,13 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers, hasOpenAIKey:
     || pathname.startsWith('/v1/responses/')
     || pathname === '/responses'
     || pathname.startsWith('/responses/');
-  const looksOpenAIAuth = hasOpenAIKey || (headers.has('authorization') && !headers.has('x-api-key'));
+  // /v1/models exists on BOTH APIs. Claude Code's subscription OAuth sends
+  // `authorization: Bearer` with NO x-api-key, which would read as OpenAI auth
+  // here and misroute an Anthropic models listing to the OpenAI upstream
+  // (upstream pxpipe #71). Anthropic clients always send anthropic-version, so
+  // its presence pins the Anthropic route regardless of auth style.
+  const looksOpenAIAuth = !headers.has('anthropic-version')
+    && (hasOpenAIKey || (headers.has('authorization') && !headers.has('x-api-key')));
   return pathname === '/v1/chat/completions'
     || pathname === '/chat/completions'
     || pathname === '/v1/responses'
@@ -659,10 +665,16 @@ export function createProxy(config: ProxyConfig = {}) {
       stopReason?: string,
     ): void => {
       const is4xx = status >= 400 && status < 500;
+      // Full transformed request bodies (= the user's prompts) persist to disk only when
+      // explicitly opted in — they are debugging aids, not default telemetry (upstream
+      // pxpipe #69/#72/#74). The short upstream error_body sample and sha8 stay on by
+      // default: they identify the failure without replaying the prompt.
+      const captureBodies =
+        typeof process !== 'undefined' && process.env?.IMGTOKENX_CAPTURE_BODIES === '1';
       // Gzip body lazily (only on 4xx). Async IIFE keeps fire() synchronous.
       const finalize = async (): Promise<void> => {
         let reqBodyGz: Uint8Array | undefined;
-        if (is4xx && reqBodyBytes && reqBodyBytes.byteLength > 0) {
+        if (is4xx && captureBodies && reqBodyBytes && reqBodyBytes.byteLength > 0) {
           try {
             reqBodyGz = await gzipBytes(reqBodyBytes);
           } catch {

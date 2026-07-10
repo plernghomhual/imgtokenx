@@ -7,7 +7,6 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { once } from 'node:events';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -15,7 +14,12 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createProxy, parseGatewayHeaders, resolveUpstreams, type ProxyConfig } from './core/proxy.js';
 import { doctorExitCode, formatDoctor, parseInstallArgs, runDoctor, runInstall, runUninstall } from './install.js';
-import { applyConfigFileDefaults, persistModelsConfig } from './node-config.js';
+import {
+  applyConfigFileDefaults,
+  isRuntimeDisabled,
+  persistModelsConfig,
+  persistRuntimeEnabled,
+} from './node-config.js';
 import { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
 export { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
 import {
@@ -33,6 +37,7 @@ import {
 } from './core/tracker.js';
 import {
   DashboardState,
+  dashboardMutationAllowed,
   dashboardPath,
   type DashboardRoute,
 } from './dashboard.js';
@@ -113,7 +118,8 @@ Usage:
 
 The proxy compresses eligible tools, schemas, reminders, tool_results,
 and history; tracks events to disk; and measures real saved_pct via
-/v1/messages/count_tokens. Dashboard controls can disable compression live.
+/v1/messages/count_tokens. The dashboard kill switch persists globally;
+restart already-running clients so they drop their inherited proxy base URL.
 
 Stats, sessions, and cleanup tools live in the dashboard at
   http://127.0.0.1:<port>/  (default port 47821)
@@ -143,6 +149,7 @@ Environment:
                           default claude-fable-5; off disables
   IMGTOKENX_CONFIG           JSON config path (default ~/.config/imgtokenx/config.json)
                           supports {"models": [...]} or {"models": "off"}
+  IMGTOKENX_DISABLE          1/true/yes/on bypasses imaging for this proxy process
   IMGTOKENX_LOG              JSONL events path (default ~/.imgtokenx/events.jsonl)
   IMGTOKENX_DUMP_DIR         debug: write every rendered PNG here (what the model
                           sees); off unless set. Compress arm only.
@@ -245,11 +252,22 @@ function isConnectionAbort(err: unknown): boolean {
 }
 
 async function waitForDrain(out: ServerResponse): Promise<void> {
-  const event = await Promise.race([
-    once(out, 'drain').then(() => 'drain'),
-    once(out, 'close').then(() => 'close'),
-  ]);
-  if (event === 'close') throw new Error('client response closed');
+  // Manual listener pairing, not Promise.race(once(), once()): the race leaves the
+  // losing 'close' listener attached after every drain, leaking one listener per
+  // backpressure event on long streams (upstream pxpipe #92).
+  if (out.destroyed || out.writableEnded) throw new Error('client response closed');
+  await new Promise<void>((resolve, reject) => {
+    const onDrain = (): void => {
+      out.off('close', onClose);
+      resolve();
+    };
+    const onClose = (): void => {
+      out.off('drain', onDrain);
+      reject(new Error('client response closed'));
+    };
+    out.once('drain', onDrain);
+    out.once('close', onClose);
+  });
 }
 
 async function writeWebResponse(res: Response, out: ServerResponse): Promise<void> {
@@ -316,6 +334,14 @@ async function dispatchDashboard(
   port: number,
 ): Promise<Response | undefined> {
   const method = req.method ?? 'GET';
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (method === 'POST' && !dashboardMutationAllowed(
+    req.headers.origin,
+    url.origin,
+    Array.isArray(fetchSite) ? fetchSite[0] : fetchSite,
+  )) {
+    return new Response('forbidden', { status: 403 });
+  }
   switch (route.kind) {
     case 'html':
       if (method !== 'GET') return undefined;
@@ -926,10 +952,13 @@ async function main(): Promise<void> {
   }
   // Stats / sessions / cleanup tools live in the dashboard.
   const opts = parseCli(argv);
-  // A/B harness passthrough switch (see the `transform` callback below).
+  // Environment override remains a hard process-lifetime kill switch. The
+  // dashboard also persists a shared off-file that generated client wrappers
+  // check before injecting any imgtokenx base URL.
   const forcePassthrough = /^(1|true|yes|on)$/i.test(process.env.IMGTOKENX_DISABLE ?? '');
-  if (forcePassthrough) {
-    console.log('[imgtokenx] IMGTOKENX_DISABLE set — passthrough mode (compress=false), still logging usage + baselines');
+  const startDisabled = isRuntimeDisabled();
+  if (startDisabled) {
+    console.log('[imgtokenx] global kill switch is off — client wrappers bypass imgtokenx; attached clients use passthrough until restarted');
   }
   // Default-on: exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay
   // native text instead of being imaged, so byte-exact content can never be
@@ -1001,7 +1030,11 @@ async function main(): Promise<void> {
   const dashboard = new DashboardState({
     eventsFile: opts.eventsFile,
     sidecarDir: bodySidecarDir,
-  }, undefined, persistModelsConfig);
+  }, undefined, persistModelsConfig, (enabled) => {
+    persistRuntimeEnabled(enabled);
+    return enabled && !forcePassthrough;
+  });
+  dashboard.setCompressionEnabled(!startDisabled);
   // Seed the "recent requests" table from the JSONL log so a process restart
   // doesn't reset what you can see in the UI. Best-effort; ignored on error.
   await dashboard.replay(opts.eventsFile).catch(() => {});

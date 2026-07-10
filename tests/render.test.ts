@@ -241,6 +241,25 @@ describe('renderer', () => {
     for (const img of imgs) expect(img.width).toBeLessThanOrEqual(2000);
   });
 
+  it('draws a visible □ placeholder for atlas-missing codepoints instead of a blank cell', async () => {
+    // Astral-plane chars (emoji) are outside the full-BMP atlas. A silent blank is
+    // indistinguishable from a space to the reader (upstream #96); the □ placeholder
+    // shows a character existed there. Same 1-cell footprint, so wrap math and
+    // droppedChars telemetry are unchanged.
+    const emoji = await renderTextToPngs('abc \u{1F600} def');
+    const blank = await renderTextToPngs('abc   def'); // emoji swapped for a space, same cell count
+    expect(emoji).toHaveLength(1);
+    expect(emoji[0]!.droppedChars).toBe(1);
+    expect(blank[0]!.droppedChars).toBe(0);
+    expect(emoji[0]!.width).toBe(blank[0]!.width);
+    expect(emoji[0]!.height).toBe(blank[0]!.height);
+    // □ must actually hit pixels: the emoji render can't be byte-identical to the blank one.
+    expect(bytesToBase64(emoji[0]!.png)).not.toBe(bytesToBase64(blank[0]!.png));
+    // The placeholder itself is in-atlas — otherwise this whole scheme degrades to blanks.
+    const square = await renderTextToPngs('□');
+    expect(square[0]!.droppedChars).toBe(0);
+  });
+
   it('multi-col honors RenderStyle cell bonuses (Opus 20x32 geometry reaches the renderer)', async () => {
     // Reader-profile bonus cells (reader-profiles.ts, Opus 20x32) must reach the
     // multi-col renderer too — before threading, a bonus-cell model with multiCol

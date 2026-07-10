@@ -281,6 +281,12 @@ export const NL_SENTINEL = '↵';
 
 const NL_SENTINEL_CP = 0x21b5; // precomputed for hot-path comparisons
 
+/** □ (U+25A1) drawn in place of atlas-missing codepoints (astral-plane emoji etc.) so the
+ *  reader SEES that a character existed there instead of a blank cell it can't tell from a
+ *  space (upstream pxpipe #96). Same 1-cell footprint as the blank it replaces, so wrap and
+ *  gate math are unchanged; droppedChars/droppedCodepoints telemetry still counts the miss. */
+const MISSING_GLYPH_CP = 0x25a1;
+
 /** Look-alike (U+23CE ⏎) for a ↵ that was ALREADY in the source content — distinct from
  *  the U+21B5 ↵ we insert for newlines. reflow() bails when its input already contains the
  *  sentinel; that's vanishingly rare for normal content but common when the content is about
@@ -797,6 +803,9 @@ export async function renderChunkToPng(
       if (advance === 0) {
         droppedChars++;
         droppedCodepoints.set(codepoint, (droppedCodepoints.get(codepoint) ?? 0) + 1);
+        // Visible □ placeholder instead of a silent blank (see MISSING_GLYPH_CP).
+        if (useAA) blitGlyphGray(fb, width, baseX, baseY, MISSING_GLYPH_CP, style.font);
+        else blitGlyph(fb, width, baseX, baseY, MISSING_GLYPH_CP, style.font);
         col += 1; // missing glyph still occupies 1 cell for wrap stability
       } else {
         col += advance;
@@ -990,6 +999,9 @@ async function renderMultiColChunkFromLines(
         if (advance === 0) {
           droppedChars++;
           droppedCodepoints.set(codepoint, (droppedCodepoints.get(codepoint) ?? 0) + 1);
+          // Visible □ placeholder instead of a silent blank (see MISSING_GLYPH_CP).
+          if (useAA) blitGlyphGray(fb, width, baseX, baseY, MISSING_GLYPH_CP, style.font);
+          else blitGlyph(fb, width, baseX, baseY, MISSING_GLYPH_CP, style.font);
           col += 1;
         } else {
           col += advance;
