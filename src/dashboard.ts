@@ -1479,6 +1479,7 @@ function round4(n: number): number {
  *  (html/stats/recent/png) stay alongside the `/api/*` JSON endpoints. */
 export type DashboardRoute =
   | { kind: 'html' }
+  | { kind: 'icon' } // browser icon probes; handled locally so they never pollute proxy stats
   | { kind: 'stats' } // /proxy-stats — legacy live counter
   | { kind: 'recent' } // /proxy-recent — legacy ring buffer
   | { kind: 'png' } // /proxy-latest-png
@@ -1492,6 +1493,11 @@ export type DashboardRoute =
 /** Match dashboard paths (handle query strings on /proxy-latest-png). */
 export function dashboardPath(pathname: string): DashboardRoute | null {
   if (pathname === '/' || pathname === '/dashboard') return { kind: 'html' };
+  if (
+    pathname === '/favicon.ico'
+    || pathname === '/apple-touch-icon.png'
+    || pathname === '/apple-touch-icon-precomposed.png'
+  ) return { kind: 'icon' };
   if (pathname === '/proxy-stats') return { kind: 'stats' };
   if (pathname === '/proxy-recent') return { kind: 'recent' };
   if (pathname === '/proxy-latest-png') return { kind: 'png' };

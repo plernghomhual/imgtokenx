@@ -290,3 +290,38 @@ Performed after explicit user approval:
 
 Remaining risks:
 - No authenticated Anthropic/OpenAI request was sent through a harness during this local install validation, so live upstream credentials and provider behavior remain intentionally unexercised.
+
+# Dashboard Model + Exactness Parity
+
+- [x] Derive dashboard imaging status from `reader-profiles.ts` instead of label-only model chips.
+- [x] Show the all-model safe-passthrough contract and the configured-client/auth boundary.
+- [x] Unhide OpenAI controls and update Claude-only dashboard copy.
+- [x] Add focused dashboard tests for calibrated, uncalibrated, and custom models.
+- [x] Run typecheck, build, focused tests, full tests, live restart/health checks, and record final review.
+
+## Final Review - 2026-07-09 (dashboard model/auth parity)
+
+Files changed:
+- `README.md` — clarified that Codex support means OpenAI-compatible/API mode and that ChatGPT-auth Codex App sessions are not captured.
+- `src/dashboard/fragments.ts` — reader-profile-backed model labels, visible OpenAI scope, Claude Code/OpenCode/Codex API-mode boundary, neutral high-contrast surfaces/focus styles, and removal of gradient text/side-stripe treatment.
+- `src/dashboard.ts`, `src/node.ts` — local 204 handling for browser favicon/touch-icon probes so they never reach upstream tracking.
+- `tests/dashboard-api.test.ts` — model policy, custom-model escaping, visible OpenAI controls, ChatGPT-auth boundary, and icon-route coverage.
+- `tasks/lessons.md`, `tasks/todo.md` — corrected transport/auth lesson and this review.
+
+Behavior changed:
+- The dashboard now derives each listed model and profile badge's `image WxH` versus `text only` status from `resolveReaderProfile`; unknown and uncalibrated models are explicitly shown as safe text passthrough.
+- Client status is scoped to the user's actual tools: Claude Code, OpenCode, and Codex API mode. It explicitly says Codex App with ChatGPT login runs direct and does not appear in pxpipe.
+- OpenAI model controls are visible. Cloudflare/Google routes are no longer promoted in the dashboard.
+- Browser icon probes return locally with 204 and no longer inflate request totals or recent-request rows.
+
+Verification performed:
+- `npm test -- tests/dashboard-api.test.ts tests/docs-integrity.test.ts`: exit 0; 2 files, 29 tests passed.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0; dist emitted and version smoke printed `0.8.0`.
+- Initial sandboxed `npm test` run executed all 699 assertions but reported one `listen EPERM` unhandled error from the existing `src/node.ts` import-time server bind. `PORT=0 npm test` with localhost-bind permission then exited 0: 39 files, 699 tests passed.
+- `git diff --check`: exit 0.
+- Rebuilt LaunchAgent restarted with `launchctl kickstart -k gui/501/com.pxpipe.proxy`; `pxpipe doctor` passed all eight live checks, launchd reported `state = running`, and `proxy.err.log` was empty.
+
+Remaining risks:
+- Codex App sessions authenticated through a ChatGPT plan bypass the shell wrapper and are not compressed. Supporting them requires a separate, explicit secret-handling/auth-upstream design; no global Codex config or token handling was changed here.
+- The in-app browser runtime had no available browser, and the local HTTP content probe was blocked by the environment guard. The server-rendered DOM is covered by tests, but the post-change live page was not screenshot-verified in this session.

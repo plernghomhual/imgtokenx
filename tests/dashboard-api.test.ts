@@ -68,6 +68,12 @@ describe('dashboardPath()', () => {
     expect(dashboardPath('/dashboard')?.kind).toBe('html');
   });
 
+  it('handles browser icon probes locally', () => {
+    expect(dashboardPath('/favicon.ico')?.kind).toBe('icon');
+    expect(dashboardPath('/apple-touch-icon.png')?.kind).toBe('icon');
+    expect(dashboardPath('/apple-touch-icon-precomposed.png')?.kind).toBe('icon');
+  });
+
   it('matches the legacy live-poll routes', () => {
     expect(dashboardPath('/proxy-stats')?.kind).toBe('stats');
     expect(dashboardPath('/proxy-recent')?.kind).toBe('recent');
@@ -176,16 +182,30 @@ describe('serveFragment', () => {
     dash.handleCompressionToggle({ enabled: true });
   });
 
-  it('renders and mutates GPT 5.5/5.6 chips via the single model scope', async () => {
+  it('renders reader-safe model policy and mutates the single model scope', async () => {
     const prev = process.env.PXPIPE_MODELS;
+    const prevProfiles = process.env.PXPIPE_READER_PROFILES;
     try {
       delete process.env.PXPIPE_MODELS;
+      delete process.env.PXPIPE_READER_PROFILES;
       setAllowedModelBases(null); // reset to built-in default (Fable 5 + GPT 5.6)
       const on = await (await dash.serveFragment('models', url, 1234)).text();
-      expect(on).toContain('Image GPT models');
+      expect(on).toContain('Reader policy');
+      expect(on).toContain('Every model stays usable');
+      expect(on).toContain('Uncalibrated models · text only');
+      expect(on).toContain('Claude Code');
+      expect(on).toContain('Codex API mode');
+      expect(on).toContain('OpenCode');
+      expect(on).toContain('Codex App with ChatGPT login runs direct');
+      expect(on).not.toContain('Cloudflare gateway');
+      expect(on).toContain('OpenAI scope');
+      expect(on).not.toContain('style="display:none"');
       // GPT 5.6 is on by default; GPT 5.5 is opt-in (off until toggled).
-      expect(on).toContain('GPT 5.6 ✓');
-      expect(on).toContain('GPT 5.5</button>');
+      expect(on).toContain('GPT 5.6 ✓</span><span class="chip-mode">image 5×8');
+      expect(on).toContain('GPT 5.5</span><span class="chip-mode">text only');
+      expect(on).toContain('Opus 4.8');
+      expect(on).toContain('image 20×32');
+      expect(on).toContain('Sonnet 5');
       // GPT 5.6 renders to the left of GPT 5.5.
       expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.5'));
       expect(getAllowedModelBases()).toContain('gpt-5.6');
@@ -193,14 +213,25 @@ describe('serveFragment', () => {
 
       dash.handleModelsToggle('gpt-5.5', true);
       const onBoth = await (await dash.serveFragment('models', url, 1234)).text();
-      expect(onBoth).toContain('GPT 5.5 ✓');
-      expect(onBoth).toContain('GPT 5.6 ✓');
+      expect(onBoth).toContain('GPT 5.5 ✓</span><span class="chip-mode">text only');
+      expect(onBoth).toContain('GPT 5.6 ✓</span><span class="chip-mode">image 5×8');
       expect(getAllowedModelBases()).toContain('gpt-5.5');
       expect(getAllowedModelBases()).toContain('gpt-5.6');
+
+      dash.handleModelsToggle('custom-"model', true);
+      const custom = await (await dash.serveFragment('models', url, 1234)).text();
+      expect(custom).toContain('Custom scope');
+      const claudeScope = custom.slice(custom.indexOf('Claude scope'), custom.indexOf('OpenAI scope'));
+      const customScope = custom.slice(custom.indexOf('Custom scope'));
+      expect(claudeScope).not.toContain('custom-&quot;model');
+      expect(customScope).toContain('custom-&quot;model');
+      expect(custom).toContain('text only');
     } finally {
       setAllowedModelBases(null);
       if (prev === undefined) delete process.env.PXPIPE_MODELS;
       else process.env.PXPIPE_MODELS = prev;
+      if (prevProfiles === undefined) delete process.env.PXPIPE_READER_PROFILES;
+      else process.env.PXPIPE_READER_PROFILES = prevProfiles;
     }
   });
 

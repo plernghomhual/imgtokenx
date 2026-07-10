@@ -3,6 +3,8 @@
 
 import { HTMX_JS, ALPINE_JS } from './vendor.js';
 import { CACHE_CREATE_RATE, CACHE_READ_RATE } from '../core/baseline.js';
+import { ATLAS_CELL_H, ATLAS_CELL_W } from '../core/atlas.js';
+import { resolveReaderProfile } from '../core/reader-profiles.js';
 import type {
   StatsPayload,
   RecentPayload,
@@ -56,10 +58,10 @@ export function renderToggleFragment(enabled: boolean): string {
   // NOTE: "PASSTHROUGH MODE", "Disable compression", "Enable compression" are asserted by tests.
   const banner = enabled
     ? ''
-    : `<div class="banner"><strong>PASSTHROUGH MODE</strong> — compression is off. Every request goes to Claude unchanged: no images, no savings. Use this to A/B test, or if the upstream API is having problems.</div>`;
+    : `<div class="banner"><strong>PASSTHROUGH MODE</strong> — compression is off. Every request goes upstream unchanged: no images, no savings. Use this to A/B test, or if the upstream API is having problems.</div>`;
   // Button POSTs the OPPOSITE of current state; 2s poll keeps it fresh.
   const confirm = enabled
-    ? ` hx-confirm="Turn compression off?\n\nRequests will pass straight through to Claude, unchanged. Restarting the proxy turns it back on."`
+    ? ` hx-confirm="Turn compression off?\n\nRequests will pass straight upstream, unchanged. Restarting the proxy turns it back on."`
     : '';
   return (
     banner +
@@ -98,6 +100,19 @@ export function renderModelsFragment(
   const labelOf = new Map(
     [...MODEL_CATALOG, ...GPT_MODEL_CATALOG].map((m) => [m.id, m.label]),
   );
+  const readerMode = (id: string): { safe: boolean; label: string } => {
+    const profile = resolveReaderProfile(id);
+    return {
+      safe: profile.safeToImage,
+      label: profile.safeToImage
+        ? `image ${ATLAS_CELL_W + profile.cellWBonus}×${ATLAS_CELL_H + profile.cellHBonus}`
+        : 'text only',
+    };
+  };
+  const policyBadge = (id: string, label: string): string => {
+    const mode = readerMode(id);
+    return `<span class="policy-badge ${mode.safe ? 'image' : 'text'}"><span class="policy-dot"></span>${label} · ${mode.label}</span>`;
+  };
   // Union the catalog with env-configured + active ids so PXPIPE_MODELS-enabled
   // families always show as toggles, then split by family for the two sections.
   const ids: string[] = [];
@@ -116,26 +131,40 @@ export function renderModelsFragment(
   const chipFor = (id: string): string => {
     const lit = on.has(id);
     const label = labelOf.get(id) ?? id;
+    const mode = readerMode(id);
+    const vals = escapeHtml(JSON.stringify({ model: id, on: !lit }));
     return (
-      `<button class="chip${lit ? ' on' : ''}" type="button" ` +
+      `<button class="chip ${mode.safe ? 'image-ready' : 'text-only'}${lit ? ' on' : ''}" type="button" ` +
+      `aria-pressed="${lit}" aria-label="Toggle ${escapeHtml(label)} runtime scope" ` +
       `hx-post="/fragments/models" hx-target="#frag-models" ` +
-      `hx-vals='{"model":"${id}","on":${!lit}}'>${escapeHtml(label)}${lit ? ' ✓' : ''}</button>`
+      `hx-vals="${vals}"><span>${escapeHtml(label)}${lit ? ' ✓' : ''}</span><span class="chip-mode">${mode.label}</span></button>`
     );
   };
-  const claudeChips = ids.filter((id) => !id.startsWith('gpt')).map(chipFor).join('');
+  const claudeChips = ids.filter((id) => id.startsWith('claude')).map(chipFor).join('');
   const gptChips = ids.filter((id) => id.startsWith('gpt')).map(chipFor).join('');
+  const otherChips = ids.filter((id) => !id.startsWith('claude') && !id.startsWith('gpt')).map(chipFor).join('');
   const moot = enabled ? '' : ` <span class="hint">compression is off, so this has no effect right now</span>`;
   return (
-    `<div class="models">` +
-    `<span class="models-label">Image Claude models</span>` +
-    claudeChips +
-    `<span class="hint">everything else is sent as normal text · runtime only · persist with PXPIPE_MODELS</span>${moot}` +
-    `</div>` +
-    `<div class="models" style="display:none">` +
-    `<span class="models-label">Image GPT models</span>` +
-    gptChips +
-    `<span class="hint">imaging only, no Anthropic cache_control · one scope for all families · set PXPIPE_MODELS (CSV of bases, or off) to persist</span>${moot}` +
-    `</div>`
+    `<section class="model-policy" aria-label="Model and client policy">` +
+    `<div class="model-policy-head">` +
+    `<div><strong class="model-policy-title">Reader policy</strong>` +
+    `<span class="model-policy-copy">Every model stays usable. Images require a calibrated reader profile; everything else remains verbatim text.</span></div>` +
+    `<div class="policy-badges">` +
+    policyBadge('claude-fable-5', 'Fable 5') +
+    policyBadge('claude-opus-4-8', 'Opus 4.x') +
+    policyBadge('gpt-5.6', 'GPT 5.6') +
+    `<span class="policy-badge text"><span class="policy-dot"></span>Uncalibrated models · text only</span>` +
+    `</div></div>` +
+    `<div class="client-routes"><span class="models-label">Client routes</span>` +
+    `<span>Claude Code</span><span>OpenCode</span><span>Codex API mode</span>` +
+    `<span class="hint">Codex App with ChatGPT login runs direct and does not appear here</span></div>` +
+    `<div class="safety-row"><span>Lossless exact default</span><span>Recovery refs supported</span><span>Break-even gate required</span></div>` +
+    `<div class="model-scope">` +
+    `<div class="models"><span class="models-label">Claude scope</span>${claudeChips}</div>` +
+    `<div class="models"><span class="models-label">OpenAI scope</span>${gptChips}</div>` +
+    (otherChips ? `<div class="models"><span class="models-label">Custom scope</span>${otherChips}</div>` : '') +
+    `<div class="scope-note">Runtime only · persist with <code>PXPIPE_MODELS</code> · reader safety always wins${moot}</div>` +
+    `</div></section>`
   );
 }
 
@@ -157,7 +186,7 @@ export function renderSessionSummaryFragment(s: StatsPayload): string {
       `<div class="hero hero-empty">` +
       `<div class="hero-eyebrow">Since start</div>` +
       `<div class="hero-headline">Warming up…</div>` +
-      `<div class="hero-sub">Point Claude Code at this proxy and send a message. The moment a request flows through, your running savings show up right here.</div>` +
+      `<div class="hero-sub">Start a configured Claude Code, Codex API-mode, or OpenCode session. The moment model traffic reaches this proxy, your running savings appear here.</div>` +
       `</div>`
     );
   }
@@ -182,7 +211,7 @@ export function renderSessionSummaryFragment(s: StatsPayload): string {
     `<div class="hero-sub">` +
     `<strong>${kFmt(actualW)}</strong> effective tokens vs <strong>${kFmt(baselineW)}</strong> if this same context ` +
     `stayed plain text — both counted after normal cache discounts since this proxy started. ` +
-    `Your latest messages and Claude's live output are never compressed.` +
+    `Your latest turns and the model's live output are never compressed.` +
     `</div>` +
     `<div class="hero-meta">` +
     `Cache-aware — cached reads counted at their real ~0.1× weight, not full price · ` +
@@ -702,15 +731,15 @@ const FAVICON =
 
 const CSS = `
   :root {
-    --bg: #faf6f2; --surface: #ffffff; --surface-2: #fbf4ee;
-    --border: #efe5db; --border-strong: #e4d6c8;
-    --ink: #241f1b; --ink-2: #5d534a; --muted: #9b9189;
+    --bg: #f5f6f7; --surface: #ffffff; --surface-2: #f1f3f5;
+    --border: #e1e4e8; --border-strong: #cfd4da;
+    --ink: #1f2328; --ink-2: #4c5661; --muted: #68737d;
     --flame: #ff5a1f; --flame-strong: #e8420a; --flame-ink: #bd3a08; --flame-tint: #fff1ea;
     --good: #1f9d57; --good-tint: #e7f6ee; --bad: #d8483b; --bad-tint: #fcebe9; --warn: #b7791f; --warn-tint: #fbf0db;
     --img: #ff5a1f; --img-ink: #bd3a08; --img-tint: #fff1ea;
     --txt: #2f7db0; --txt-ink: #1f5f8b; --txt-tint: #e9f3fb;
-    --radius: 14px;
-    --shadow: 0 1px 2px rgba(60,35,15,.05), 0 8px 24px rgba(60,35,15,.05);
+    --radius: 8px;
+    --shadow: 0 1px 3px rgba(31,35,40,.10);
     --mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color-scheme: light;
   }
@@ -718,14 +747,14 @@ const CSS = `
      paint by the <head> script (localStorage 'pp-theme' else system pref);
      toggled by ppTheme(). Accents (flame/img/txt) are lifted for contrast. */
   :root[data-theme="dark"] {
-    --bg: #17120f; --surface: #211a15; --surface-2: #2a211b;
-    --border: #352a22; --border-strong: #46382e;
-    --ink: #f6efe8; --ink-2: #cabbac; --muted: #9a8c7d;
+    --bg: #111315; --surface: #191c1f; --surface-2: #22262a;
+    --border: #30353a; --border-strong: #424950;
+    --ink: #f2f4f5; --ink-2: #c4cbd1; --muted: #aab3bb;
     --flame: #ff6a33; --flame-strong: #e8420a; --flame-ink: #ff9a63; --flame-tint: #3a2318;
     --good: #3fbd76; --good-tint: #15291f; --bad: #f0645a; --bad-tint: #341b18; --warn: #d99a3a; --warn-tint: #33260f;
     --img: #ff6a33; --img-ink: #ff9a63; --img-tint: #3a2318;
     --txt: #5aa3d6; --txt-ink: #8cc3ea; --txt-tint: #142631;
-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.45);
+    --shadow: 0 1px 3px rgba(0,0,0,.45);
     color-scheme: dark;
   }
   /* Dark fix-ups for the few intentionally hard-coded (light) spots. */
@@ -747,13 +776,13 @@ const CSS = `
   .flame-dot { width: 14px; height: 14px; border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ffd0a8, var(--flame) 55%, var(--flame-strong));
     box-shadow: 0 0 0 4px var(--flame-tint); flex: none; }
-  .wordmark { font-size: 22px; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; }
+  .wordmark { font-size: 22px; font-weight: 800; color: var(--ink); letter-spacing: 0; }
   .tagline { font-size: 12.5px; color: var(--muted); margin-top: 1px; max-width: 460px; }
   .controls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 
   /* kill switch */
   .banner { display: block; margin: 0 0 8px; padding: 9px 13px; background: var(--bad-tint);
-    border: 1px solid #f3b6af; border-radius: 9px; color: #9c2b20; font-size: 12px; max-width: 520px; }
+    border: 1px solid #f3b6af; border-radius: 8px; color: #9c2b20; font-size: 12px; max-width: 520px; }
   .banner strong { color: #8a2117; }
   .switch { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
   .switch-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
@@ -771,29 +800,55 @@ const CSS = `
     box-shadow: var(--shadow); display: inline-flex; align-items: center; gap: 6px; line-height: 1; }
   .theme-btn:hover { border-color: var(--flame); color: var(--flame-ink); }
 
-  /* model chips */
-  .models { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 18px; }
+  /* model + client policy */
+  .model-policy { margin: 0 0 18px; padding: 14px 0; border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border); }
+  .model-policy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .model-policy-title { color: var(--ink); font-size: 13px; margin-right: 10px; }
+  .model-policy-copy { color: var(--ink-2); font-size: 12px; }
+  .policy-badges, .client-routes, .safety-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+  .policy-badges { justify-content: flex-end; }
+  .policy-badge, .client-routes > span:not(.models-label):not(.hint), .safety-row span { display: inline-flex;
+    align-items: center; gap: 6px; min-height: 26px; padding: 3px 9px; border-radius: 7px;
+    background: var(--surface); border: 1px solid var(--border); color: var(--ink-2); font-size: 11px; }
+  .policy-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .policy-badge.image { color: var(--good); background: var(--good-tint); }
+  .policy-badge.text { color: var(--txt-ink); background: var(--txt-tint); }
+  .client-routes { margin-top: 11px; }
+  .safety-row { margin-top: 7px; }
+  .safety-row span { background: transparent; }
+  .model-scope { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .models { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 7px 0; }
   .models-label { color: var(--ink-2); font-size: 12px; font-weight: 600; }
   .chip { background: var(--surface); color: var(--ink-2); border: 1px solid var(--border-strong);
-    border-radius: 999px; padding: 4px 12px; cursor: pointer; font: inherit; font-size: 12px; }
+    border-radius: 8px; padding: 5px 9px; cursor: pointer; font: inherit; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 7px; min-height: 30px; }
   .chip:hover { border-color: var(--flame); color: var(--flame-ink); }
   .chip.on { background: var(--flame-tint); color: var(--flame-ink); border-color: var(--flame);
     font-weight: 600; }
+  .chip-mode { font-size: 10px; font-weight: 500; color: var(--muted); padding-left: 7px;
+    border-left: 1px solid var(--border-strong); }
+  .chip.image-ready .chip-mode { color: var(--good); }
+  .chip.text-only .chip-mode { color: var(--txt-ink); }
+  .scope-note { color: var(--muted); font-size: 11px; margin-top: 7px; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--flame); outline-offset: 2px; }
+  @media (max-width: 760px) {
+    .model-policy-head { flex-direction: column; }
+    .policy-badges { justify-content: flex-start; }
+    .models-label { flex-basis: 100%; }
+  }
 
   /* session hero */
   #frag-session { display: block; margin-bottom: 16px; }
-  .hero { background: linear-gradient(135deg, var(--flame-tint), var(--surface) 60%); border: 1px solid var(--border);
-    border-left: 4px solid var(--flame); border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow); }
-  .hero-neg { border-left-color: var(--bad); }
-  .hero-eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  .hero { background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow); }
+  .hero-neg { border-color: var(--bad); }
+  .hero-eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: 0; text-transform: uppercase;
     color: var(--muted); margin-bottom: 8px; }
-  .hero-headline { font-size: 28px; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; line-height: 1.1; }
+  .hero-headline { font-size: 28px; font-weight: 700; color: var(--ink); letter-spacing: 0; line-height: 1.1; }
   .hero-num { font-size: 56px; font-weight: 800; line-height: 1; margin-right: 8px;
-    background: linear-gradient(135deg, #ff9a4d, var(--flame) 55%, var(--flame-strong));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    font-variant-numeric: tabular-nums; }
-  .hero-neg .hero-num { background: linear-gradient(135deg, #f0857a, var(--bad));
-    -webkit-background-clip: text; background-clip: text; color: transparent; }
+    color: var(--flame-strong); font-variant-numeric: tabular-nums; }
+  .hero-neg .hero-num { color: var(--bad); }
   .hero-sub { font-size: 14.5px; color: var(--ink-2); margin-top: 12px; max-width: 720px; }
   .hero-meta { font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 10px;
     border-top: 1px dashed var(--border-strong); }
@@ -808,7 +863,7 @@ const CSS = `
   .tile-label { font-size: 11.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 8px;
     display: flex; align-items: center; gap: 5px; }
   .tile-value { font-size: 26px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em; line-height: 1.1; }
+    letter-spacing: 0; line-height: 1.1; }
   .tile-value.pos { color: var(--good); } .tile-value.neg { color: var(--bad); }
   .tile-value.muted-val { color: var(--muted); font-size: 18px; font-weight: 600; }
   .tile-sub { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
@@ -848,7 +903,7 @@ const CSS = `
   .section-sub { font-size: 12px; font-weight: 400; color: var(--muted); }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
-  .card-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  .card-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0;
     color: var(--muted); margin: 0 0 12px; }
   .card-head.spaced { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
 
@@ -859,7 +914,7 @@ const CSS = `
   /* context map */
   .ctxmap { font-size: 13px; }
   .empty-note { color: var(--muted); font-size: 12.5px; padding: 14px; background: var(--surface-2);
-    border: 1px dashed var(--border-strong); border-radius: 10px; }
+    border: 1px dashed var(--border-strong); border-radius: 8px; }
   .ctx-headline { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
   .ctx-title { display: inline-block; font-weight: 700; color: var(--ink); margin-right: 6px; }
   .ctx-big { font-size: 22px; font-weight: 800; color: var(--flame); font-variant-numeric: tabular-nums; }
@@ -873,7 +928,7 @@ const CSS = `
   .tag-txt::before { background: var(--txt); }
   .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 560px) { .split { grid-template-columns: 1fr; } }
-  .split-col { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+  .split-col { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
   .split-img { border-top: 3px solid var(--img); background: linear-gradient(180deg, var(--img-tint), var(--surface) 40%); }
   .split-txt { border-top: 3px solid var(--txt); background: linear-gradient(180deg, var(--txt-tint), var(--surface) 40%); }
   .split-head { font-size: 12px; font-weight: 700; color: var(--ink); margin-bottom: 8px; display: flex;
@@ -971,7 +1026,7 @@ const CSS = `
   /* toast tray */
   .tray { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px;
     z-index: 1000; pointer-events: none; }
-  .toast { background: var(--surface); color: var(--bad); border: 1px solid #f0b3ab; border-radius: 9px;
+  .toast { background: var(--surface); color: var(--bad); border: 1px solid #f0b3ab; border-radius: 8px;
     padding: 10px 14px; font-size: 12px; box-shadow: 0 8px 24px rgba(60,35,15,.14); display: flex;
     align-items: center; gap: 12px; pointer-events: auto; max-width: 360px; }
   .toast button { background: transparent; color: inherit; border: 0; cursor: pointer; font-size: 16px;
@@ -1060,7 +1115,7 @@ export function renderPage(port: number): string {
     <span class="flame-dot"></span>
     <div>
       <div class="wordmark">pxpipe</div>
-      <div class="tagline">See exactly what got turned into images to shrink your Claude Code bill.</div>
+      <div class="tagline">Inspect how long context is compressed without sacrificing exact text.</div>
     </div>
   </div>
   <div class="controls">

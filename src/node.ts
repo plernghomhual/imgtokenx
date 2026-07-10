@@ -349,6 +349,12 @@ async function dispatchDashboard(
     case 'html':
       if (method !== 'GET') return undefined;
       return dashboard.serveHtml(port);
+    case 'icon':
+      if (method !== 'GET' && method !== 'HEAD') return undefined;
+      return new Response(null, {
+        status: 204,
+        headers: { 'cache-control': 'public, max-age=86400' },
+      });
     case 'stats':
       if (method !== 'GET') return undefined;
       return dashboard.serveStats();

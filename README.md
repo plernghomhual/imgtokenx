@@ -75,6 +75,10 @@ launchd or start a local fallback process, then run `claude`, `codex`, or
 `opencode` with the right base URL. `PXPIPE_DISABLE=1 <tool>` bypasses the
 wrapper and runs the original CLI unchanged.
 
+Codex support here means OpenAI-compatible/API mode. Codex App sessions signed
+in with ChatGPT do not inherit the terminal wrapper and are not currently
+captured by pxpipe; subscription-token proxying is intentionally not implemented.
+
 Dashboard at <http://127.0.0.1:47821/>: tokens saved, every text→image
 conversion side by side, kill switch, live model chips. Responses stream
 normally — pxpipe compresses the *request* only, never the model's output.
