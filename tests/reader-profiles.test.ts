@@ -97,7 +97,7 @@ describe('transformRequest reader-profile gate (integration)', () => {
     expect(hasImage).toBe(false);
   });
 
-  it('claude-opus-4-8 renders at its calibrated bonus cell — wider images than claude-fable-5 for identical text', async () => {
+  it('keeps calibrated Opus 20x32 pages within Anthropic\'s 1568px no-resize edge', async () => {
     const system = 'x'.repeat(150_000);
     const reqFor = (model: string) => new TextEncoder().encode(JSON.stringify({
       model,
@@ -111,7 +111,10 @@ describe('transformRequest reader-profile gate (integration)', () => {
     expect(opus.info.compressed).toBe(true);
     expect(fable.info.imageDims?.[0]?.width).toBeDefined();
     expect(opus.info.imageDims?.[0]?.width).toBeDefined();
-    // Opus's cellWBonus:15 (5px -> 20px) must reach the actual renderer, not just the gate.
-    expect(opus.info.imageDims![0]!.width).toBeGreaterThan(fable.info.imageDims![0]!.width);
+    expect(fable.info.imageDims![0]!.width).toBe(1568);
+    expect(opus.info.imageDims![0]!.width).toBe(1568);
+    expect(opus.info.imageDims!.every(({ width, height }) => width <= 1568 && height <= 728)).toBe(true);
+    // Larger cells reduce each page to 78x22 characters, so the same source needs more pages.
+    expect(opus.info.imageCount).toBeGreaterThan(fable.info.imageCount);
   });
 });

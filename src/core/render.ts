@@ -175,6 +175,14 @@ export const DEFAULT_CELL_H_BONUS = 0;
 export const CELL_W = ATLAS_CELL_W + DEFAULT_CELL_W_BONUS;
 export const CELL_H = ATLAS_CELL_H + DEFAULT_CELL_H_BONUS;
 
+/** Preserve the calibrated 1568px dense-page width when a reader needs larger cells. */
+export function denseContentColsForCellWidth(cellW: number = CELL_W): number {
+  return Math.max(
+    1,
+    Math.min(DENSE_CONTENT_COLS, Math.floor((DENSE_CONTENT_COLS * CELL_W) / Math.max(1, cellW))),
+  );
+}
+
 export interface RenderedImage {
   png: Uint8Array;
   width: number;

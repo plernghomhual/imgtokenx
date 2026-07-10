@@ -34,6 +34,7 @@ import {
   DENSE_RENDER_STYLE,
   renderTextToPngsWithCharLimit,
   cellDims,
+  denseContentColsForCellWidth,
 } from './render.js';
 import type { RenderStyle } from './render.js';
 import { factSheetTextComplete } from './factsheet.js';
@@ -270,18 +271,22 @@ function imageTokensCost(
 }
 
 /** Gate geometry for the single-col dense path (tool_result, reminder, history).
- *  Dense single-col uses DENSE_CONTENT_COLS at a `cellH`-aware char budget (default
- *  production CELL_H, matching the historical DENSE_CONTENT_CHARS_PER_IMAGE constant
- *  exactly); multi-col uses configured `cols` at the fixed READABLE budget. Slab uses
+ *  Dense single-col scales the 312-column base to the reader's cell width and uses
+ *  a `cellH`-aware char budget; multi-col uses configured `cols` at the fixed READABLE budget. Slab uses
  *  its own path. Multi-col intentionally ignores `cellH`: renderTextToPngsMultiCol
  *  (render.ts) has no RenderStyle param today, so a reader-profile cell bonus can't
  *  reach the multi-col renderer yet — gating it as if it could would just make the
  *  gate wrong relative to what actually renders. Scope limit, not a bug; see
  *  reader-profiles.ts and the textToImageBlocks multi-col branch below. */
-function denseGateGeometry(cols: number, numCols: number, cellH: number = CELL_H): { cols: number; maxChars: number } {
-  return Math.max(1, numCols | 0) > 1
-    ? { cols, maxChars: READABLE_CHARS_PER_IMAGE }
-    : { cols: DENSE_CONTENT_COLS, maxChars: maxCharsPerImage(DENSE_CONTENT_COLS, cellH) };
+function denseGateGeometry(
+  cols: number,
+  numCols: number,
+  cellH: number = CELL_H,
+  cellW: number = CELL_W,
+): { cols: number; maxChars: number } {
+  if (Math.max(1, numCols | 0) > 1) return { cols, maxChars: READABLE_CHARS_PER_IMAGE };
+  const denseCols = denseContentColsForCellWidth(cellW);
+  return { cols: denseCols, maxChars: maxCharsPerImage(denseCols, cellH) };
 }
 
 /** Visual rows per image at a given cell height (`floor((MAX_HEIGHT_PX − 2·PAD_Y) / cellH)`).
@@ -1439,13 +1444,15 @@ export async function textToImageBlocks(
   // If shrinkage drops below the full width, stay single-col (avoid wasting a divider column).
   const effectiveCols = shrinkWidth ? shrinkColsToContent(text, cols) : cols;
   const effectiveNumCols = effectiveCols < cols ? 1 : numCols;
+  const denseCols = denseContentColsForCellWidth(cellDims(style).cellW);
+  const singleCols = shrinkWidth
+    ? shrinkColsToContent(text, denseCols, style.markerScale, style.font)
+    : denseCols;
   const imgs =
     effectiveNumCols > 1
       ? await renderTextToPngsMultiCol(text, effectiveCols, effectiveNumCols)
-      // Single-col dense: shrink the 312-col base to content so the renderer matches the
-      // gate (denseGateGeometry uses DENSE_CONTENT_COLS, priced via shrinkColsToContent).
-      // Was hard-coded to DENSE_CONTENT_COLS, which threw away the shrink the gate assumed.
-      : await renderTextToPngsWithCharLimit(text, shrinkColsToContent(text, DENSE_CONTENT_COLS), DENSE_CONTENT_CHARS_PER_IMAGE, style);
+      // Single-col dense: cap the reader-specific base to 1568px, then shrink to content.
+      : await renderTextToPngsWithCharLimit(text, singleCols, DENSE_CONTENT_CHARS_PER_IMAGE, style);
   let droppedChars = 0;
   let pixels = 0;
   const droppedCodepoints = new Map<number, number>();
@@ -1509,11 +1516,10 @@ async function runHistoryCollapseAndFinalize(
     // turn because the history gate ignored priorWarmImageTokens.
     const historyProfitable = (text: string, cols: number): boolean => {
       if (shouldKeepLosslessExact(info, o, text)) return false;
-      // History always renders single-col at the dense 312-col / cellH-row page
-      // (history.ts → renderTextToPngsWithCharLimit with DENSE_CONTENT_COLS /
-      // renderStyle), so gate at THAT geometry, not o.cols — and at the same
+      // History renders single-col at the reader-scaled dense width and cellH row cap,
+      // so gate at that geometry, not o.cols — and at the same
       // per-model cell size the renderer below will actually use.
-      const g = denseGateGeometry(cols, 1, cellH);
+      const g = denseGateGeometry(cols, 1, cellH, cellW);
       return isCompressionProfitableAmortized(
         text, g.cols, undefined, 1, historyCpt, horizon,
         o.priorWarmTokens, o.priorWarmImageTokens, false, g.maxChars, cellW, cellH,
@@ -1807,9 +1813,9 @@ export async function transformRequest(
     Math.max(1, (o.multiCol | 0) || 1),
     Math.max(1, maxFittingCols(o.cols)),
   );
-  // Gate geometry for dense single-col (tool_result/reminder) paths — 312-col page,
-  // row cap derived from this model's reader-profile cell height (cellH).
-  const denseGeo = denseGateGeometry(o.cols, numCols, cellH);
+  // Gate geometry for dense single-col paths: 312 columns at 5px, scaled down
+  // for larger reader cells, with the row cap derived from cellH.
+  const denseGeo = denseGateGeometry(o.cols, numCols, cellH, cellW);
   // Use slab cpt (2.0) unless host pinned charsPerToken explicitly.
   const slabCpt = opts.charsPerToken !== undefined
     ? o.charsPerToken
@@ -1842,7 +1848,15 @@ export async function transformRequest(
   // so the gate's prediction and the renderer's output agree at the smallest
   // legible width. The banner above sets the natural floor — no separate
   // minWidth knob needed. Multi-col packing still gets numCols × this width.
-  const slabCols = shrinkColsToContent(combinedWithHeader, o.cols);
+  const slabMaxCols = numCols > 1
+    ? o.cols
+    : Math.min(o.cols, denseContentColsForCellWidth(cellW));
+  const slabCols = shrinkColsToContent(
+    combinedWithHeader,
+    slabMaxCols,
+    renderStyle.markerScale,
+    renderStyle.font,
+  );
   const slabGateEval = evalCompressionProfitability(
     combinedWithHeader, slabCols, undefined, numCols, slabCpt, o.priorWarmTokens, o.priorWarmImageTokens,
     false, // already shrunk — don't double-shrink
@@ -2239,9 +2253,8 @@ export async function transformRequest(
     const horizon = Math.max(1, Math.floor(o.historyAmortizationHorizon));
     const historyProfitable = (text: string, cols: number): boolean => {
       if (shouldKeepLosslessExact(info, o, text)) return false;
-      // Gate at dense 312-col geometry, row cap from THIS model's reader-profile
-      // cell height (matches history.ts renderer, which now gets `renderStyle` too).
-      const g = denseGateGeometry(cols, 1, cellH);
+      // Gate at the reader-scaled dense geometry used by history.ts.
+      const g = denseGateGeometry(cols, 1, cellH, cellW);
       return isCompressionProfitableAmortized(
         text, g.cols, undefined, 1, historyCpt, horizon,
         o.priorWarmTokens, o.priorWarmImageTokens, false, g.maxChars, cellW, cellH,

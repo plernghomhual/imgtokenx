@@ -9,7 +9,7 @@ geometry, font, style, and billing from the exact model id.
 | Model rule | Reader default | Font / cell | Columns | Max height |
 |---|---|---|---:|---:|
 | `claude-fable-5` | image | Spleen + Unifont, 5x8 | 312 | 728 px |
-| `claude-opus-4-*` | image | Spleen + Unifont, 20x32 | 78 on Responses | 728 px |
+| `claude-opus-4-*` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
 | other Claude models | text only until calibrated | Spleen + Unifont, 5x8 | 312 | 728 px |
 | generic `gpt-5.6` | image | Spleen + Unifont, 5x8 | 152 | 1932 px |
 | `gpt-5.6-sol` | **text only until calibrated** | JetBrains Mono 10 + Unifont fallback, 6x11 | 126 | 1932 px |

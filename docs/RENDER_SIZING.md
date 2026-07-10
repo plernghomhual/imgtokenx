@@ -29,7 +29,8 @@ That fits Anthropic's standard 1568px edge and the roughly 1.15 MP fidelity
 threshold measured in the July 2026 legibility audit.
 
 Reader and transport profiles may select a different cell and column count.
-Opus 4.x uses its calibrated 20x32 cell; OpenAI-shaped GPT traffic can select a
+Opus 4.x uses its calibrated 20x32 cell at 78 columns, preserving the same
+1568px edge; OpenAI-shaped GPT traffic can select a
 different atlas and geometry by exact model id. `gpt-5.6-sol`, for example, has
 a 6x11 JetBrains Mono profile at 126 columns, but remains text-only until its
 reader profile is explicitly enabled. See
@@ -59,7 +60,8 @@ Use `ANTHROPIC_PATCH_PX` and `IMAGE_COST_SAFETY_MARGIN` from
 The shared renderer can select a font atlas, derive its cell dimensions, shrink
 a page to the measured content width, and pack
 multiple columns when asked. The proxy's dense default is a single column capped
-at `DENSE_CONTENT_COLS`.
+at `DENSE_CONTENT_COLS`; `denseContentColsForCellWidth` lowers that cap for
+larger reader cells.
 
 Relevant entry points:
 

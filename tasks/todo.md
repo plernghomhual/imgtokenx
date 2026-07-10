@@ -342,3 +342,77 @@ Implementation note:
 
 Migration blocker:
 - The approval service rejected the preserved old uninstaller before execution because its usage allowance was exhausted. The running legacy service and data remain untouched. The new `~/.config/imgtokenx/config.json` was safely written with the seven models checked in the supplied dashboard screenshot and mode `0600`.
+
+Migration progress after user-executed uninstall:
+- Confirmed the legacy listener, LaunchAgent, plist, generated environment file, shell block, and MCP registrations were removed.
+- Moved six retained event/sidecar/recovery/log files into `~/.imgtokenx`, archived the old process logs with `.pre-imgtokenx` suffixes, removed the empty legacy data directory, and renamed the repository to `~/Documents/imgtokenx`.
+- The approval service rejected `node bin/cli.js install` before execution because its usage allowance remains exhausted. Port `47821` is offline until the approved installer is run outside the sandbox.
+
+Live installation progress after user-executed installer:
+- Confirmed `com.imgtokenx.proxy` is running from `~/Documents/imgtokenx`, port `47821` is listening, the new shell block and all three `imgtokenx-recover` MCP registrations are present, and the new error log is empty.
+- The fresh build loaded all seven saved models from `~/.config/imgtokenx/config.json`; startup logs use only `~/.imgtokenx` paths.
+- Sandboxed doctor passed seven checks and could not fetch loopback `/healthz`; `lsof` and startup logs independently confirm the listener. The approval service rejected the external GitHub rename before execution, so `origin` still points to `teamchong/pxpipe`.
+
+GitHub correction:
+- The attempted rename returned HTTP 404 because `teamchong/pxpipe` is the public upstream, not the user's writable fork. The local clone has no fork remote, and `gh auth status` reports the stored `plernghomhual` token as invalid.
+- Correct next step: re-authenticate, create or locate `plernghomhual/imgtokenx` as the fork, keep `teamchong/pxpipe` as `upstream`, then push local `main` to the fork's `origin`.
+- Authentication succeeded in the user's terminal. The first fork command made no changes because this installed `gh` rejects `--remote` when an explicit repository argument is supplied; the following push then correctly failed with 403 against unchanged upstream `origin`.
+- `plernghomhual/imgtokenx` was then created successfully; `gh` renamed source remote to `upstream` and added the fork as `origin`. The first push was rejected non-fast-forward, so remote ancestry must be fetched and inspected before integrating. Codex network isolation blocked that read-only fetch.
+
+# Selective Upstream Integration - 2026-07-09
+
+- [x] Restore the verified pre-merge `imgtokenx` branch at `68c46a2` and preserve the tracker stash.
+- [x] Replace the new fork's untouched upstream snapshot with `68c46a2` using an exact `--force-with-lease`.
+- [x] Port the Claude/OpenCode/Codex runtime fixes from `5eb80a4` without Grok logic.
+- [x] Port the Codex Responses/cache documentation from `bfcf15c` without Grok documentation.
+- [x] Port the useful model-specific render/profile work from `cd4c9ef` without Grok artifacts or defaults. Commit `611965c`.
+- [x] Adapt the hermetic model-scope test from `5deffdc` to `IMGTOKENX_MODELS`. Commit `d79c735`.
+- [x] Run focused checks, typecheck, build, the full test suite, diff/docs/secret guards, and record the final review.
+
+Recovery note:
+- `git merge --abort` could not restore the checkpoint because several conflict resolutions had been modified after staging. The explicitly approved fallback `git reset --hard 68c46a2` removed only the unfinished merge state; `stash@{0}` remained intact and was restored after GitHub confirmed `origin/main` at `68c46a2`.
+
+Verification correction:
+- After adopting `cd4c9ef`'s Fable-only built-in scope, the first focused run passed 147/150 tests. Three assertions still assumed GPT 5.6 was enabled by default: two compatibility cases and one applicability unit test. Runtime/profile tests remained green; update those contracts to use an explicit `IMGTOKENX_MODELS` opt-in, then rerun the same slice before committing.
+- The first complete post-integration run passed 714/715 assertions. `tests/history.test.ts` expected `not_profitable` for a tiny history but received no reason; isolate the test and trace the Anthropic history gate before any push or live restart.
+- The first direct-Opus width fix left the static-slab render at 6248px even though 215/216 focused assertions passed. `textToImageBlocks` and history were constrained, but the slab uses a separate direct render call; trace and align that path before rerunning.
+
+## Final Review - 2026-07-10 (reader-scaled dense width — closes the 6248px slab overflow)
+
+This finishes the change the previous (Codex) session left uncommitted when it hit its
+context limit right after the last doc patch, before verification could run.
+
+Files changed:
+- `src/core/render.ts` — new `denseContentColsForCellWidth(cellW)`: scales the 312-column
+  dense base down so `cols * cellW` never exceeds the calibrated 1568px page width
+  (Opus 20px cell → 78 cols; production 5px cell → unchanged 312).
+- `src/core/transform.ts` — `denseGateGeometry` takes `cellW` and gates at the scaled
+  width; `textToImageBlocks` single-col path renders at the same scaled base; the static
+  slab path caps `shrinkColsToContent` at `min(o.cols, denseContentColsForCellWidth(cellW))`
+  (this was the missed third render path that produced 6248px-wide pages for Opus); both
+  `historyProfitable` closures pass `cellW`.
+- `src/core/history.ts` — `collapseHistory` renders at
+  `denseContentColsForCellWidth(renderCellWidth(o.style))` instead of the raw 312.
+- `tests/reader-profiles.test.ts` — Opus integration test now asserts every page is
+  ≤1568×728 (Anthropic no-resize edge) and that Opus needs more pages than Fable for the
+  same text (bigger cells = fewer chars/page), replacing the old wider-than-Fable check.
+- `docs/RENDER_SIZING.md`, `docs/MODEL_RENDER_PROFILES.md` — geometry docs match.
+
+Behavior changed:
+- Bonus-cell readers (Opus 4.x 20×32) now render every imaging path — slab, tool_result,
+  reminder, history — at ≤1568px width, staying inside Anthropic's linear-billing,
+  no-server-resize window. Previously the gate priced a 1568px page while the slab
+  renderer emitted 6248px, which the API would downscale (unreadable glyphs + mispriced gate).
+- Zero-bonus profiles (Fable 5, gpt-5.6) are numerically unchanged (312 cols).
+
+Verification performed (this session, from the exact uncommitted tree):
+- `npm run typecheck`: exit 0.
+- `npm test`: 40 files, 715 tests, all passed — including the history `not_profitable`
+  case and the new ≤1568px Opus assertions flagged open in the correction notes above.
+- `npm run build`: exit 0; version smoke `0.8.0`.
+- `git diff --check`: exit 0.
+
+Remaining risks:
+- Multi-col path still has no RenderStyle param (pre-existing, documented scope limit).
+- The Codex session transcript (`20260710_agentsmd-instructions-for-usersplernghomhual.md`,
+  5.1MB) and `codex-md.py` sit untracked in the repo root; left uncommitted deliberately.

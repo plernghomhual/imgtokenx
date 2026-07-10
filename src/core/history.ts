@@ -12,7 +12,7 @@
  */
 
 import type { CacheControl, ContentBlock, ImageBlock, Message, TextBlock, ToolUseBlock, ToolResultBlock } from './types.js';
-import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_CONTENT_COLS, DENSE_RENDER_STYLE, neutralizeSentinel, reflow, renderTextToPngsWithCharLimit, roleSlotSegment, SLOT_MARK_ASSISTANT, SLOT_MARK_USER } from './render.js';
+import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_RENDER_STYLE, denseContentColsForCellWidth, neutralizeSentinel, reflow, renderCellWidth, renderTextToPngsWithCharLimit, roleSlotSegment, SLOT_MARK_ASSISTANT, SLOT_MARK_USER } from './render.js';
 import type { RenderStyle } from './render.js';
 import { factSheetTextComplete } from './factsheet.js';
 import { bytesToBase64 } from './png.js';
@@ -579,6 +579,7 @@ export async function collapseHistory(
   let carryOverOrdinal = -1;
 
   const imageBlocks: Array<ImageBlock & { cache_control?: CacheControl }> = [];
+  const denseCols = denseContentColsForCellWidth(renderCellWidth(o.style));
   let chunkStart = protectedPrefix;
   for (const chunkEnd of sortedEnds) {
     const seg = messagesToHistorySegments(messages, chunkEnd, chunkStart);
@@ -613,7 +614,7 @@ export async function collapseHistory(
     // byte depth) and carries the serialize-time slot string instead of re-parsing.
     const imgs = await renderTextToPngsWithCharLimit(
       chunkRender,
-      DENSE_CONTENT_COLS,
+      denseCols,
       DENSE_CONTENT_CHARS_PER_IMAGE,
       { ...o.style, colorByRole: true },
       undefined,
