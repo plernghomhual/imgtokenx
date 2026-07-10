@@ -30,6 +30,8 @@ import {
   recoverableRefText,
   sha8,
   shouldKeepLosslessExact,
+  ANTHROPIC_PATCH_PX,
+  IMAGE_COST_SAFETY_MARGIN,
   type TransformInfo,
   type TransformOptions,
 } from './transform.js';
@@ -106,6 +108,21 @@ export function openAIVisionTokens(model: string, w: number, h: number): number 
   if (Math.max(W, H) > 2048) { const r = 2048 / Math.max(W, H); W = Math.floor(W * r); H = Math.floor(H * r); }
   if (Math.min(W, H) > 768) { const r = 768 / Math.min(W, H); W = Math.floor(W * r); H = Math.floor(H * r); }
   return c.base + c.perTile * (Math.ceil(W / 512) * Math.ceil(H / 512));
+}
+
+/** OpenAI-shaped clients can carry Claude models over `/v1/responses`. */
+export function isClaudeModel(model: string | null | undefined): boolean {
+  const m = (model ?? '').toLowerCase();
+  return m.startsWith('claude') || m.includes('anthropic');
+}
+
+/** Price images for the model serving the request, not the endpoint shape. */
+export function visionTokensForModel(model: string, w: number, h: number): number {
+  if (isClaudeModel(model)) {
+    const patches = Math.ceil(w / ANTHROPIC_PATCH_PX) * Math.ceil(h / ANTHROPIC_PATCH_PX);
+    return Math.ceil(patches * IMAGE_COST_SAFETY_MARGIN);
+  }
+  return openAIVisionTokens(model, w, h);
 }
 
 type OpenAIRole = 'system' | 'developer' | 'user' | 'assistant' | 'tool' | string;
@@ -480,7 +497,7 @@ function evalOpenAIGate(
 ): { imageTokens: number; textTokens: number; profitable: boolean } {
   const stripW = 2 * PAD_X + cols * CELL_W;
   const estImages = estimateImageCount(renderedText, cols, 1);
-  const perStrip = openAIVisionTokens(model, stripW, resolveGptProfile(model).maxHeightPx);
+  const perStrip = visionTokensForModel(model, stripW, resolveGptProfile(model).maxHeightPx);
   const imageTokens = estImages * perStrip;
   const textTokens = renderedText.length / charsPerToken;
   return { imageTokens, textTokens, profitable: imageTokens < textTokens };
@@ -515,11 +532,10 @@ function gptTextTokens(text: string): number {
   }
 }
 
-/** Vision-token cost of the rendered images, summed over their real dims —
- *  what GPT actually bills as input for the slab imgtokenx imaged. */
+/** Vision-token cost of rendered images, using the serving model's billing. */
 function gptImageTokens(model: string, images: RenderedImage[]): number {
   let n = 0;
-  for (const img of images) n += openAIVisionTokens(model, img.width, img.height);
+  for (const img of images) n += visionTokensForModel(model, img.width, img.height);
   return n;
 }
 

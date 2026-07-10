@@ -75,6 +75,14 @@ describe('estimateImageCount', () => {
     expect(estimateImageCount(READABLE_CHARS_PER_IMAGE, COLS)).toBe(1);
     expect(estimateImageCount(READABLE_CHARS_PER_IMAGE + 1, COLS)).toBe(2);
   });
+
+  it('treats reflow markers as inline glyphs, not row breaks', () => {
+    const reflowed = Array.from({ length: 50 }, (_, i) => `turn-${i}`).join('↵');
+    expect(estimateImageCount(reflowed, COLS)).toBe(1);
+
+    const hardLines = Array.from({ length: ROWS_PER_IMG + 1 }, (_, i) => `turn-${i}`).join('\n');
+    expect(estimateImageCount(hardLines, COLS)).toBe(2);
+  });
 });
 
 describe('dense readable render profile', () => {

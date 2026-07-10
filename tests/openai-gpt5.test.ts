@@ -4,7 +4,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import { isImgtokenxSupportedGptModel } from '../src/core/applicability.js';
-import { openAIVisionTokens, resolveVisionCost, transformOpenAIChatCompletions, transformOpenAIResponses } from '../src/core/openai.js';
+import {
+  isClaudeModel,
+  openAIVisionTokens,
+  resolveVisionCost,
+  transformOpenAIChatCompletions,
+  transformOpenAIResponses,
+  visionTokensForModel,
+} from '../src/core/openai.js';
+import { resolveGptProfile } from '../src/core/gpt-model-profiles.js';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -63,6 +71,25 @@ describe('openAIVisionTokens', () => {
     expect(resolveVisionCost('gpt-5.6-nano').regime).toBe('patch');
     expect(resolveVisionCost('gpt-4o').regime).toBe('tile');
     expect(resolveVisionCost('o1').regime).toBe('tile');
+  });
+});
+
+describe('Claude models on OpenAI Responses', () => {
+  it('detects Claude model ids without classifying GPT models', () => {
+    expect(isClaudeModel('claude-opus-4-8')).toBe(true);
+    expect(isClaudeModel('anthropic/claude-sonnet-5')).toBe(true);
+    expect(isClaudeModel('gpt-5.6')).toBe(false);
+    expect(isClaudeModel(undefined)).toBe(false);
+  });
+
+  it('uses Anthropic geometry and patch pricing by model id', () => {
+    const profile = resolveGptProfile('claude-opus-4-8');
+    expect(profile).toMatchObject({ stripCols: 312, maxHeightPx: 728 });
+    expect(resolveGptProfile('gpt-5.6')).toMatchObject({ stripCols: 152, maxHeightPx: 1932 });
+
+    const expectedClaudeTokens = Math.ceil(Math.ceil(1568 / 28) * Math.ceil(728 / 28) * 1.10);
+    expect(visionTokensForModel('claude-opus-4-8', 1568, 728)).toBe(expectedClaudeTokens);
+    expect(visionTokensForModel('gpt-5.6', 768, 1932)).toBe(openAIVisionTokens('gpt-5.6', 768, 1932));
   });
 });
 

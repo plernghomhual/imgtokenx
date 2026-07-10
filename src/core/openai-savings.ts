@@ -17,6 +17,8 @@
  * premium like Anthropic's ephemeral cache.
  */
 
+import { CACHE_READ_RATE } from './baseline.js';
+
 /** gpt-5 cached input list ratio: $0.125 / $1.25 per 1M tokens. */
 export const OPENAI_GPT5_CACHE_READ_RATE = 0.1;
 
@@ -28,12 +30,14 @@ export const OPENAI_GPT5_OUTPUT_RATE = 8;
  * so passthrough telemetry does not accidentally get priced at Anthropic rates. */
 export function openAICacheReadRate(model: string | undefined): number {
   const m = (model ?? '').toLowerCase();
+  if (m.startsWith('claude') || m.includes('anthropic')) return CACHE_READ_RATE;
   if (/^gpt-5/.test(m)) return OPENAI_GPT5_CACHE_READ_RATE;
   return 0.5;
 }
 
 export function openAIOutputRate(model: string | undefined): number {
   const m = (model ?? '').toLowerCase();
+  if (m.startsWith('claude') || m.includes('anthropic')) return 5;
   if (/^gpt-5/.test(m)) return OPENAI_GPT5_OUTPUT_RATE;
   // Good-enough fallback for non-compressed OpenAI rows; they normally do not
   // enter the savings numerator, but the all-usage denominator should still be

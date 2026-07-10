@@ -25,6 +25,7 @@ import {
   computeOpenAIActualInputEff,
   computeOpenAIBaselineRawTokens,
   openAICacheReadRate,
+  openAIOutputRate,
 } from '../src/core/openai-savings.js';
 
 const GPT = 'gpt-5.6';
@@ -155,12 +156,12 @@ describe('per-model pricing is applied correctly (Fable vs Opus vs GPT)', () => 
     expect(CACHE_READ_RATE).toBe(0.1);
   });
 
-  it('GPT cached-read discount is model-GATED: gpt-5.x → 0.1×, others must NOT get it', () => {
-    // imgtokenx images gpt-5.x only; pricing a non-gpt-5 row at the aggressive 0.1×
-    // would overstate its cache savings. The gate keeps families from bleeding
-    // each other's rates.
+  it('uses Anthropic rates for Claude on Responses without changing other GPT fallbacks', () => {
     expect(openAICacheReadRate('gpt-5.6')).toBe(0.1);
     expect(openAICacheReadRate('gpt-5.5')).toBe(0.1);
+    expect(openAICacheReadRate('claude-opus-4-8')).toBe(CACHE_READ_RATE);
+    expect(openAICacheReadRate('claude-sonnet-5')).toBe(CACHE_READ_RATE);
+    expect(openAIOutputRate('claude-opus-4-8')).toBe(5);
     expect(openAICacheReadRate('gpt-4o')).not.toBe(0.1);
     expect(openAICacheReadRate(undefined)).not.toBe(0.1);
   });

@@ -1178,19 +1178,17 @@ function lineRows(line: string, cols: number): number {
   return Math.max(1, Math.ceil(line.length / cols));
 }
 
-/** Visual row count after soft-wrap at `cols`. Both `\n` and the ↵ sentinel
- *  end a row; ↵ occupies a cell on the line it terminates. */
+/** Visual row count after soft-wrap at `cols`. Only hard newlines start rows;
+ *  reflow's ↵ sentinel is an inline glyph and never forces a row break. */
 function countVisualRows(text: string, cols: number): number {
   let rows = 0;
   let lineStart = 0;
   const len = text.length;
   for (let i = 0; i <= len; i++) {
     const cc = i < len ? text.charCodeAt(i) : -1;
-    const isSentinel = cc === 0x21b5 /* ↵ */;
-    if (i === len || cc === 10 /* \n */ || isSentinel) {
-      // ↵ renders as a glyph on the line it ends — count it in the length.
-      const lineLen = (isSentinel ? i + 1 : i) - lineStart;
-      rows += Math.max(1, Math.ceil(lineLen / cols));
+    if (i === len || cc === 10 /* \n */) {
+      const lineLen = i - lineStart;
+      rows += lineLen === 0 ? 1 : Math.ceil(lineLen / Math.max(1, cols));
       lineStart = i + 1;
     }
   }

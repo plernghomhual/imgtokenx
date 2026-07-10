@@ -24,6 +24,11 @@
  * (1190 / 1445 / 2372 / 1464 / 630 …) was calibrated at this height — do not re-link to
  * the Anthropic constant.
  */
+import {
+  DENSE_CONTENT_COLS as ANTHROPIC_STRIP_COLS,
+  MAX_HEIGHT_PX as ANTHROPIC_MAX_HEIGHT_PX,
+} from './render.js';
+
 export const GPT_MAX_HEIGHT_PX = 1932;
 
 /** Image-token cost model (mirrors OpenAI's mandatory pre-tokenize resize). */
@@ -103,6 +108,17 @@ const BUILTIN_RULES: ProfileRule[] = [
   {
     test: (m) => /^o[13]/.test(m),
     profile: { vision: { regime: 'tile', base: 75, perTile: 150 }, stripCols: C, maxHeightPx: H },
+  },
+  // Claude can arrive through OpenAI Responses clients such as OpenCode. Route
+  // by model id so it uses Anthropic's measured page geometry, not GPT's.
+  {
+    test: (m) => m.startsWith('claude') || m.includes('anthropic'),
+    profile: {
+      // vision is priced by visionTokensForModel; this field is not used here.
+      vision: { regime: 'tile', base: 85, perTile: 170 },
+      stripCols: ANTHROPIC_STRIP_COLS,
+      maxHeightPx: ANTHROPIC_MAX_HEIGHT_PX,
+    },
   },
 ];
 
