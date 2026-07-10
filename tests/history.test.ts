@@ -25,7 +25,7 @@ import {
   HISTORY_DEFAULTS,
 } from '../src/core/history.js';
 import { transformRequest, isCompressionProfitable } from '../src/core/transform.js';
-import { DENSE_CONTENT_CHARS_PER_IMAGE } from '../src/core/render.js';
+import { DENSE_CONTENT_CHARS_PER_IMAGE, DENSE_CONTENT_COLS } from '../src/core/render.js';
 import type { Message } from '../src/core/types.js';
 
 // A tiny helper so test fixtures are readable.
@@ -305,18 +305,29 @@ describe('collapseHistory', () => {
   });
 
   it('rejects tiny histories under the full-canvas gate', async () => {
-    // 12 micro-turns (~150 chars serialised). Under the full-canvas render
+    // Five micro-turns (~143 chars serialized). Under the full-canvas render
     // policy (no shrink-to-content) the cheapest image still spends the full
-    // 1568×88 pixel band, which costs more tokens than 150 chars of text. The
+    // 1568x16 pixel band, which costs more tokens than 143 chars of text. The
     // gate correctly refuses unprofitable compressions — imgtokenx must SAVE
     // tokens, never spend more than the text it replaces. This is a regression
     // guard against re-introducing shrink-to-content (which traded savings for
     // a savings illusion on sparse content).
     const msgs: Message[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 5; i++) {
       msgs.push(i % 2 === 0 ? usr(`q${i}`) : asst(`a${i}`));
     }
-    const { info } = await collapseHistory(msgs, profitable, {
+    const fullCanvasProfitable = (text: string): boolean =>
+      isCompressionProfitable(
+        text,
+        DENSE_CONTENT_COLS,
+        undefined,
+        1,
+        undefined,
+        0,
+        0,
+        false,
+      );
+    const { info } = await collapseHistory(msgs, fullCanvasProfitable, {
       keepTail: 0,
       minCollapsePrefix: 5,
       collapseChunk: 0,

@@ -1516,7 +1516,7 @@ async function runHistoryCollapseAndFinalize(
       const g = denseGateGeometry(cols, 1, cellH);
       return isCompressionProfitableAmortized(
         text, g.cols, undefined, 1, historyCpt, horizon,
-        o.priorWarmTokens, o.priorWarmImageTokens, true, g.maxChars, cellW, cellH,
+        o.priorWarmTokens, o.priorWarmImageTokens, false, g.maxChars, cellW, cellH,
       );
     };
     // No protectedPrefix here: this path runs only when the slab did NOT image
@@ -2244,7 +2244,7 @@ export async function transformRequest(
       const g = denseGateGeometry(cols, 1, cellH);
       return isCompressionProfitableAmortized(
         text, g.cols, undefined, 1, historyCpt, horizon,
-        o.priorWarmTokens, o.priorWarmImageTokens, true, g.maxChars, cellW, cellH,
+        o.priorWarmTokens, o.priorWarmImageTokens, false, g.maxChars, cellW, cellH,
       );
     };
     const slabAnchorIdx = (req.messages ?? []).findIndex((m) => m.role === 'user');
