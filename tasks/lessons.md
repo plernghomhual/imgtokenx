@@ -43,3 +43,14 @@ Classify remote-only commits before integration. With explicit approval, preserv
 
 ### Trigger
 A newly created fork snapshots a newer upstream `main` while the local product branch has intentionally diverged.
+
+## Lesson: Prove the Live Traffic Owner
+
+### Anti-Pattern
+Treating a regenerated shell wrapper and an OFF dashboard as proof that no requests can still reach the proxy, without identifying the process that owns each live connection.
+
+### Pattern
+For kill-switch bugs, distinguish historical dashboard rows from new traffic, map current proxy connections to client PIDs and process start times, and verify the client was relaunched after OFF. A sourced wrapper only affects future launches; it cannot rewrite an already-running process or a launcher that hard-codes the base URL.
+
+### Trigger
+Any report that traffic still reaches imgtokenx after the global switch is OFF.

@@ -57,22 +57,21 @@ function shortPath(p: string | null | undefined): string {
 // ---- compression toggle (kill switch) ------------------------------------
 
 export function renderToggleFragment(enabled: boolean): string {
-  // NOTE: "PASSTHROUGH MODE", "Disable compression", "Enable compression" are asserted by tests.
   const banner = enabled
     ? ''
-    : `<div class="banner"><strong>PASSTHROUGH MODE</strong> — compression is off. Every request goes upstream unchanged: no images, no savings. Use this to A/B test, or if the upstream API is having problems.</div>`;
+    : `<div class="banner"><strong>IMGTOKENX OFF</strong> — new Claude Code, Codex API, and OpenCode launches bypass the proxy completely. Request counts and rows below are saved history, not live traffic. Restart any client that was already running. If this shell predates the wrapper update, run <code>. ~/.imgtokenx/env.sh</code> once first.</div>`;
   // Button POSTs the OPPOSITE of current state; 2s poll keeps it fresh.
   const confirm = enabled
-    ? ` hx-confirm="Turn compression off?\n\nRequests will pass straight upstream, unchanged. Restarting the proxy turns it back on."`
+    ? ` hx-confirm="Turn imgtokenx off?\n\nNew client launches will bypass the proxy completely. Restart any client already running."`
     : '';
   return (
     banner +
     `<div class="switch">` +
-    `<span class="switch-state ${enabled ? 'on' : 'off'}"><span class="switch-dot"></span>${enabled ? 'Compression on' : 'Compression off'}</span>` +
+    `<span class="switch-state ${enabled ? 'on' : 'off'}"><span class="switch-dot"></span>${enabled ? 'imgtokenx on' : 'imgtokenx off'}</span>` +
     `<button class="switch-btn" type="button" hx-post="/fragments/toggle" hx-target="#frag-toggle" hx-vals='{"enabled": ${!enabled}}'${confirm}>` +
-    (enabled ? 'Disable compression' : 'Enable compression') +
+    (enabled ? 'Turn imgtokenx off' : 'Turn imgtokenx on') +
     `</button>` +
-    `<span class="hint">kill switch · resets to on when you restart</span>` +
+    `<span class="hint">global kill switch · saved across restarts</span>` +
     `</div>`
   );
 }

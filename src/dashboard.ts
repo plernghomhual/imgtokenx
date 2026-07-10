@@ -499,15 +499,18 @@ export class DashboardState {
    *  the developer's actual Claude Code session files. */
   private readonly ccMapFn: () => Promise<Map<string, ClaudeCodeSessionRef>>;
   private readonly persistModels: ((models: readonly string[]) => void) | undefined;
+  private readonly persistEnabled: ((enabled: boolean) => boolean | void) | undefined;
 
   constructor(
     paths?: SessionsPaths,
     ccMapFn?: () => Promise<Map<string, ClaudeCodeSessionRef>>,
     persistModels?: (models: readonly string[]) => void,
+    persistEnabled?: (enabled: boolean) => boolean | void,
   ) {
     this.paths = paths;
     this.ccMapFn = ccMapFn ?? (() => claudeCodeMap());
     this.persistModels = persistModels;
+    this.persistEnabled = persistEnabled;
   }
 
   /** Stash every rendered image into the ring (called from onRequest with the
@@ -1432,13 +1435,13 @@ export class DashboardState {
     });
   }
 
-  /** POST /api/compression — flip the runtime kill switch.
-   *  Body: { enabled: boolean }. Returns the new state. In-memory only;
-   *  restart resets to the default (on). */
+  /** POST /api/compression — flip the global kill switch.
+   *  Body: { enabled: boolean }. Returns the new state. */
   handleCompressionToggle(body: { enabled?: unknown }): Response {
     const on = body.enabled === true;
-    this.compressionEnabled = on;
-    return jsonResponse({ compression_enabled: on });
+    const persisted = this.persistEnabled?.(on);
+    this.compressionEnabled = persisted === false ? false : on;
+    return jsonResponse({ compression_enabled: this.compressionEnabled });
   }
 
   /** POST /fragments/models — add/remove one model from the compression scope. */
@@ -1492,6 +1495,20 @@ export type DashboardRoute =
   | { kind: 'api-compression' } // /api/compression (POST {enabled}) — runtime kill switch
   | { kind: 'api-image-source' } // /api/image-source[?id=N] — source text behind a rendered PNG
   | { kind: 'fragment'; name: string }; // /fragments/<name> — server-rendered htmx panels
+
+export function dashboardMutationAllowed(
+  origin: string | undefined,
+  targetOrigin: string,
+  fetchSite: string | undefined,
+): boolean {
+  if (fetchSite === 'cross-site') return false;
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === targetOrigin;
+  } catch {
+    return false;
+  }
+}
 
 /** Match dashboard paths (handle query strings on /proxy-latest-png). */
 export function dashboardPath(pathname: string): DashboardRoute | null {

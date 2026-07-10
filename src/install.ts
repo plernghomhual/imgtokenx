@@ -127,6 +127,10 @@ export IMGTOKENX_PORT="\${IMGTOKENX_PORT:-${plan.port}}"
 export IMGTOKENX_NODE="\${IMGTOKENX_NODE:-${shDouble(plan.nodePath)}}"
 export IMGTOKENX_CLI="\${IMGTOKENX_CLI:-${shDouble(plan.cliPath)}}"
 
+imgtokenx_disabled() {
+  [ "\${IMGTOKENX_DISABLE:-}" = "1" ] || [ -e "$HOME/.imgtokenx/disabled" ]
+}
+
 imgtokenx_health() {
   command curl -fsS "$IMGTOKENX_BASE_URL/healthz" >/dev/null 2>&1
 }
@@ -145,20 +149,20 @@ imgtokenx_ensure_proxy() {
 }
 
 claude() {
-  if [ "\${IMGTOKENX_DISABLE:-}" = "1" ]; then command claude "$@"; return $?; fi
-  imgtokenx_ensure_proxy || echo "[imgtokenx] warning: proxy health check failed; running claude anyway" >&2
+  if imgtokenx_disabled; then command claude "$@"; return $?; fi
+  if ! imgtokenx_ensure_proxy; then echo "[imgtokenx] proxy unavailable; bypassing it" >&2; command claude "$@"; return $?; fi
   ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL" command claude "$@"
 }
 
 codex() {
-  if [ "\${IMGTOKENX_DISABLE:-}" = "1" ]; then command codex "$@"; return $?; fi
-  imgtokenx_ensure_proxy || echo "[imgtokenx] warning: proxy health check failed; running codex anyway" >&2
+  if imgtokenx_disabled; then command codex "$@"; return $?; fi
+  if ! imgtokenx_ensure_proxy; then echo "[imgtokenx] proxy unavailable; bypassing it" >&2; command codex "$@"; return $?; fi
   OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/v1" command codex "$@"
 }
 
 opencode() {
-  if [ "\${IMGTOKENX_DISABLE:-}" = "1" ]; then command opencode "$@"; return $?; fi
-  imgtokenx_ensure_proxy || echo "[imgtokenx] warning: proxy health check failed; running opencode anyway" >&2
+  if imgtokenx_disabled; then command opencode "$@"; return $?; fi
+  if ! imgtokenx_ensure_proxy; then echo "[imgtokenx] proxy unavailable; bypassing it" >&2; command opencode "$@"; return $?; fi
   ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL/anthropic" OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/openai" command opencode "$@"
 }
 `;

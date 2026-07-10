@@ -8,12 +8,40 @@ interface ConfigEnv {
   IMGTOKENX_MODELS?: string;
 }
 
+interface RuntimeEnv {
+  HOME?: string;
+  IMGTOKENX_DISABLE?: string;
+}
+
 export const DEFAULT_CONFIG_FILE = path.join(
   os.homedir(),
   '.config',
   'imgtokenx',
   'config.json',
 );
+
+export function runtimeDisableFile(env: RuntimeEnv = process.env): string {
+  return path.join(env.HOME?.trim() || os.homedir(), '.imgtokenx', 'disabled');
+}
+
+export function isRuntimeDisabled(env: RuntimeEnv = process.env): boolean {
+  return /^(1|true|yes|on)$/i.test(env.IMGTOKENX_DISABLE?.trim() ?? '')
+    || fs.existsSync(runtimeDisableFile(env));
+}
+
+export function persistRuntimeEnabled(
+  enabled: boolean,
+  env: RuntimeEnv = process.env,
+): string {
+  const file = runtimeDisableFile(env);
+  if (enabled) {
+    fs.rmSync(file, { force: true });
+  } else {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, 'off\n', { mode: 0o600 });
+  }
+  return file;
+}
 
 function configFile(env: ConfigEnv): string {
   return env.IMGTOKENX_CONFIG ?? DEFAULT_CONFIG_FILE;

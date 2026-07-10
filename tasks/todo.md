@@ -452,3 +452,68 @@ transcript + converter no longer appear untracked.
 
 Remaining risks: none known for this pass. Live daemon restart still pending for this
 commit (kickstart after push).
+
+# Global Kill Switch - 2026-07-10
+
+- [x] Add a red regression proving dashboard-off persists and all three generated wrappers launch clients directly.
+- [x] Share one durable off-state across dashboard startup/toggle, Claude Code, Codex API mode, and OpenCode.
+- [x] Replace passthrough-only wording with global-off behavior and the running-client restart boundary.
+- [x] Run focused regression, typecheck, build, full suite, and scoped diff/audit checks.
+- [x] Update the live generated wrapper and restart the local service after verification.
+
+Scout note:
+- `fable-context brief` could not create its `~/.cache/fable-context` run directory under the workspace sandbox; CRG, context memory, targeted `rg`, and exact reads were used instead.
+- Existing uncommitted changes in `src/core/proxy.ts`, `src/core/render.ts`, `src/node.ts`, `tests/proxy-usage.test.ts`, and `tests/render.test.ts` predate this task and must be preserved.
+
+## Final Review - 2026-07-10 (global kill switch)
+
+Files changed:
+- `src/node-config.ts`, `src/dashboard.ts`, `src/dashboard/fragments.ts`, `src/install.ts`, `src/node.ts` — durable off sentinel, dashboard persistence/startup state, wrapper bypass, cross-site mutation guard, and honest UI/help copy.
+- `tests/node-config.test.ts`, `tests/dashboard-api.test.ts`, `tests/install.test.ts` — persistence, forced-off, CSRF, and real three-wrapper shell regression coverage.
+- `README.md` — global-off and one-time wrapper refresh instructions.
+
+Behavior changed:
+- Dashboard OFF writes `~/.imgtokenx/disabled`; fresh Claude Code, Codex API-mode, and OpenCode launches run their original CLIs without proxy base URLs. OFF survives service restarts.
+- Cross-site browser POSTs cannot mutate the durable dashboard setting. A process-level `IMGTOKENX_DISABLE` override cannot be contradicted by the dashboard.
+- The live wrapper was regenerated and the LaunchAgent restarted with OFF preserved.
+
+Verification performed:
+- Pre-fix regression: focused run failed 2/35 assertions because the dashboard did not persist and all three wrappers injected proxy URLs.
+- Post-fix focused run: 3 files / 42 tests passed.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0; version smoke `0.8.0`.
+- Full `npm test`: 40 files / 724 tests passed.
+- `git diff --check`: exit 0.
+- Live doctor: 8/8 checks passed; `/healthz` 200; dashboard remained OFF; cross-site enable POST returned 403.
+
+Remaining risks:
+- The already-running client that inherited the old proxy URL must be relaunched from a new shell or after `. ~/.imgtokenx/env.sh`; no child process can rewrite its parent/current process environment.
+- The loopback dashboard/daemon remains running as the control plane so OFF can be reversed; manually hard-coded base URLs remain outside wrapper control.
+
+# OFF-State Dashboard History Clarity - 2026-07-10
+
+- [x] Reproduce whether OFF-state rows are new traffic or replayed history.
+- [x] Make the OFF banner distinguish saved rows/counts from live traffic.
+- [x] Run focused and full verification; update the live service.
+
+## Final Review - 2026-07-10 (OFF-state history clarity)
+
+Files changed:
+- `src/dashboard/fragments.ts` — OFF banner now says stored counts/rows are saved history rather than live traffic.
+- `tests/dashboard-api.test.ts` — regression assertion for the history warning.
+- `tasks/lessons.md`, `tasks/todo.md` — corrected the live-traffic verification pattern and recorded evidence.
+
+Root cause:
+- The real `claude-fable-5` retries occurred from 14:38:30–14:39:06 EDT while a Claude process launched before the latest `. ~/.imgtokenx/env.sh` commands was still alive. Shell history has the last Claude launch before both source commands and no later launch; sourcing cannot mutate that already-running process.
+- After the retries ended, the dashboard continued replaying those persisted rows. Two five-second samples showed no new request timestamp. Current browser keep-alive connections serve dashboard polling only and do not create proxy event rows.
+
+Verification:
+- Pre-fix focused test: 1 failed / 29 passed.
+- Post-fix focused test: 30/30 passed.
+- `npm run typecheck`: exit 0.
+- `npm run build`: exit 0; version smoke `0.8.0`.
+- Full `npm test`: 40 files / 724 tests passed.
+- Live dashboard: OFF, history warning visible, last API event remains `2026-07-10T18:39:06.117Z`.
+
+Remaining boundary:
+- To bypass the proxy, Claude must be exited and relaunched after sourcing in its parent terminal. Running the source command inside Claude's tool subprocess or merely refreshing the dashboard cannot change the current Claude process environment.

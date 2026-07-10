@@ -14,6 +14,7 @@ import {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 describe('install artifacts', () => {
   it('renders a launchd plan with absolute node/cli paths and logs under ~/.imgtokenx', () => {
@@ -47,7 +48,45 @@ describe('install artifacts', () => {
     expect(env).toContain('ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL" command claude "$@"');
     expect(env).toContain('OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/v1" command codex "$@"');
     expect(env).toContain('ANTHROPIC_BASE_URL="$IMGTOKENX_BASE_URL/anthropic" OPENAI_BASE_URL="$IMGTOKENX_BASE_URL/openai" command opencode "$@"');
-    expect(env).toContain('if [ "${IMGTOKENX_DISABLE:-}" = "1" ]; then command claude "$@"; return $?; fi');
+    expect(env).toContain('[ "${IMGTOKENX_DISABLE:-}" = "1" ] || [ -e "$HOME/.imgtokenx/disabled" ]');
+    expect(env).toContain('if imgtokenx_disabled; then command claude "$@"; return $?; fi');
+  });
+
+  it('launches Claude Code, Codex, and OpenCode directly while the global kill switch is off', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-kill-switch-'));
+    try {
+      const bin = path.join(home, 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      const client = '#!/bin/sh\nprintf "%s|%s|%s\\n" "$(basename "$0")" "${ANTHROPIC_BASE_URL-unset}" "${OPENAI_BASE_URL-unset}"\n';
+      for (const command of ['claude', 'codex', 'opencode']) {
+        const file = path.join(bin, command);
+        fs.writeFileSync(file, client, { mode: 0o755 });
+      }
+      fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      fs.mkdirSync(path.join(home, '.imgtokenx'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.imgtokenx', 'disabled'), 'off\n');
+
+      const envFile = path.join(home, 'env.sh');
+      fs.writeFileSync(envFile, renderShellEnv({
+        nodePath: '/node',
+        cliPath: '/repo/bin/cli.js',
+        baseUrl: 'http://127.0.0.1:47821',
+        port: 47821,
+      }));
+      const run = spawnSync('/bin/zsh', ['-c', '. "$1"; claude; codex; opencode', 'zsh', envFile], {
+        encoding: 'utf8',
+        env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` },
+      });
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout.trim().split('\n')).toEqual([
+        'claude|unset|unset',
+        'codex|unset|unset',
+        'opencode|unset|unset',
+      ]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('adds and removes exactly one zshrc source block idempotently', () => {

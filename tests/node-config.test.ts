@@ -2,7 +2,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyConfigFileDefaults, persistModelsConfig } from '../src/node-config.js';
+import {
+  applyConfigFileDefaults,
+  isRuntimeDisabled,
+  persistModelsConfig,
+  persistRuntimeEnabled,
+} from '../src/node-config.js';
 
 const dirs: string[] = [];
 
@@ -58,5 +63,19 @@ describe('model config persistence', () => {
 
     expect(() => persistModelsConfig(['gpt-5.6'], { IMGTOKENX_CONFIG: file })).toThrow();
     expect(fs.readFileSync(file, 'utf8')).toBe('not json\n');
+  });
+});
+
+describe('global kill switch persistence', () => {
+  it('survives process state and clears when re-enabled', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-disable-'));
+    dirs.push(home);
+    const env = { HOME: home };
+
+    persistRuntimeEnabled(false, env);
+    expect(isRuntimeDisabled({ HOME: home })).toBe(true);
+
+    persistRuntimeEnabled(true, env);
+    expect(isRuntimeDisabled({ HOME: home })).toBe(false);
   });
 });

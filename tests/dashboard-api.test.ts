@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { DashboardState, dashboardPath } from '../src/dashboard.js';
+import { DashboardState, dashboardMutationAllowed, dashboardPath } from '../src/dashboard.js';
 import { getAllowedModelBases, setAllowedModelBases } from '../src/core/applicability.js';
 import type { SessionsPaths } from '../src/sessions.js';
 import type { TrackEvent } from '../src/core/tracker.js';
@@ -94,6 +94,15 @@ describe('dashboardPath()', () => {
   });
 });
 
+describe('dashboardMutationAllowed()', () => {
+  it('blocks cross-site dashboard mutations', () => {
+    expect(dashboardMutationAllowed('http://127.0.0.1:47821', 'http://127.0.0.1:47821', 'same-origin')).toBe(true);
+    expect(dashboardMutationAllowed('https://example.com', 'http://127.0.0.1:47821', 'cross-site')).toBe(false);
+    expect(dashboardMutationAllowed(undefined, 'http://127.0.0.1:47821', 'cross-site')).toBe(false);
+    expect(dashboardMutationAllowed('not a url', 'http://127.0.0.1:47821', undefined)).toBe(false);
+  });
+});
+
 // ---- /api/sessions.json --------------------------------------------------
 
 describe('serveSessionsJson', () => {
@@ -173,13 +182,40 @@ describe('serveFragment', () => {
   it('renders the toggle fragment reflecting compression state', async () => {
     const on = await dash.serveFragment('toggle', url, 1234);
     expect(on.headers.get('content-type')).toContain('text/html');
-    expect(await on.text()).toContain('Disable compression');
+    expect(await on.text()).toContain('Turn imgtokenx off');
     dash.handleCompressionToggle({ enabled: false });
     const off = await dash.serveFragment('toggle', url, 1234);
     const offHtml = await off.text();
-    expect(offHtml).toContain('PASSTHROUGH MODE');
-    expect(offHtml).toContain('Enable compression');
+    expect(offHtml).toContain('IMGTOKENX OFF');
+    expect(offHtml).toContain('Turn imgtokenx on');
+    expect(offHtml).toContain('. ~/.imgtokenx/env.sh');
+    expect(offHtml).toContain('saved history, not live traffic');
     dash.handleCompressionToggle({ enabled: true });
+  });
+
+  it('sends every toggle to the durable global-state writer', async () => {
+    const persisted: boolean[] = [];
+    const persistentDash = new DashboardState(
+      tmp,
+      async () => new Map(),
+      undefined,
+      (enabled) => { persisted.push(enabled); },
+    );
+
+    persistentDash.handleCompressionToggle({ enabled: false });
+    persistentDash.handleCompressionToggle({ enabled: true });
+
+    expect(persisted).toEqual([false, true]);
+  });
+
+  it('keeps the dashboard off when a process-level override refuses enablement', async () => {
+    const forcedOff = new DashboardState(tmp, async () => new Map(), undefined, () => false);
+    const body = await forcedOff.handleCompressionToggle({ enabled: true }).json() as {
+      compression_enabled: boolean;
+    };
+
+    expect(body.compression_enabled).toBe(false);
+    expect(forcedOff.getCompressionEnabled()).toBe(false);
   });
 
   it('renders reader-safe model policy and mutates the single model scope', async () => {

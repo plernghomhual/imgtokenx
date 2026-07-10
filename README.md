@@ -73,7 +73,12 @@ imgtokenx uninstall          # removes the launchd/env/zshrc wiring
 The generated wrappers health-check <http://127.0.0.1:47821/healthz>, kickstart
 launchd or start a local fallback process, then run `claude`, `codex`, or
 `opencode` with the right base URL. `IMGTOKENX_DISABLE=1 <tool>` bypasses the
-wrapper and runs the original CLI unchanged.
+wrapper for one launch. The dashboard kill switch writes
+`~/.imgtokenx/disabled`; while present, all three wrappers run their original
+CLIs directly. Restart a client that was already running when the switch changed
+because a process cannot discard a base URL it inherited at launch. After this
+wrapper upgrade, open a new shell or run `. ~/.imgtokenx/env.sh` once before
+relaunching; later switch changes are picked up on every launch automatically.
 
 Codex support here means OpenAI-compatible/API mode. Codex App sessions signed
 in with ChatGPT do not inherit the terminal wrapper and are not currently
