@@ -22,12 +22,15 @@ import {
 } from './node-config.js';
 import { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
 export { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
+import { pruneRecoverableDir } from './recovery-retention.js';
+export { pruneRecoverableDir, readRecoveryCaps } from './recovery-retention.js';
 import {
   parseExportArgv,
   runExportCore,
   type ExportParsed,
   type ExportResult,
 } from './core/export.js';
+import { redactErrorBody } from './core/redact.js';
 import { readExportTextFile } from './export-collect.js';
 import {
   toTrackEvent,
@@ -157,6 +160,11 @@ Environment:
                           refs here (defaults to ~/.imgtokenx/recovery, written
                           0600). Set to "off" / "0" / "false" / "no" to disable.
                           May contain secrets / PII — directory is owner-readable only.
+                          Caps (any set to 0 disables that cap; missing or
+                          non-numeric envs fall back to the default):
+  IMGTOKENX_RECOVERY_MAX_AGE_DAYS  delete .txt files older than N days (default 7)
+  IMGTOKENX_RECOVERY_MAX_BYTES    delete oldest until total size ≤ N bytes
+                          (default 268435456 = 256 MiB)
   IMGTOKENX_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
                           IMGTOKENX_RECOVERABLE_DIR is also set.
 
@@ -734,29 +742,20 @@ function walkDir(
 }
 
 /** Cap the recovery dir so it can't grow unbounded on a long-running proxy.
- *  Keeps the newest MAX_RECOVERABLE_FILES `.txt` sources; the rest are the
- *  oldest and least likely to be referenced by a still-live `rec_*` id. */
-const MAX_RECOVERABLE_FILES = 4096;
-
-function pruneRecoverableDir(dir: string): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  const files = entries
-    .filter((e) => e.isFile() && e.name.endsWith('.txt'))
-    .map((e) => {
-      let mtimeMs = 0;
-      try { mtimeMs = fs.statSync(path.join(dir, e.name)).mtimeMs; } catch { /* gone */ }
-      return { name: e.name, mtimeMs };
-    })
-    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
-  for (let i = 0; i < files.length - MAX_RECOVERABLE_FILES; i++) {
-    try { fs.unlinkSync(path.join(dir, files[i]!.name)); } catch { /* gone */ }
-  }
-}
+ *  Three independent caps — any explicit env value of `0` DISABLES that cap.
+ *  Run in order: age first (free, mtime already known), then byte + count on
+ *  the survivors (newest-first). Each is the longest-lived constraint a
+ *  multi-day proxy should ever hold:
+ *  - AGE:           `IMGTOKENX_RECOVERY_MAX_AGE_DAYS` default 7 days.
+ *  - BYTE:          `IMGTOKENX_RECOVERY_MAX_BYTES`   default 256 MiB.
+ *  - COUNT (last):  `MAX_RECOVERABLE_FILES` = 4096. Hard ceiling that
+ *                   keeps a runaway pace from walking the whole dir on every
+ *                   write; not configurable via env.
+ *  Implementation lives in src/recovery-retention.ts so tests can import
+ *  the source of truth directly (audit finding E7).
+ *  NOTE: `.txt` recovery sources are intentionally NOT redacted — `rec_*` is
+ *  the "exact byte recovery" contract and files are 0600 + ttl-pruned.
+ *  Redaction happens at the JSONL/stderr layer instead. */
 
 /** Collect files from a list of targets (files or directories). */
 export function collectFilesFromTargets(
@@ -1199,11 +1198,12 @@ export async function main(): Promise<void> {
 
       // Surface upstream 4xx error bodies inline so a regression in the
       // request shape is obvious without having to grep events.jsonl. The
-      // tracker JSONL already has the full ~2 KiB capture.
+      // tracker JSONL already has the full ~2 KiB capture. Apply redaction
+      // first (audit finding E7): the message gets echoed to stderr which
+      // can persist in terminal scrollback / systemd journals.
       if (e.errorBody) {
-        const trimmed = e.errorBody.length > 400
-          ? e.errorBody.slice(0, 400) + '…'
-          : e.errorBody;
+        const redacted = redactErrorBody(e.errorBody);
+        const trimmed = redacted.length > 400 ? redacted.slice(0, 400) + '…' : redacted;
         console.warn(`[imgtokenx ${e.status}] upstream body: ${trimmed}`);
       }
 

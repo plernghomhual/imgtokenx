@@ -7,6 +7,7 @@ import { transformRequest, type TransformOptions, type TransformInfo } from './t
 import { transformOpenAIChatCompletions, transformOpenAIResponses } from './openai.js';
 import { isAnthropicMessagesPath, isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import { resolveReaderProfile } from './reader-profiles.js';
+import { redactErrorBody } from './redact.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,
@@ -399,7 +400,11 @@ function teeForUsage(res: Response): {
       } catch {
         /* client may have aborted */
       }
-      return out.length > ERROR_BODY_MAX ? out.slice(0, ERROR_BODY_MAX) : out;
+      // Cap, then redact. Auditing finding E7: providers may echo back
+      // Authorization values, leaked keys, or PII in 4xx bodies — scrub
+      // before persisting to JSONL or logging to stderr.
+      const capped = out.length > ERROR_BODY_MAX ? out.slice(0, ERROR_BODY_MAX) : out;
+      return redactErrorBody(capped);
     })();
       return {
         response: new Response(forClient, {
