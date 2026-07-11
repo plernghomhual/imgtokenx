@@ -575,7 +575,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 
 - [x] 22. Return 405 plus `Allow` for wrong-method dashboard routes.
 - [x] 23. Validate dashboard mutation payloads and model identifiers strictly.
-- [ ] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
+- [x] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
 - [x] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
 - [x] 26. Replace clickable image thumbnails with keyboard-accessible controls.
 - [ ] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
@@ -868,6 +868,64 @@ Status: 1 item implemented + regression-tested; tsc clean (0); vitest 55 files /
 - Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
 - Dashboard/installer/ops: #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+## Final Review - 2026-07-10 (audit batch 12 — 1 of 40 items: #24 E4)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 56 files / 893 tests pass (was 867); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] **#24 E4** non-loopback host/auth + DNS-rebinding defense. Three concrete fixes:
+  - **src/core/bind-auth.ts (NEW)**: parseHostList(spec) -> string[] (CSV). defaultAllowedHosts(port) returns loopback variants. hostMatches(headerHost, allowedHosts): strict equality, case-insensitive hostname, FQDN trailing-dot strip, port-aware. isLoopbackRequest(req): URL hostname + localAddress (IPv4-mapped IPv6 ::ffff: prefix stripped). bindAuthResponse(req, opts) -> Response | null: 400 missing Host, 403 host-not-in-allowlist (off-host), 403 no-secret hint when off-host + allowlist hit + secret unset, 401 + WWW-Authenticate on Bearer mismatch; null = allow. Loopback bypass applied first so local 127.0.0.1 / [::1] / localhost callers skip every gate.
+  - **src/node.ts**: RuntimeConfig extended with `allowedHosts: string[]` + `proxyToken?: string`. parseCli reads IMGTOKENX_ALLOWED_HOSTS (defaults to defaultAllowedHosts(port) when unset) + IMGTOKENX_PROXY_TOKEN (trimmed nonEmpty via nonEmpty helper). createServer callback runs bindAuthResponse BEFORE dashboard / proxy dispatch with /healthz EXEMPT (carries its own IMGTOKENX_HEALTHZ_TOKEN gate per Batch 11). printHelp documents NEW env vars. Factored single shared `nodeHeadersToWeb(raw: IncomingHttpHeaders)` helper used by both toWebRequest and the bind-auth gate.
+  - **tests/bind-auth.test.ts (NEW)**: 26 tests across parseHostList (4), defaultAllowedHosts (1), hostMatches (5 incl. case-insensitive + FQDN dot + port-strict + subdomain-attack), isLoopbackRequest (5 incl. URL+localAddress mismatch = off-host), loopback bypass (2), host whitelist off-host (2 incl. the malformed-test fix), secret gate off-host+allowlisted (3), DNS rebinding defense (2 incl. missing Host), method-agnostic POST (1).
+
+### Notes / risks
+- **DNS rebinding defense works in two layers**: (1) isLoopbackRequest requires BOTH URL hostname AND localAddress to be loopback (carried forward from Batch 11 healthz mitigations); (2) bindAuthResponse then enforces the operator's IMGTOKENX_ALLOWED_HOSTS whitelist off-host. A rebinding browser pointed at `evil.com -> 127.0.0.1` mid-session fails layer 1 (URL hostname `evil.com` != loopback) -> 403.
+- **/healthz double-secret fix**: bindAuth would have forced operators to set BOTH IMGTOKENX_PROXY_TOKEN AND IMGTOKENX_HEALTHZ_TOKEN for off-host /healthz (Batch 11 legacy gate). Adding a `(req.url ?? '/').split('?')[0] === '/healthz'` exemption in createServer lets /healthz use its existing single-token gate. Net effect: off-host /healthz needs ONLY IMGTOKENX_HEALTHZ_TOKEN; off-host /proxy + /dashboard needs IMGTOKENX_PROXY_TOKEN (and Host in IMGTOKENX_ALLOWED_HOSTS).
+- **Default backward compat**: when IMGTOKENX_ALLOWED_HOSTS is unset, parseCli seeds `allowedHosts = defaultAllowedHosts(port)` — the documented dev workflow (`curl http://127.0.0.1:47821/healthz`, browser-localhost dashboard) keeps working with zero config. Operators opting into a public deploy must enumerate every hostname they intend to serve.
+- **Worker compat**: bindAuth is Node-only (src/node.ts); src/core/proxy.ts + src/worker.ts are untouched. Worker's existing IMGTOKENX_WORKER_SECRET + x-imgtokenx-secret gate continues to gate the Worker deploy separately.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 56 files, 893 tests, all passed (was 867 / 55 files before Batch 12 — +26 new bind-auth tests).
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+- Pre-commit reviewer pass: "Ship it. Zero blockers."
+- Single-source-of-truth verified: `grep -n nodeHeadersToWeb src/node.ts` shows 1 definition (line 268) and 2 call sites (toWebRequest at line 290, bind-auth gate at line 1348) — no third call site snuck in.
+
+### Remaining (not yet implemented, 17 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+
+EOF_BATCH12; \
+  echo 'heredoc wrote /tmp/batch12.md:'; \
+  wc -l /tmp/batch12.md; \
+  echo; \
+  echo '=== INSERT block BEFORE the last existing ## Final Review ==='; \
+  node -e "
+    const fs = require('fs');
+    let s = fs.readFileSync('tasks/todo.md', 'utf8');
+    const block = fs.readFileSync('/tmp/batch12.md', 'utf8');
+    const idx = s.lastIndexOf('## Final Review');
+    if (idx === -1) { console.log('NO ANCHOR FOUND'); process.exit(1); }
+    s = s.slice(0, idx) + block + s.slice(idx);
+    fs.writeFileSync('tasks/todo.md', s);
+    console.log('inserted at offset', idx);
+  "; \
+  echo; \
+  echo '=== verify ledger block landed ==='; \
+  grep -c 'audit batch 12' tasks/todo.md; \
+  tail -3 tasks/todo.md; \
+  echo; \
+  echo '=== git amend ==='; \
+  git add tasks/todo.md; \
+  git status --short; \
+  git -c user.name='imgtokenx-audit-bot' -c user.email='audit@imgtokenx.local' commit --amend --no-edit; \
+  echo; \
+  echo '=== final state ==='; \
+  git log --oneline -3; \
+  git status
 ## Final Review - 2026-07-10 (audit batch 10 \u2014 1 of 40 items: #23 D19)
 
 Status: 1 item implemented + regression-tested; tsc clean (0); vitest 54 files / 850 tests pass (was 821 after Batch 9); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).

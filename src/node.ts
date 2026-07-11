@@ -6,7 +6,7 @@
  * version; only the request/response plumbing differs.
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -31,6 +31,12 @@ import {
   type ExportResult,
 } from './core/export.js';
 import { redactErrorBody } from './core/redact.js';
+import {
+  defaultAllowedHosts,
+  parseHostList,
+  bindAuthResponse,
+  type BindAuthRequest,
+} from './core/bind-auth.js';
 import {
   parseModelsPayload,
   parseTogglePayload,
@@ -67,6 +73,17 @@ interface RuntimeConfig {
   gatewayBaseUrl?: string;
   gatewayHeaders?: Record<string, string>;
   eventsFile: string;
+  /** Audit E4: explicit opt-in list of Host header values permitted when
+   *  binding to a non-loopback interface. Empty/unset means “only loopback
+   *  variants are accepted” — preserves the documented loopback-by-default
+   *  threat model unless the operator intentionally opens up. */
+  allowedHosts: string[];
+  /** Audit E4: shared secret required from off-host callers (Bearer). The
+   *  loopback bypass covers development; setting the secret opts the
+   *  deployment into public reach. /healthz has its own IMGTOKENX_HEALTHZ_TOKEN
+   *  (kept by Batch 11) — this one covers ALL other routes (proxy + dashboard +
+   *  fragments). */
+  proxyToken?: string;
 }
 
 function parseCli(argv: string[]): RuntimeConfig {
@@ -103,7 +120,23 @@ function parseCli(argv: string[]): RuntimeConfig {
     eventsFile:
       process.env.IMGTOKENX_LOG ??
       path.join(os.homedir(), '.imgtokenx', 'events.jsonl'),
+    // Audit E4: parse CSV host whitelist once at boot. Default loopback
+    // variants ensure the documented dev workflow (curl http://127.0.0.1:PORT/...)
+    // keeps working without setting the env var. Operators opting into a public
+    // deploy MUST list every hostname they intend to serve.
+    allowedHosts: parseHostList(process.env.IMGTOKENX_ALLOWED_HOSTS).length > 0
+      ? parseHostList(process.env.IMGTOKENX_ALLOWED_HOSTS)
+      : defaultAllowedHosts(Number(process.env.PORT ?? 47821)),
+    // Empty string is the same as unset — both fall through to the loopback
+    // bypass. /healthz has its own IMGTOKENX_HEALTHZ_TOKEN and is unaffected.
+    proxyToken: nonEmpty(process.env.IMGTOKENX_PROXY_TOKEN),
   };
+}
+
+function nonEmpty(v: string | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  const t = v.trim();
+  return t.length > 0 ? t : undefined;
 }
 
 function parseProvider(v: string | undefined): 'cloudflare-ai-gateway' | undefined {
@@ -178,6 +211,20 @@ Environment:
                           interface (127.0.0.1 / ::1 / localhost). Unset =
                           off-host /healthz refuses with a 403 hint instead
                           of leaking the build version.
+  IMGTOKENX_ALLOWED_HOSTS     (audit E4) comma-separated Host headers accepted
+                          from off-host callers (defense against DNS rebinding
+                          + auth bypass via Host spoof). Default — when unset —
+                          is the loopback variants for the bound port, so
+                          development keeps working out of the box. Operators
+                          opting into a public deploy must list every hostname
+                          they intend to serve, e.g. foo.example.com,bar.example.com.
+  IMGTOKENX_PROXY_TOKEN       (audit E4) shared secret required from off-host
+                          callers on EVERY route (proxy + dashboard + fragments +
+                          /api/*). Set to enable a non-loopback deploy. The
+                          loopback bypass covers development; unset = off-host
+                          requests get a 403 hint pointing at this env var.
+                          Use a >=32-char random token. /healthz uses
+                          IMGTOKENX_HEALTHZ_TOKEN (separate, per audit D21).
 
 Use with Claude Code:
   ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
@@ -210,6 +257,24 @@ function packageRoot(): string {
 
 // ---- node:http <-> Web Request/Response bridge ---------------------------
 
+/** Flatten Node's `IncomingHttpHeaders` (Record<string, string|string[]|undefined>)
+ *  into a Web `Headers` instance. Single source of truth for the conversion —
+ *  toWebRequest forwards the full set, and the bind-auth gate (Batch 12 audit
+ *  E4) needs case-insensitive `.get()` lookups for Host + Authorization. Keep
+ *  array-valued headers (Cookie, etc.) as multiple appends; ignore undefined
+ *  values (Node leaves them in the record with `undefined` after a header
+ *  was deleted via res.removeHeader). String-cast defensively so a typed
+ *  buffer value (rare on Node 18+) doesn't crash the adapter. */
+function nodeHeadersToWeb(raw: IncomingHttpHeaders): Headers {
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(raw)) {
+    if (v == null) continue;
+    if (Array.isArray(v)) v.forEach((vv) => headers.append(k, String(vv)));
+    else headers.append(k, String(v));
+  }
+  return headers;
+}
+
 function toWebRequest(req: IncomingMessage): Request {
   const proto = (req.headers['x-forwarded-proto'] as string) ?? 'http';
   // Host header is required by RFC 7230 §5.4 for well-formed HTTP/1.1; the
@@ -222,12 +287,7 @@ function toWebRequest(req: IncomingMessage): Request {
   const host = req.headers.host ?? 'localhost';
   const url = `${proto}://${host}${req.url ?? '/'}`;
 
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (v == null) continue;
-    if (Array.isArray(v)) v.forEach((vv) => headers.append(k, vv));
-    else headers.append(k, v);
-  }
+  const headers = nodeHeadersToWeb(req.headers);
   // Authoritative loopback signal for the D21 /healthz handler: the actual
   // TCP local interface, NOT the (client-controlled) Host header. Strip
   // the `::ffff:` prefix so IPv4-mapped IPv6 loopback (Linux default when
@@ -1262,6 +1322,41 @@ export async function main(): Promise<void> {
   const server = createServer((req, res) => {
     Promise.resolve()
       .then(async () => {
+        // Audit E4: every Node-side request runs through bindAuth BEFORE
+        // dashboard or proxy dispatch. Closes two DNS-rebinding / off-host
+        // exploit vectors that the existing same-origin check can't:
+        //   1. A browser-based rebinding attack pointing evil.com → 127.0.0.1
+        //      mid-session: the localAddress guard (Batch 11 /healthz approach
+        //      carried forward here) refuses to classify it as loopback when
+        //      the URL hostname doesn't match the bound interface.
+        //   2. A curl/non-browser direct off-host caller: must present a Host
+        //      header from IMGTOKENX_ALLOWED_HOSTS AND the Bearer secret.
+        // Loopback bypass (= "is the request REALLY coming over a loopback
+        // socket?") preserves the documented dev workflow.
+        // EXEMPT /healthz: it has its own IMGTOKENX_HEALTHZ_TOKEN gate (Batch
+        // 11 audit D21). If bindAuth also gated /healthz, an operator would
+        // need to set BOTH IMGTOKENX_PROXY_TOKEN AND IMGTOKENX_HEALTHZ_TOKEN
+        // for off-host /healthz to work, a regression. Pass /healthz through
+        // to its built-in handler which has its own loopback bypass.
+        const urlForBind = `http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`;
+        const bindReq: BindAuthRequest = {
+          method: req.method ?? 'GET',
+          url: urlForBind,
+          // Single source of truth for Node→Web header normalization, shared
+          // with toWebRequest above — `headers.get(name)` is then case-folded
+          // and array-valued headers are flattened.
+          headers: nodeHeadersToWeb(req.headers),
+          localAddress: req.socket?.localAddress,
+        };
+        const isHealthz = (req.url ?? '/').split('?')[0] === '/healthz';
+        const block = isHealthz ? null : bindAuthResponse(bindReq, {
+          allowedHosts: opts.allowedHosts,
+          secret: opts.proxyToken,
+        });
+        if (block) {
+          await writeWebResponse(block, res);
+          return;
+        }
         // Local dashboard routes — handled BEFORE the proxy so they never hit
         // api.anthropic.com (which would 404 them).
         const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
