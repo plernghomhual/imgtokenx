@@ -181,10 +181,6 @@ export function renderModelsFragment(
 
 // ---- session hero --------------------------------------------------------
 
-// Must stay in lockstep with ASSUMED_INPUT_USD_PER_MTOK in src/dashboard.ts.
-const INPUT_USD_PER_MTOK = 10.0;
-void INPUT_USD_PER_MTOK; // suppress unused-var; renderHeaderFragment uses the server's pricing block.
-
 // Lifetime hero. Reads the SAME cumulative weighted totals as the header strip
 // (serveStats), so the headline and the "$ saved" tiles can never disagree, and
 // the number stops swinging on tiny per-session samples. Cache-weighted on

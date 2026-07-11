@@ -153,8 +153,10 @@ Environment:
   IMGTOKENX_LOG              JSONL events path (default ~/.imgtokenx/events.jsonl)
   IMGTOKENX_DUMP_DIR         debug: write every rendered PNG here (what the model
                           sees); off unless set. Compress arm only.
-  IMGTOKENX_RECOVERABLE_DIR  debug: write exact source text for rec_* recovery
-                          refs here; off unless set. May contain secrets.
+  IMGTOKENX_RECOVERABLE_DIR  default-on: write exact source text for rec_* recovery
+                          refs here (defaults to ~/.imgtokenx/recovery, written
+                          0600). Set to "off" / "0" / "false" / "no" to disable.
+                          May contain secrets / PII — directory is owner-readable only.
   IMGTOKENX_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
                           IMGTOKENX_RECOVERABLE_DIR is also set.
 

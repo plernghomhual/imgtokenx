@@ -32,8 +32,10 @@ export interface Env {
   MIN_REMINDER_CHARS?: string;
   MIN_TOOL_RESULT_CHARS?: string;
   COLS?: string;
-  /** R2 multi-column packing — default 1 (off). 2 squeezes ~2× source rows
-   *  per image; OCR-verify before flipping in production. */
+  /** R2 multi-column packing. Default 2 (on) — single-col drops below break-even
+   *  on real tool-doc slabs; 2 squeezes ~2× source rows per image with
+   *  manageable OCR cost at the calibrated cell. Override via MULTI_COL=N to use
+   *  N columns, or set to 1 to fall back to single-column. */
   MULTI_COL?: string;
   /** Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
    *  instead of being imaged. Default-on; set "0"/"false" to disable. */

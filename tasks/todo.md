@@ -569,7 +569,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [x] 18. Contain rejected `onRequest` hooks without unhandled rejections.
 - [x] 19. Parse SSE frames correctly across CRLF and arbitrary chunk boundaries.
 - [x] 20. Drain or cancel oversized JSON inspection tees and record truncation.
-- [ ] 21. Redact and bound provider error/recovery data.
+- [x] 21. Redact and bound provider error/recovery data.
 
 ## Dashboard, installer, operations, and UX
 
@@ -761,3 +761,81 @@ Status: 2 items implemented + regression-tested; tsc clean; full suite 775 passe
 - Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention, #31 demo/restart script port/state safety.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
 
+## Final Review - 2026-07-10 (audit batch 8 — 1 of 40 items: #38 D24)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 51 files / 779 tests pass; build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #38 D24 docs reconcile and dead-constant removal. Three concrete fixes:
+  - **src/worker.ts**: `MULTI_COL` JSDoc was stale ("default 1 (off)"); the actual default in src/worker.ts is `2` (`env.MULTI_COL ? ... : 2`). Rewrote the comment to say "Default 2 (on) ... set to 1 to fall back to single-column."
+  - **src/node.ts**: the `IMGTOKENX_RECOVERABLE_DIR` help-text block in `printHelp()` previously claimed the env var was "off unless set" — actually false; the implementation has been default-on since the lossless-by-default pass (writes to `~/.imgtokenx/recovery` at 0600, opt out with `IMGTOKENX_RECOVERABLE_DIR=off`). Rewrote to say "default-on: write exact source text for rec_* recovery refs here (defaults to ~/.imgtokenx/recovery, written 0600). Set to "off" / "0" / "false" / "no" to disable. May contain secrets / PII — directory is owner-readable only."
+  - **src/dashboard/fragments.ts**: removed the dead `INPUT_USD_PER_MTOK = 10.0` constant + `void INPUT_USD_PER_MTOK` suppressor + lockstep comment. The canonical constant still lives at `src/dashboard.ts:346` (`export const ASSUMED_INPUT_USD_PER_MTOK = 10.0`) and is the actual load-bearing symbol. The fragments copy was bindable to the wrong value silently if `ASSUMED_INPUT_USD_PER_MTOK` ever changed — eliminated.
+  - **`FONT_PX` is unused** (audit mention): verified already gone — only `ATLAS_FONT_PX` (atlas.ts/atlas-jbmono10.ts) and `PRIMARY_FONT_PX`/`FALLBACK_FONT_PX` (gen-atlas.ts) remain; both used. No change needed.
+
+### New regression test
+- `tests/cli-help.test.ts` (new, 4 tests): file-content invariants so the audit-stated mismatches can't drift back.
+  - `IMGTOKENX_RECOVERABLE_DIR` help block must say "default-on" (case-insensitive) and must NOT say "off unless set"; must mention `~/.imgtokenx/recovery`. Uses `matchAll` + `.find()` to disambiguate the three real occurrences (`Usage:` redirect line, the env-var help block, and the cross-reference inside the LOSSLESS_EXACT description) and selects only the block whose body actually describes the env var.
+  - Worker `MULTI_COL` JSDoc must mention `default\s*2` and must NOT mention `default\s*1`.
+  - `src/dashboard/fragments.ts` must NOT contain `const INPUT_USD_PER_MTOK = ...` or `void INPUT_USD_PER_MTOK`.
+  - `src/dashboard.ts` MUST still contain `export const ASSUMED_INPUT_USD_PER_MTOK = 10.0`.
+  - Test file uses `process.cwd()` + `path.resolve()` for portability (no `import.meta.dirname`, which is absent in plain Node 18).
+
+### Notes / risks
+- `process.cwd()` in `tests/cli-help.test.ts` assumes the test runs from project root, which is the case under both `vitest run` and `node --test` from any package.json script in this repo.
+- The three regex-based file-content assertions are stable against whitespace additions and description expansions because each one anchors on either the env-var name + a fixed-padding-2-spaces help text pattern, or the explicit "default\s*2" / "default\s*1" wording.
+- The "Usage:" redirect line at printHelp:30+ references `IMGTOKENX_RECOVERABLE_DIR` once; it's a single-line mention, not a description, so `matchAll + find` skips it.
+- The fix did NOT touch the hard-coded literal `default port 47821` and `127.0.0.1` in `printHelp`; not in D24 scope, but flagged for a future pass to source them from `parseCli()` config.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run tests/cli-help.test.ts`: 4 tests passed.
+- `node_modules/.bin/vitest run`: 51 files, 779 tests, all passed (was 775).
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 20 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #21 D19 redact/bound provider error/recovery data.
+- Dashboard/installer/ops: #23 D19 strict dashboard mutation + model-id validation, #24 E4 non-loopback host/auth + DNS-rebind, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention, #31 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #39 CLI/package duplication review, #40 large-module boundary review.
+
+## Final Review - 2026-07-10 (audit batch 9 — 1 of 40 items: #21 D19 / E7)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 53 files / 821 tests pass (was 779); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #21 D19 redact+bounds provider error bodies and recovery retention caps. Five concrete fixes:
+  - **src/core/redact.ts (NEW)**: 14 specific→generic patterns (email, anthropic_key, stripe_key, openai_key, aws_key, github_token, slack_token, jwt, bearer with `$1[REDACTED:bearer]` template that preserves the "Bearer " prefix, card, ssn, phone, ip, pem_private_key multiline). `REDACT_INPUT_MAX=32KiB` caps input so regex workload (and any ReDoS risk) is bounded. `redactionPatterns()` re-exports the pattern set + per-pattern `template?` for dashboards.
+  - **src/core/proxy.ts**: in `teeForUsage` 4xx branch, the captured `capped = out.slice(0, ERROR_BODY_MAX)` now feeds `redactErrorBody(capped)` before assignment to `ProxyEvent.errorBody` (was verbatim).
+  - **src/node.ts**: imports `pruneRecoverableDir, readRecoveryCaps` from the new shared module; the inline impl + duplicate `MAX_RECOVERABLE_FILES / DEFAULT_RECOVERY_*` constants are gone. The errorBody console.warn path runs through `redactErrorBody()`. `printHelp()` documents `IMGTOKENX_RECOVERY_MAX_AGE_DAYS` (default 7 d) and `IMGTOKENX_RECOVERY_MAX_BYTES` (default 256 MiB) immediately under the recoverable-dir paragraph.
+  - **src/recovery-retention.ts (NEW)**: pure module exporting `MAX_RECOVERABLE_FILES, DEFAULT_RECOVERY_MAX_AGE_DAYS, DEFAULT_RECOVERY_MAX_BYTES, MS_PER_DAY, readRecoveryCaps(), pruneRecoverableDir(dir, caps?)`. Explicit env value of `0` DISABLES that cap (was: fell back to default — contradicted the docstring). Missing or non-numeric envs fall back to the default. Caps run in order: age first (mtime is free), then byte+count on the survivors (newest-first).
+  - **`tests/redact.test.ts` (NEW)**: 34 tests covering positive + negative + idempotence + REDACT_INPUT_MAX boundary + Bearer prefix preservation + cross-pattern secrets. Phone leading `\b` dropped (it failed at position 0 for parens-prefixed inputs — would leave a stray `(`).
+  - **`tests/recovery-retention.test.ts` (NEW)**: 8 tests pinning age/byte/count caps + env-var roundtrip + bogus env fallback + explicit-`0`-disables for both age and byte + a double-count regression that age-pass unlinks don't leak size into the byte pass.
+
+### Notes / risks
+- The 4xx body SIDEcars (gzipped REQuest bodies persisted to `4xx-bodies/`) are intentionally NOT redacted — they're the user's transformed request body, needed intact to debug a malformed request. They're 0600 + gzip-by-default + opt-in via `IMGTOKENX_CAPTURE_BODIES`. Redaction lands where the provider RESPONSE body lands (JSONL + stderr).
+- The on-disk `.txt` recovery sources are intentionally NOT redacted — `rec_*` is the documented "exact byte recovery" contract, files are 0600 and now age-pruned. Redacting them would break the contract.
+- PEM private-key detection is deliberately the LAST pattern (multiline, most expensive). The input cap bounds total regex workload so order is defense-in-depth rather than required for safety.
+
+### Verification
+- `node_modules/.bin/tsc --noEmit`: exit 0.
+- `node_modules/.bin/vitest run`: 53 files, 821 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 19 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (high-risk — deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #23 D19 strict mutation + model-id validation, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard thumbnails (done), #27 D23 dashboard a11y (done in B7), #28 D20 transactional installer + MCP failure reporting, #29 D21 versioned/authenticated health check, #30 D20 sidecar/recovery permissions + symlink + retention (done in B9 partial — full D20 not yet), #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI coverage, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile (done in B8), #39 CLI/package duplication, #40 large-module boundary review.
+- SKIP: #4 D4 request-wide 100-image budget (high-risk — deferred).
+EOF_BATCH9; \
+  echo 'tail of todo.md:'; tail -50 tasks/todo.md; \
+  echo; \
+  echo '=== 3. stage + commit ==='; \
+  git add src/core/redact.ts src/core/proxy.ts src/node.ts src/recovery-retention.ts tests/redact.test.ts tests/recovery-retention.test.ts tasks/todo.md && \
+  git status --short && \
+  git -c user.name='imgtokenx-audit-bot' -c user.email='audit@imgtokenx.local' commit -m 'fix: pre-prod audit batch 9 \u2014 #21 D19 redact+bounds error bodies + recovery retention caps' -m 'Status: 1 item implemented + regression-tested; tsc clean (0); vitest 53 files / 821 tests pass (was 779); build 0.8.0; git diff --check clean; local commit on main, no push per scope.' && \
+  echo; \
+  echo '=== 4. last 3 commits ==='; \
+  git log --oneline -3
