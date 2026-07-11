@@ -574,13 +574,13 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 ## Dashboard, installer, operations, and UX
 
 - [x] 22. Return 405 plus `Allow` for wrong-method dashboard routes.
-- [ ] 23. Validate dashboard mutation payloads and model identifiers strictly.
+- [x] 23. Validate dashboard mutation payloads and model identifiers strictly.
 - [ ] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
 - [x] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
 - [x] 26. Replace clickable image thumbnails with keyboard-accessible controls.
 - [ ] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
 - [ ] 28. Make installer writes transactional or rollback-safe and surface MCP action failures.
-- [ ] 29. Version and authenticate product health checks instead of accepting arbitrary 2xx responses.
+- [x] 29. Version and authenticate product health checks instead of accepting arbitrary 2xx responses.
 - [ ] 30. Harden sidecar/recovery permissions, symlink handling, and age/byte retention.
 - [ ] 31. Make demo/restart scripts refuse unrelated port owners and use isolated temporary state.
 
@@ -839,3 +839,71 @@ EOF_BATCH9; \
   echo; \
   echo '=== 4. last 3 commits ==='; \
   git log --oneline -3
+## Final Review - 2026-07-10 (audit batch 11 — 1 of 40 items: #29 D21)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 55 files / 867 tests pass (was 850); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] **#29 D21** versioned + authenticated /healthz with loopback-spoof mitigation. Five concrete fixes:
+  - **src/core/healthz.ts (NEW)**: readBuildInfo() reads `__IMGTOKENX_VERSION__` + `__IMGTOKENX_BUILD_TIME__` (typeof guards so undeclared in vitest falls back to "unknown"); isLoopbackHostname() strips IPv6 brackets and matches 127.0.0.1/::1/localhost; healthzResponse({method, url, headers, healthzToken, localAddress}) -> Response with method gate (GET/HEAD, 405 + Allow otherwise), loopback detection (URL hostname, with localAddress override for Node), off-host without token = 403 + actionable hint, off-host with wrong/missing token = 401 + WWW-Authenticate, HEAD returns body=null, malformed URL = 400, cache-control: no-store, JSON envelope on both success AND error.
+  - **src/core/proxy.ts**: inline /healthz block replaced with healthzResponse call; threads `localAddress` from `x-imgtokenx-local-address` request header so Host-header spoof bypass is neutralized (off-host attacker cannot fake loopback via Host header because Node reads the actual TCP local interface). ProxyConfig.healthzToken?: string field added.
+  - **src/node.ts**: toWebRequest() reads `req.socket?.localAddress`, normalizes IPv4-mapped IPv6 (`::ffff:127.0.0.1` -> `127.0.0.1`), `headers.set` (not append) so client-supplied copies are overwritten, deletes the header entirely if `req.socket` is missing so the handler falls back to URL-only (Worker-safe path). printHelp documents IMGTOKENX_HEALTHZ_TOKEN env var.
+  - **scripts/build.mjs**: define map gains `__IMGTOKENX_BUILD_TIME__: JSON.stringify(new Date().toISOString())` alongside the existing version define so the bundle exposes fingerprintable build time.
+  - **tests/healthz.test.ts (NEW)** + **tests/compatibility-smoke.test.ts**: 22 tests total covering isLoopbackHostname (4 positive + 3 negative + 2 spoof), readBuildInfo (1), method gate (2), loopback bypass (4 incl. 127.0.0.1/localhost/[::1]/spoof-free), off-host token gate (3), HEAD (3), malformed URL (1), localAddress override (4 new — Host-spoof mitigation), defense-in-depth (1). compatibility-smoke `{ok:true}`-only expectation updated to `expect(body.ok).toBe(true)` — backward-compat since legacy minimal contract is preserved via additive {version, build_time, auth} fields.
+
+### Notes / risks
+- **Loopback spoof mitigation via x-imgtokenx-local-address**: server-side `headers.set` after iterating req.headers means client-supplied `x-imgtokenx-local-address` copies are overwritten before reaching proxy.ts. HTTP/2 casing collapses to lowercase on Node parse so no escape via mixed-case. `req.socket.localAddress` is the authoritative TCP local interface (the bound IP, not the client IP), unaffected by keep-alive socket reuse.
+- **Worker compat**: Worker Request objects never go through toWebRequest and never set `x-imgtokenx-local-address`, so the proxy.ts handler falls back to URL-only loopback check — Worker has authoritative routing anyway, so this is safe.
+- **Cache stability**: `new Date().toISOString()` rebuilds every time, breaking any artifact keyed by build_time. Acceptable for healthz (no-store) and for export manifests if cache invalidates per build; could accept `process.env.IMGTOKENX_BUILD_TIME` as override for reproducible CI bundles in a future iteration (cosmetic only — non-blocking).
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 55 files, 867 tests, all passed.
+- `PATH=node_modules/.bin:/Users/plernghomhual/.opencode/bin:/Users/plernghomhual/.bun/bin:/Users/plernghomhual/.local/bin:/Users/plernghomhual/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Library/TeX/texbin:/Users/plernghomhual/.cargo/bin:/Applications/Ghostty.app/Contents/MacOS:/Users/plernghomhual/.spicetify node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+- Pre-commit reviewer pass: "No blockers. Ship it."
+
+### Remaining (not yet implemented, 17 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+## Final Review - 2026-07-10 (audit batch 10 \u2014 1 of 40 items: #23 D19)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 54 files / 850 tests pass (was 821 after Batch 9); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #23 D19 strict dashboard mutation + model-id validation. **New module `src/dashboard-mutations.ts`** with:
+  - `BadPayloadError` class + `parseTogglePayload(raw: string) -> { enabled: boolean }` + `parseModelsPayload(raw: string) -> { model: string, on: boolean }` + `validateModelId(id: unknown) -> string` + `badRequest(err: unknown) -> Response`.
+  - Strict JSON parsing (no urlencoded fallback). Explicit `typeof` per field — `enabled` and `on` must be boolean; `model` must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$` (1-80 chars, leading alphanumeric, no spaces, no shell metacharacters, no [variant] brackets).
+  - `badRequest()` ONLY converts `BadPayloadError` to JSON 400; non-validation throws (disk full / EACCES / `.tmp` rename race in `persistModelsConfig`) are re-THROWN so the outer `createServer` `.catch` still maps them to 500. **Reviewer-blocker fix**: an earlier version of `badRequest` masked persistence failures as `bad request: EACCES...` 400, which would have made every disk-write failure look like a payload bug. Reverted.
+- **`src/node.ts` 3 inline dual JSON/urlencoded payload-parsing sites** (`/fragments/toggle`, `/fragments/models`, `/api/compression`) replaced with calls into the centralized validators. The urlencoded fallback is GONE; strict JSON only. Any malformed/non-JSON body now returns a typed 400 with `{ error, detail }`.
+- **`tests/dashboard-mutations.test.ts` (NEW)**: 28 tests covering parseTogglePayload (positive: true/false, extra keys; negative: string/number/null/array/missing/garbage), parseModelsPayload (positive: real ids; negative: missing model/on, numeric model, charset (./$/&/|/\`/spaces/[variant]), length, garbage), validateModelId (positive: claude-fable-5, gpt-5.6-sol, a1, model.test, model_name; negative: leading punctuation, spaces, shell metacharacters, [variant] tags, non-string input, length 0 / length > 80), and badRequest (returns 400 with JSON envelope for BadPayloadError; rethrows for non-BadPayloadError so persistence failures stay 5xx).
+
+### Notes / risks
+- This is a deliberate behavior change: legacy htmx v1.x flows that POSTed as `application/x-www-form-urlencoded` now return 400. The dashboard's htmx v1.x client uses JSON `hx-vals` already (grep `hx-vals=` against `src/dashboard/fragments.ts` to confirm). Anyone integrating imgtokenx via curl against the dashboard mutation routes must now send JSON.
+- Persistence failures (write to `~/.imgtokenx/disabled` or `~/.config/imgtokenx/config.json`) no longer get misclassified as `bad request`. They surface as a 500 from the createServer fallback, which is what audit/MCP-style external integrations expect.
+- The single source of truth for the model-id contract lives in `validateModelId`. `applicability.ts` and `reader-profiles.ts` already use ids in this exact shape; the validator is a thin defense-in-depth layer that prevents a malformed payload from writing garbage to disk.
+
+### Verification
+- `node_modules/.bin/tsc --noEmit`: exit 0.
+- `node_modules/.bin/vitest run`: 54 files, 850 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 18 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (high-risk — deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard thumbnails (done in B7), #27 D23 dashboard a11y (done in B7), #28 D20 transactional installer + MCP failure reporting, #29 D21 versioned/authenticated health check, #30 D20 sidecar/recovery permissions + symlink + retention (partial in B9 \u2014 full D20 not yet), #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI coverage, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile (done in B8), #39 CLI/package duplication, #40 large-module boundary review.
+- SKIP: #4 D4 request-wide 100-image budget (high-risk \u2014 deferred).
+EOF_BATCH10; \
+  echo; \
+  echo '=== 4c. stage tasks/todo.md + amend ==='; \
+  git add tasks/todo.md; \
+  git -c user.name='imgtokenx-audit-bot' -c user.email='audit@imgtokenx.local' commit --amend --no-edit; \
+  echo; \
+  echo '=== final state ==='; \
+  git log --oneline -3; \
+  echo; \
+  git status

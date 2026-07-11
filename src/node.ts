@@ -172,6 +172,12 @@ Environment:
                           (default 268435456 = 256 MiB)
   IMGTOKENX_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
                           IMGTOKENX_RECOVERABLE_DIR is also set.
+  IMGTOKENX_HEALTHZ_TOKEN     (audit D21) shared secret for off-host /healthz.
+                          When set, callers must present Authorization: Bearer
+                          <token> unless the request reaches a loopback
+                          interface (127.0.0.1 / ::1 / localhost). Unset =
+                          off-host /healthz refuses with a 403 hint instead
+                          of leaking the build version.
 
 Use with Claude Code:
   ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
@@ -206,6 +212,13 @@ function packageRoot(): string {
 
 function toWebRequest(req: IncomingMessage): Request {
   const proto = (req.headers['x-forwarded-proto'] as string) ?? 'http';
+  // Host header is required by RFC 7230 §5.4 for well-formed HTTP/1.1; the
+  // synthesized 'localhost' fallback only fires for raw sockets, malformed
+  // H1, or HTTP/2 :authority never populated. Audit D21 relies on URL
+  // hostname for /healthz auth classification — so an off-host caller
+  // genuinely missing a Host header would parse as 'localhost' (loopback
+  // bypass). Pinning the assumption here so a future HTTP/2 / raw-socket
+  // migration surfaces it loudly instead of silently routing around auth.
   const host = req.headers.host ?? 'localhost';
   const url = `${proto}://${host}${req.url ?? '/'}`;
 
@@ -214,6 +227,21 @@ function toWebRequest(req: IncomingMessage): Request {
     if (v == null) continue;
     if (Array.isArray(v)) v.forEach((vv) => headers.append(k, vv));
     else headers.append(k, v);
+  }
+  // Authoritative loopback signal for the D21 /healthz handler: the actual
+  // TCP local interface, NOT the (client-controlled) Host header. Strip
+  // the `::ffff:` prefix so IPv4-mapped IPv6 loopback (Linux default when
+  // binding 0.0.0.0 with an IPv6 stack) normalizes to 127.0.0.1. We `set`
+  // (not `append`) so any client-supplied copy is overwritten; we delete
+  // the header entirely if req.socket/localAddress is missing so the
+  // proxy.ts handler falls back to URL-only checks (Worker-safe path).
+  const localRaw = req.socket?.localAddress;
+  if (typeof localRaw === 'string' && localRaw.length > 0) {
+    const normalized = localRaw.startsWith('::ffff:')
+      ? localRaw.slice('::ffff:'.length) : localRaw;
+    headers.set('x-imgtokenx-local-address', normalized);
+  } else {
+    headers.delete('x-imgtokenx-local-address');
   }
 
   const method = req.method ?? 'GET';
@@ -1105,6 +1133,10 @@ export async function main(): Promise<void> {
     upstream: opts.upstream,
     openAIUpstream: opts.openAIUpstream,
     openAIApiKey: opts.openAIApiKey,
+    // Audit D21: off-host /healthz secret. Empty/unset = off-host gets a 403
+    // instead of leaking the build version (loopback bypasses). Read here
+    // (not in RuntimeConfig) so the typed surface doesn't carry secrets.
+    healthzToken: process.env.IMGTOKENX_HEALTHZ_TOKEN,
     // Per-request transform options:
     //   1. Runtime kill switch — when the dashboard "passthrough" toggle
     //      is off, force compress=false so /v1/messages forwards

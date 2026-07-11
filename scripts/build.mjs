@@ -35,7 +35,10 @@ await build({
   // Inline the package version so `imgtokenx --version` is correct for global/npx
   // installs (see the note where `pkg` is read). esbuild replaces the bare
   // identifier with the string literal at every reference.
-  define: { __IMGTOKENX_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __IMGTOKENX_VERSION__: JSON.stringify(pkg.version),
+    __IMGTOKENX_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   // Atlas is inlined as a base64 string in src/core/atlas.ts, so no external assets.
   external: [],
   banner: { js: '#!/usr/bin/env node' },

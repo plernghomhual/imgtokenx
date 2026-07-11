@@ -8,6 +8,7 @@ import { transformOpenAIChatCompletions, transformOpenAIResponses } from './open
 import { isAnthropicMessagesPath, isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import { resolveReaderProfile } from './reader-profiles.js';
 import { redactErrorBody } from './redact.js';
+import { healthzResponse } from './healthz.js';
 import {
   buildBaselineCountTokensBody,
   buildCacheablePrefixCountTokensBody,
@@ -46,6 +47,13 @@ export interface ProxyConfig {
    *  present — are rejected with 413 before any transform/forward. Unset = no
    *  limit (preserves current behavior; operator must opt in). */
   maxRequestBodyBytes?: number;
+  /** Shared secret for off-host /healthz (audit D21). When set, callers
+   *  reaching /healthz from a non-loopback hostname MUST present
+   *  `Authorization: Bearer <token>`. Unset = off-host /healthz refuses with
+   *  a 403 hint instead of leaking the build version. Loopback callers
+   *  (127.0.0.1 / ::1 / localhost) bypass the token requirement so local
+   *  operators can curl without ceremony. */
+  healthzToken?: string;
 }
 
 export interface ProxyEvent {
@@ -745,9 +753,18 @@ export function createProxy(config: ProxyConfig = {}) {
     const path = url.pathname + url.search;
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
-      return new Response(req.method === 'HEAD' ? null : JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
+      // Audit D21: versioned + token-gated healthz (no-store, JSON envelope).
+      // handler is in src/core/healthz.ts so Worker + Node stay in sync.
+      // Thread the authoritative TCP localAddress (set by toWebRequest in
+      // src/node.ts) so an off-host attacker can't spoof loopback via the
+      // Host header — defense in depth against D21 bypass.
+      const localAddr = req.headers.get('x-imgtokenx-local-address');
+      return healthzResponse({
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        healthzToken: config.healthzToken,
+        localAddress: localAddr && localAddr.length > 0 ? localAddr : undefined,
       });
     }
 

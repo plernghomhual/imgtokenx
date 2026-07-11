@@ -50,6 +50,12 @@ export interface Env {
    *  attach your key to any stranger's request. Set with:
    *    npx wrangler secret put IMGTOKENX_WORKER_SECRET */
   IMGTOKENX_WORKER_SECRET?: string;
+  /** Audit D21: Shared secret for off-host /healthz. When set, callers
+   *  reaching /healthz from a non-loopback hostname MUST present
+   *  `Authorization: Bearer <token>`. Unset = off-host /healthz refuses
+   *  with 403 + a hint instead of leaking the build version.
+   *    npx wrangler secret put IMGTOKENX_HEALTHZ_TOKEN */
+  IMGTOKENX_HEALTHZ_TOKEN?: string;
 }
 
 /** Compare SHA-256 digests instead of the raw strings so the comparison
@@ -137,6 +143,8 @@ export default {
       apiKey: env.ANTHROPIC_API_KEY,
       openAIUpstream: env.OPENAI_UPSTREAM ?? sharedUpstream ?? 'https://api.openai.com',
       openAIApiKey: env.OPENAI_API_KEY,
+      // D21 off-host /healthz secret. Falsy = off-host only returns 403.
+      healthzToken: env.IMGTOKENX_HEALTHZ_TOKEN,
       transform,
       onRequest: (e) => {
         // Terse human-readable line (separate from the JSON event below;

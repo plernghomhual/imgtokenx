@@ -83,7 +83,11 @@ describe('client compatibility smoke matrix', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    const body = await res.json() as { ok: boolean; version?: string; build_time?: string; auth?: string };
+    // Backward-compat: the legacy `{ok:true}` minimal contract is still
+    // present; D21 adds version / build_time / auth as additive fields so
+    // operator scripts that only inspect `body.ok === true` keep working.
+    expect(body.ok).toBe(true);
     expect(capture.calls).toEqual([]);
   });
 
