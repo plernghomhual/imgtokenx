@@ -29,6 +29,7 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import * as readline from 'node:readline';
 import type { TrackEvent } from './core/tracker.js';
+import { writeFileAtomic } from './core/fs-atomic.js';
 import {
   computeActualInputEff,
   computeBaselineInputEff,
@@ -453,30 +454,33 @@ async function rewriteEventsFile(
   toRemove: Set<string>,
 ): Promise<void> {
   if (!fs.existsSync(eventsFile)) return;
-  const tmp = eventsFile + '.tmp';
-  // Open with 'w' (truncate). We never reuse a stale .tmp.
-  const outFd = fs.openSync(tmp, 'w');
-  try {
-    const stream = fs.createReadStream(eventsFile, { encoding: 'utf8' });
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      let ev: TrackEvent;
-      try {
-        ev = JSON.parse(line) as TrackEvent;
-      } catch {
-        // Preserve malformed lines so we don't silently eat data we can't parse.
-        fs.writeSync(outFd, line + '\n');
-        continue;
-      }
-      if (toRemove.has(sessionIdOf(ev))) continue;
-      fs.writeSync(outFd, line + '\n');
+  // Buffer the filtered content in memory. events.jsonl on a single-user dev
+  // box is bounded by the recovery-retention caps (Batch 9 — 256 MiB default
+  // AGE+BYTE) plus rotation in FileTracker (100 MiB), so an in-memory
+  // rewrite is fine for the documented envelope. Streams would buy us only
+  // O(1) peak memory at the cost of a more complex atomic-rename handshake,
+  // not worth it. writeFileAtomic handles the rename atomicity.
+  const out: string[] = [];
+  const stream = fs.createReadStream(eventsFile, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    let ev: TrackEvent;
+    try {
+      ev = JSON.parse(line) as TrackEvent;
+    } catch {
+      // Preserve malformed lines so we don't silently eat data we can't parse.
+      out.push(line);
+      continue;
     }
-    fs.fsyncSync(outFd);
-  } finally {
-    fs.closeSync(outFd);
+    if (toRemove.has(sessionIdOf(ev))) continue;
+    out.push(line);
   }
-  fs.renameSync(tmp, eventsFile);
+  const body = out.length === 0 ? '' : out.join('\n') + '\n';
+  // fs-atomic writes to a same-dir tmp + fsync + rename, so a crash mid-rename
+  // leaves the original events.jsonl intact. Single source of truth matching
+  // src/install.ts's atomic write pattern.
+  writeFileAtomic(eventsFile, body, { mode: 0o600 });
 }
 
 // ---- disk usage ------------------------------------------------------------

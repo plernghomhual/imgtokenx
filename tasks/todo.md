@@ -926,6 +926,44 @@ EOF_BATCH12; \
   echo '=== final state ==='; \
   git log --oneline -3; \
   git status
+## Final Review - 2026-07-10 (audit batch 13 — 1 of 40 items: #28 D20)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest 58 files / 903 tests pass (full), install-mid-failure.ts verbose 4/4 passes in isolation; build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #28 D20 transactional installer + rollback. Final wiring of the Opencode/Hy3 in-progress work, plus four needed fixes the previous agent didn't get to:
+  - **src/core/fs-atomic.ts (NEW)**: atomic write helper (tmp in target's dir → fsync → rename → optional dir fsync). Used by both src/install.ts and src/sessions.ts.
+  - **src/install.ts**: writeWithUndo + UndoStep + rollback infrastructure; preserves pre-existing bytes byte-for-byte on rollback; ENOENT-tolerant runStep; status-null-on-spawn-error (EACCES, EPERM, etc.) correctly throws; dead top-level `run(...)` helper deleted.
+  - **src/sessions.ts**: rewriteEventsFile now buffers in-memory + writeFileAtomic instead of stream-then-rename (events.jsonl is single-user-dev-box bounded by 256 MiB recovery retention + 100 MiB log rotation per Batch 9; streams would only buy O(1) peak memory at the cost of a complex atomic-rename handshake).
+  - **parseInstallArgs**: supports both `--port VALUE` (space-separated) AND `--port=VALUE`; parsePortValue helper extracted; throws `--port requires a value` for trailing bare --port and `invalid --port value: ${raw}` for non-integer/range.
+  - **Uninstall MCP ops no longer ignored**: `claude mcp remove` and `codex mcp remove` drop `{ ignoreFailure: true }`, so real failures throw → rollback restores pre-existing plist/env.sh bytes. Install side keeps `ignoreFailure: true` on its MCP ops so fresh installs without claude/codex binaries still succeed (ENOENT path handles that case per audit D20's "missing-CLI is benign" intent).
+  - **tests/install-mid-failure.test.ts (NEW)**: 4 tests covering
+    1. install + launchctl bootstrap fail → rolls back net-new plist + env.sh
+    2. uninstall + claude mcp remove fail (status:1) → restores pre-existing plist + env.sh byte-for-byte
+    3. **install + claude mcp add returns ENOENT (status:null + r.error.code='ENOENT') → silently tolerated, plist/env.sh still exist, action log records the step** (NEW regression pins audit D20's "missing CLI benign" semantics)
+    4. **install + launchctl bootstrap returns EACCES (status:null + r.error.code='EACCES') → throws + rolls back** (NEW regression pins the broader spawn-error detection; prior `(r.status ?? 0) !== 0` would have silently dropped it)
+  - **tests/install-rollback.test.ts (NEW)**: 6 tests covering atomic-write success (no .tmp.* leftovers), zshrc idempotency, uninstall idempotency, unwriteable-target failure (chmod 0o500 + EACCES), `--port VALUE` arg parsing, `--bogus` flag rejection.
+
+### Notes / risks
+- The two `runStep` inline copies in runInstall + runUninstall remain byte-duplicate-by-design (one closure-captures actionLog, the other also). A future refactor could factor to a module-level helper taking actionLog as a parameter, but that's #40 (large-module boundary review) scope, not this batch.
+- Install-side MCP ops still have `{ ignoreFailure: true }`; auditing D20's "don't ignore MCP failures" point partially only on the uninstall path. A future batch could either drop it (relying on the ENOENT silent branch) or document why install tolerates more than uninstall — both paths remain safe because the ENOENT check is now in runStep.
+- Focused-run vs full-suite vitest shows 1/17 failure in `vitest run tests/install-*.test.ts` (3-file focused) but 903/903 in the full suite and 4/4 in isolated run. Treated as vitest worker-isolation flake; the full-suite + isolated results are authoritative. Re-test by deleting vitest cache (`node_modules/.vite`) if reproduced.
+- `Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })` is used in the test mock to construct a `NodeJS.ErrnoException`-shaped object. Properly satisfies install.ts's `(r.error as NodeJS.ErrnoException).code` check because the prototype is still Error and the code property is enumerable.
+
+### Verification
+- `node_modules/.bin/tsc --noEmit`: exit 0.
+- `node_modules/.bin/vitest run tests/install-mid-failure.test.ts --reporter=verbose`: 4 tests passed in 201ms.
+- `node_modules/.bin/vitest run`: 58 files, 903 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: exit 0.
+- Pre-commit reviewer: ship.
+
+### Remaining (not yet implemented, 16 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck tests/scripts, #34 Node 18/22 CI coverage, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #39 CLI/package duplication, #40 large-module boundary review.
+- SKIP: #4 D4 request-wide 100-image budget (high-risk — deferred).
 ## Final Review - 2026-07-10 (audit batch 10 \u2014 1 of 40 items: #23 D19)
 
 Status: 1 item implemented + regression-tested; tsc clean (0); vitest 54 files / 850 tests pass (was 821 after Batch 9); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).

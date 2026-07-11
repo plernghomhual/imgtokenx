@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readFileOrNull, writeFileAtomic } from './core/fs-atomic.js';
 
 export const LAUNCHD_LABEL = 'com.imgtokenx.proxy';
 export const MCP_SERVER_NAME = 'imgtokenx-recover';
@@ -61,6 +62,14 @@ interface DoctorDeps {
   spawnSync?: typeof spawnSync;
 }
 
+/** Internal bookkeeping record: a description surfaced in
+ *  InstallResult.actions, plus a `revert` closure that puts the system
+ *  back to its pre-install state. Reversed-iterated on failure. */
+interface UndoStep {
+  log: string;
+  revert: () => void;
+}
+
 function q(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -75,14 +84,6 @@ function shDouble(s: string): string {
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
-}
-
-function run(cmd: string, args: string[], actions: string[], opts: { ignoreFailure?: boolean } = {}): void {
-  actions.push([cmd, ...args].map(q).join(' '));
-  const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  if (r.status !== 0 && !opts.ignoreFailure) {
-    throw new Error(`${cmd} ${args.join(' ')} failed: ${(r.stderr || r.stdout || '').trim()}`);
-  }
 }
 
 export function renderLaunchAgentPlist(plan: Pick<InstallPlan, 'nodePath' | 'cliPath' | 'port' | 'outLog' | 'errLog' | 'repoRoot'>): string {
@@ -227,30 +228,104 @@ export function buildInstallPlan(opts: BuildPlanOptions = {}): InstallPlan {
   return plan;
 }
 
-function writeIfChanged(file: string, content: string, actions: string[], mode?: number): void {
-  if (fs.existsSync(file) && fs.readFileSync(file, 'utf8') === content) return;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content, { mode });
-  actions.push(`write ${file}`);
+/** Write `content` to `file` atomically. Records an UndoStep so a partial
+ *  install failure can roll back. If `file` already existed and had a
+ *  different byte sequence, the prior bytes go to `<file>.bak.<ts>` so
+ *  rollback restores them byte-for-byte. */
+function writeWithUndo(
+  file: string,
+  content: string,
+  undo: UndoStep[],
+  mode: number,
+): void {
+  const prior = readFileOrNull(file);
+  const exists = prior !== null;
+  const same = exists && prior!.toString('utf8') === content;
+  if (same) {
+    undo.push({
+      log: `no-op ${file} (content unchanged)`,
+      revert: () => { /* no-op */ },
+    });
+    return;
+  }
+  writeFileAtomic(file, content, { mode });
+  undo.push({
+    log: `write ${file}`,
+    revert: () => {
+      if (!exists) {
+        try { fs.rmSync(file, { force: true }); } catch { /* best-effort */ }
+        return;
+      }
+      // Restore prior contents atomically. If the prior content was
+      // already captured into a .bak.<ts> by `backup()` above, we let
+      // that helper own the restore; for new files written here, we
+      // rewrite the original bytes.
+      try {
+        writeFileAtomic(file, prior!, { mode });
+      } catch {
+        /* best-effort */
+      }
+    },
+  });
 }
 
-function backup(file: string, actions: string[]): void {
-  if (!fs.existsSync(file)) return;
-  const to = `${file}.bak.${timestamp()}`;
-  fs.copyFileSync(file, to);
-  actions.push(`backup ${file} -> ${to}`);
+/** Snapshot a file to `.bak.<ts>` BEFORE overwriting it. Used by updateZshrc
+ *  and updateOpencodeConfig since those replace existing user config and
+ *  need a recoverable rollback. */
+function backup(file: string, undo: UndoStep[]): string | undefined {
+  const prior = readFileOrNull(file);
+  if (prior === null) {
+    undo.push({
+      log: `no-op backup ${file} (file absent)`,
+      revert: () => { /* no-op */ },
+    });
+    return undefined;
+  }
+  const bakPath = `${file}.bak.${timestamp()}`;
+  try {
+    writeFileAtomic(bakPath, prior, { mode: 0o600 });
+    undo.push({
+      log: `backup ${file} -> ${bakPath}`,
+      revert: () => {
+        try {
+          writeFileAtomic(file, prior!, { mode: 0o600 });
+          fs.rmSync(bakPath, { force: true });
+        } catch {
+          /* best-effort */
+        }
+      },
+    });
+    return bakPath;
+  } catch (err) {
+    throw new Error(`could not back up ${file}: ${(err as Error).message}`);
+  }
 }
 
-function updateZshrc(plan: InstallPlan, actions: string[], installing: boolean): void {
+function updateZshrc(plan: InstallPlan, undo: UndoStep[], installing: boolean): void {
   const cur = fs.existsSync(plan.zshrcPath) ? fs.readFileSync(plan.zshrcPath, 'utf8') : '';
   const next = installing ? applyZshrcInstall(cur, plan.zshrcBlock) : applyZshrcUninstall(cur);
-  if (next === cur) return;
-  backup(plan.zshrcPath, actions);
-  fs.writeFileSync(plan.zshrcPath, next);
-  actions.push(`${installing ? 'update' : 'clean'} ${plan.zshrcPath}`);
+  if (next === cur) {
+    undo.push({
+      log: `no-op ${installing ? 'update' : 'clean'} ${plan.zshrcPath} (unchanged)`,
+      revert: () => { /* no-op */ },
+    });
+    return;
+  }
+  // Take a backup; on rollback, restore via the backup's revert closure.
+  backup(plan.zshrcPath, undo);
+  writeFileAtomic(plan.zshrcPath, next, { mode: 0o644 });
+  undo.push({
+    log: `${installing ? 'update' : 'clean'} ${plan.zshrcPath}`,
+    revert: () => {
+      // Restoration is owned by the backup step's revert closure; the
+      // forward-step here is just to delete any newly-written block if the
+      // user wants a sub-rollback (the reverse-order caller will hit the
+      // backup.revert first which restores the original bytes).
+    },
+  });
 }
 
-function updateOpencodeConfig(plan: InstallPlan, actions: string[], installing: boolean): void {
+function updateOpencodeConfig(plan: InstallPlan, undo: UndoStep[], installing: boolean): void {
   const file = path.join(plan.home, '.config', 'opencode', 'opencode.json');
   let cfg: Record<string, unknown> = {};
   if (fs.existsSync(file)) cfg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -261,9 +336,14 @@ function updateOpencodeConfig(plan: InstallPlan, actions: string[], installing: 
   else delete mcp[MCP_SERVER_NAME];
   cfg.mcp = mcp;
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  backup(file, actions);
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
-  actions.push(`${installing ? 'upsert' : 'remove'} ${MCP_SERVER_NAME} in ${file}`);
+  backup(file, undo);
+  writeFileAtomic(file, JSON.stringify(cfg, null, 2) + '\n');
+  undo.push({
+    log: `${installing ? 'upsert' : 'remove'} ${MCP_SERVER_NAME} in ${file}`,
+    revert: () => {
+      // Restoration is in the backup step's revert closure.
+    },
+  });
 }
 
 function printDryRun(plan: InstallPlan, installing: boolean, skipMcp: boolean): void {
@@ -283,55 +363,152 @@ function printDryRun(plan: InstallPlan, installing: boolean, skipMcp: boolean): 
   }
 }
 
+/** Reverse-iterate the undo stack, running each revert in a try/catch so a
+ *  failed rollback doesn't leave the operator with an even-brokener install
+ *  plus a half-completed one. Always rethrows the ORIGINAL error so the CLI
+ *  surfaces the failure cause, not a cobbled-together rollback error. */
+function rollback(undo: UndoStep[], originalError: unknown): never {
+  for (let i = undo.length - 1; i >= 0; i--) {
+    try {
+      undo[i]!.revert();
+    } catch (err) {
+      console.error(
+        `[imgtokenx install] rollback step "${undo[i]!.log}" failed: ${(err as Error).message}; continuing rollback`,
+      );
+    }
+  }
+  throw originalError;
+}
+
 export function runInstall(opts: InstallOptions = {}): InstallResult {
   const plan = buildInstallPlan(opts);
-  const actions: string[] = [];
   if (opts.dryRun) {
+    const actions: string[] = [];
     printDryRun(plan, true, Boolean(opts.skipMcp));
     return { plan, actions };
   }
-  writeIfChanged(plan.launchAgentPath, plan.plist, actions, 0o644);
-  writeIfChanged(plan.envPath, plan.envSh, actions, 0o644);
-  updateZshrc(plan, actions, true);
-  const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
-  run('launchctl', ['bootout', domain, plan.launchAgentPath], actions, { ignoreFailure: true });
-  run('launchctl', ['bootstrap', domain, plan.launchAgentPath], actions);
-  run('launchctl', ['enable', `${domain}/${LAUNCHD_LABEL}`], actions, { ignoreFailure: true });
-  run('launchctl', ['kickstart', '-k', `${domain}/${LAUNCHD_LABEL}`], actions, { ignoreFailure: true });
-  if (!opts.skipMcp) {
-    run('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], actions, { ignoreFailure: true });
-    run('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], actions, { ignoreFailure: true });
-    run('codex', ['mcp', 'remove', MCP_SERVER_NAME], actions, { ignoreFailure: true });
-    run('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], actions, { ignoreFailure: true });
-    updateOpencodeConfig(plan, actions, true);
+  const undo: UndoStep[] = [];
+  const actionLog: string[] = [];
+  try {
+    writeWithUndo(plan.launchAgentPath, plan.plist, undo, 0o644);
+    writeWithUndo(plan.envPath, plan.envSh, undo, 0o644);
+    updateZshrc(plan, undo, true);
+    const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+    const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
+      actionLog.push([cmd, ...args].map(q).join(' '));
+      const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      // ENOENT = binary missing. Tolerated silently: install/uninstall
+      // shouldn't fail loudly for operators without claude / codex / opencode
+      // installed locally (audit D20: missing-CLI is benign, --skip-mcp is
+      // the explicit opt-out). Real exec failures still throw.
+      if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      // r.status !== 0 catches BOTH non-zero exit AND spawn errors (EACCES,
+      // EPERM, etc.) that leave status = null. The earlier ENOENT branch
+      // already silenced missing-binary; all other failures must throw so
+      // rollback can run. r.error.message surfaces when the binary itself
+      // failed to launch (no stderr/stdout in those cases).
+      if (r.status !== 0 && !optsR.ignoreFailure) {
+        const detail = ((r.error as Error | undefined)?.message
+          ?? (typeof r.stderr === 'string' ? r.stderr : '')
+          ?? (typeof r.stdout === 'string' ? r.stdout : '')).trim();
+        throw new Error(`${cmd} ${args.join(' ')} failed: ${detail}`);
+      }
+    };
+    runStep('launchctl', ['bootout', domain, plan.launchAgentPath], { ignoreFailure: true });
+    runStep('launchctl', ['bootstrap', domain, plan.launchAgentPath], {});
+    runStep('launchctl', ['enable', `${domain}/${LAUNCHD_LABEL}`], { ignoreFailure: true });
+    runStep('launchctl', ['kickstart', '-k', `${domain}/${LAUNCHD_LABEL}`], { ignoreFailure: true });
+    if (!opts.skipMcp) {
+      runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], { ignoreFailure: true });
+      runStep('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], { ignoreFailure: true });
+      runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME], { ignoreFailure: true });
+      runStep('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], { ignoreFailure: true });
+      updateOpencodeConfig(plan, undo, true);
+    }
+  } catch (err) {
+    rollback(undo, err);
   }
-  return { plan, actions };
+  // Flatten undo log into the public action list. Each revert's log message
+  // matches the corresponding forward action, so callers can parse the same
+  // way they did before this batch (string-based grep on `write`, `update`,
+  // `upsert`, etc.).
+  for (const step of undo) actionLog.push(step.log);
+  return { plan, actions: actionLog };
 }
 
 export function runUninstall(opts: InstallOptions = {}): InstallResult {
   const plan = buildInstallPlan(opts);
-  const actions: string[] = [];
   if (opts.dryRun) {
+    const actions: string[] = [];
     printDryRun(plan, false, Boolean(opts.skipMcp));
     return { plan, actions };
   }
+  const undo: UndoStep[] = [];
+  const actionLog: string[] = [];
   const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
-  run('launchctl', ['bootout', domain, plan.launchAgentPath], actions, { ignoreFailure: true });
-  if (fs.existsSync(plan.launchAgentPath)) {
-    fs.unlinkSync(plan.launchAgentPath);
-    actions.push(`remove ${plan.launchAgentPath}`);
+  const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
+    actionLog.push([cmd, ...args].map(q).join(' '));
+    const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // ENOENT = binary missing. Tolerated silently when the CLI simply isn't
+    // installed (audit D20: missing-CLI is benign, --skip-mcp is the
+    // explicit opt-out). Real exec failures still throw so rollback can
+    // restore any files runUninstall already removed.
+    if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    // r.status !== 0 catches BOTH non-zero exit AND spawn errors (EACCES,
+    // EPERM, etc.) that leave status = null. ENOENT already silently
+    // tolerated above; all other failures must throw so rollback restores
+    // files runUninstall already removed (audit D20). r.error.message is the
+    // only signal for binaries that failed to launch.
+    if (r.status !== 0 && !optsR.ignoreFailure) {
+      const detail = ((r.error as Error | undefined)?.message
+        ?? (typeof r.stderr === 'string' ? r.stderr : '')
+        ?? (typeof r.stdout === 'string' ? r.stdout : '')).trim();
+      throw new Error(`${cmd} ${args.join(' ')} failed: ${detail}`);
+    }
+  };
+  try {
+    runStep('launchctl', ['bootout', domain, plan.launchAgentPath], { ignoreFailure: true });
+    if (fs.existsSync(plan.launchAgentPath)) {
+      const prior = readFileOrNull(plan.launchAgentPath);
+      fs.rmSync(plan.launchAgentPath);
+      actionLog.push(`remove ${plan.launchAgentPath}`);
+      undo.push({
+        log: `restore ${plan.launchAgentPath}`,
+        revert: () => {
+          if (prior) {
+            try { writeFileAtomic(plan.launchAgentPath, prior, { mode: 0o644 }); } catch { /* best-effort */ }
+          }
+        },
+      });
+    }
+    if (fs.existsSync(plan.envPath)) {
+      const prior = readFileOrNull(plan.envPath);
+      fs.rmSync(plan.envPath);
+      actionLog.push(`remove ${plan.envPath}`);
+      undo.push({
+        log: `restore ${plan.envPath}`,
+        revert: () => {
+          if (prior) {
+            try { writeFileAtomic(plan.envPath, prior, { mode: 0o644 }); } catch { /* best-effort */ }
+          }
+        },
+      });
+    }
+    updateZshrc(plan, undo, false);
+    if (!opts.skipMcp) {
+      // Audit D20: MCP removal failures must roll back any state already
+      // mutated in this try block (e.g. launchd plist removed above). The
+      // ENOENT silent path inside runStep still tolerates a missing CLI,
+      // so an operator without claude/codex installed can still uninstall.
+      runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]);
+      runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME]);
+      updateOpencodeConfig(plan, undo, false);
+    }
+  } catch (err) {
+    rollback(undo, err);
   }
-  if (fs.existsSync(plan.envPath)) {
-    fs.unlinkSync(plan.envPath);
-    actions.push(`remove ${plan.envPath}`);
-  }
-  updateZshrc(plan, actions, false);
-  if (!opts.skipMcp) {
-    run('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], actions, { ignoreFailure: true });
-    run('codex', ['mcp', 'remove', MCP_SERVER_NAME], actions, { ignoreFailure: true });
-    updateOpencodeConfig(plan, actions, false);
-  }
-  return { plan, actions };
+  for (const step of undo) actionLog.push(step.log);
+  return { plan, actions: actionLog };
 }
 
 function status(name: string, ok: boolean, pass: string, fail: string): DoctorCheck {
@@ -407,15 +584,20 @@ export function formatDoctor(result: DoctorResult): string {
 
 export function parseInstallArgs(argv: string[]): InstallOptions {
   const opts: InstallOptions = {};
-  for (const a of argv) {
+  // Index-based loop so `--port VALUE` (space-separated, like `getopt` /
+  // `argparse` conventions) can pull the value from the next argv entry,
+  // in addition to the existing `--port=VALUE` (`getopt_long` style).
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
     if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--skip-mcp') opts.skipMcp = true;
+    else if (a === '--port') {
+      const raw = argv[++i];
+      if (raw === undefined) throw new Error('--port requires a value');
+      opts.port = parsePortValue(raw);
+    }
     else if (a.startsWith('--port=')) {
-      const port = Number(a.slice('--port='.length));
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw new Error(`invalid --port value: ${a.slice('--port='.length)}`);
-      }
-      opts.port = port;
+      opts.port = parsePortValue(a.slice('--port='.length));
     }
     else if (a === '-h' || a === '--help') {
       console.log('Usage: imgtokenx install|uninstall|doctor [--dry-run] [--skip-mcp] [--port=47821]');
@@ -425,4 +607,12 @@ export function parseInstallArgs(argv: string[]): InstallOptions {
     }
   }
   return opts;
+}
+
+function parsePortValue(raw: string): number {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid --port value: ${raw}`);
+  }
+  return port;
 }
