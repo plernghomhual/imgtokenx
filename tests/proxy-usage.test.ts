@@ -1821,3 +1821,80 @@ describe('proxy usage extraction', () => {
     expect(captured!.usage?.output_tokens).toBe(1);
   });
 });
+
+describe('E2 request-body limit', () => {
+  it('rejects declared-too-large bodies with 413 (content-length header gate)', async () => {
+    const proxy = createProxy({ maxRequestBodyBytes: 100, transform: {} });
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': '500' },
+        body: 'x'.repeat(150),
+      }),
+    );
+    expect(res.status).toBe(413);
+    const j = (await res.json()) as { error: string; limit: number };
+    expect(j.error).toBe('request entity too large');
+    expect(j.limit).toBe(100);
+  });
+
+  it('rejects streamed-too-large bodies with 413 (no content-length)', async () => {
+    const proxy = createProxy({ maxRequestBodyBytes: 200, transform: {} });
+    const body = JSON.stringify({
+      model: 'claude-fable-5',
+      system: 'x'.repeat(1000),
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it('forwards bodies under the configured limit', async () => {
+    const restore = mockUpstream(
+      () => new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const proxy = createProxy({ maxRequestBodyBytes: 1_000_000, transform: {} });
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: SAMPLE_REQ_BODY,
+      }),
+    );
+    restore();
+    expect(res.status).toBe(200);
+  });
+
+  it('preserves default behavior when the limit is unset (no cap)', async () => {
+    const restore = mockUpstream(
+      () => new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const proxy = createProxy({ transform: {} });
+    const big = JSON.stringify({
+      model: 'claude-fable-5',
+      system: 'x'.repeat(100_000),
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: big,
+      }),
+    );
+    restore();
+    expect(res.status).toBe(200);
+  });
+});

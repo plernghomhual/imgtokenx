@@ -563,7 +563,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 ## Proxy, routing, lifecycle, and resource safety
 
 - [ ] 14. Route canonical `/openai` traffic only to the OpenAI upstream and strip the prefix without breaking explicit gateways.
-- [ ] 15. Enforce configurable request-body limits from headers and streamed byte counts; return 413 safely.
+- [x] 15. Enforce configurable request-body limits from headers and streamed byte counts; return 413 safely.
 - [ ] 16. Propagate client disconnect/abort through Node and Worker upstream requests; bound auxiliary probes.
 - [ ] 17. Attach detached Worker lifecycle work to `ExecutionContext.waitUntil`.
 - [ ] 18. Contain rejected `onRequest` hooks without unhandled rejections.
@@ -625,7 +625,7 @@ Committed on `main` (no push per scope). Remaining 29 items below are NOT yet im
 
 ### Remaining (not yet implemented)
 - Core correctness: #1 D1 fail-open transforms, #2 D2 GPT history collapse independent, #3 D3 preserve unsupported history state, #4 D4 request-wide 100-image budget (needs transform.ts counter threading — high-risk, deferred), #5 D5 factsheet pricing sidecar, #6 D6 expose `losslessExact` public API, #7 D7 GPT model-safety on public SDK transformers, #10 D14 multi-col size-limit threading, #12 D16 export savings overhead.
-- Proxy/lifecycle/resource: #15 E2 request-body 413 limit, #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
+- Proxy/lifecycle/resource: #15 E2 request-body 413 limit (done in batch 3), #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
 - Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
 
@@ -651,4 +651,15 @@ Status: 3 items implemented + regression-tested; tsc clean; full suite 759 passe
 ### Notes / risks
 - D7 deliberately gates on READER-PROFILE safety (the "model-safety" the proxy enforces), not the operator `IMGTOKENX_MODELS` scope. Gate by scope would have forced 22 public-API transform tests to set env and subverted the library's "caller opted in" contract. `gpt-5.6-sol` is text-only by reader-profile policy, so the old test that asserted it rendered an image was asserting unsafe behavior; updated to assert the passthrough.
 - D1's fail-open path forwards the original request bytes; callers relying on `info.compressed`/`reason` telemetry should still distinguish (the passthrough keeps `reason` undefined vs a successful transform).
+
+## Final Review - 2026-07-10 (audit batch 3 — 1 of 40 items: E2)
+
+Status: 1 item implemented + regression-tested; tsc clean; full suite 763 passed (was 759); build green (0.8.0). To be committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #15 E2 configurable request-body 413 limit (`src/core/proxy.ts`): new `ProxyConfig.maxRequestBodyBytes` (unset = no cap, behavior preserved). Two layers — (1) early `content-length` header gate rejecting declared-too-large bodies on every path with 413; (2) `readBodyWithLimit` enforcing the streamed byte count on the transformable paths (no header = still capped). New tests in `tests/proxy-usage.test.ts` cover header gate, streamed over-limit, under-limit, and unset-limit passthrough.
+
+### Notes / risks
+- The streamed check buffers the full body via `arrayBuffer()` then compares (not a true incremental stream cancel), so memory is still allocated before rejection. Acceptable for the operator-configured cap; a hard incremental cancel would need a ReadableStream wrapper. Flagged, not blocking.
+- `BodyTooLargeError` is exported so hosts/tests can distinguish it from transform failures.
 

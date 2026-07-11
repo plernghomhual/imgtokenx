@@ -40,6 +40,11 @@ export interface ProxyConfig {
    *  event (and any sidecars) on every request. Pass `ctx.waitUntil`
    *  from the Worker `fetch` handler to schedule it instead. */
   waitUntil?: (p: Promise<unknown>) => void;
+  /** Max request body in bytes (audit E2). When set, requests exceeding the
+   *  `content-length` header — or the streamed byte count, when no header is
+   *  present — are rejected with 413 before any transform/forward. Unset = no
+   *  limit (preserves current behavior; operator must opt in). */
+  maxRequestBodyBytes?: number;
 }
 
 export interface ProxyEvent {
@@ -104,6 +109,25 @@ export const transformFailureTelemetry = {
 };
 let transformFailureCount = 0;
 let transformFailureLastClass: string | undefined;
+
+/** Raised when a request body exceeds `maxRequestBodyBytes` (audit E2). The
+ *  handler maps this to a 413 and never surfaces it as a 502 transform error. */
+export class BodyTooLargeError extends Error {
+  constructor(public readonly bytes: number, public readonly limit: number) {
+    super('request entity too large');
+    this.name = 'BodyTooLargeError';
+  }
+}
+
+/** Read a request body with an optional hard byte cap (audit E2). Enforces the
+ *  limit against the streamed byte count (header-less requests) as well as the
+ *  caller's own content-length check. Throws `BodyTooLargeError` past the cap. */
+async function readBodyWithLimit(req: Request, max?: number): Promise<Uint8Array> {
+  if (max === undefined) return new Uint8Array(await req.arrayBuffer());
+  const full = new Uint8Array(await req.arrayBuffer());
+  if (full.byteLength > max) throw new BodyTooLargeError(full.byteLength, max);
+  return full;
+}
 
 /** Gzip via CompressionStream — available in Node 18+ and Cloudflare Workers. */
 async function gzipBytes(body: Uint8Array): Promise<Uint8Array> {
@@ -796,6 +820,20 @@ export function createProxy(config: ProxyConfig = {}) {
       else void fin;
     };
 
+    // Audit E2: reject oversized bodies before any transform/forward. The header
+    // check covers every request (incl. pass-through paths); the transformable
+    // paths additionally enforce the streamed byte count via readBodyWithLimit.
+    if (config.maxRequestBodyBytes !== undefined) {
+      const declared = Number(req.headers.get('content-length') ?? '0');
+      if (declared > config.maxRequestBodyBytes) {
+        fire(413, undefined, 'request_entity_too_large');
+        return new Response(
+          JSON.stringify({ error: 'request entity too large', limit: config.maxRequestBodyBytes }),
+          { status: 413, headers: { 'content-type': 'application/json' } },
+        );
+      }
+    }
+
     // Transform only known shapes; everything else passes through.
     const providerPrefixed = isProviderPrefixedPath(url.pathname);
     const isMessages = req.method === 'POST' && isAnthropicMessagesPath(url.pathname);
@@ -832,10 +870,23 @@ export function createProxy(config: ProxyConfig = {}) {
     let baselineStatusApplies = false;
 
     if (isMessages || isOpenAIChat || isOpenAIResponses) {
-      const bodyIn = new Uint8Array(await req.arrayBuffer());
+      let bodyIn: Uint8Array;
       try {
-        // bodyIn is captured above (before the try) so the fail-open catch can
-        // forward the original request even if the transform itself throws.
+        // Audit E2: enforce the streamed byte-count cap here (the header gate
+        // above already rejected declared-too-large bodies). When the limit is
+        // unset, readBodyWithLimit just buffers the body without a cap.
+        bodyIn = await readBodyWithLimit(req, config.maxRequestBodyBytes);
+      } catch (e) {
+        if (e instanceof BodyTooLargeError) {
+          fire(413, undefined, 'request_entity_too_large');
+          return new Response(
+            JSON.stringify({ error: 'request entity too large', limit: config.maxRequestBodyBytes }),
+            { status: 413, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        throw e; // any other read error falls through to the fail-open catch
+      }
+      try {
         const transformOpts =
           typeof config.transform === 'function' ? config.transform() : config.transform;
         // Fail-closed: unreadable model → no compression, not a risky guess.
