@@ -452,7 +452,16 @@ export function renderContextMapFragment(
       ids
         .map(
           (id) =>
-            `<img class="page" src="/proxy-latest-png?id=${id}" alt="page ${id}" loading="lazy" title="Click to read the source text behind page ${id}" onclick="ppPin(${id});ppSource(true)" onerror="this.classList.add('page-gone'); this.alt='page ${id} expired from buffer';" />`,
+            // D22: <button>, not <img onclick>, for keyboard/AT users —
+            // the inner <img> keeps the visual styling and onerror fallback.
+            `<button class="page-btn" type="button" onclick="ppPin(${id});ppSource(true)"` +
+            ` aria-label="Read the source text behind image page ${id}" title="Click to read the source text behind page ${id}">` +
+            // alt="" on the inner img: the wrapping button's aria-label carries the
+            // meaning, so a real alt here would double-announce ("Read the source
+            // text behind image page 7, page 7, graphic") on NVDA + Firefox.
+            `<img class="page" src="/proxy-latest-png?id=${id}" alt="" loading="lazy"` +
+            ` onerror="this.classList.add('page-gone'); this.alt='page ${id} expired from buffer';" />` +
+            `</button>`,
         )
         .join('') +
       `</div>`
@@ -787,7 +796,7 @@ const CSS = `
   .flame-dot { width: 14px; height: 14px; border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ffd0a8, var(--flame) 55%, var(--flame-strong));
     box-shadow: 0 0 0 4px var(--flame-tint); flex: none; }
-  .wordmark { font-size: 22px; font-weight: 800; color: var(--ink); letter-spacing: 0; }
+  .wordmark { font-size: 22px; font-weight: 800; color: var(--ink); letter-spacing: 0; margin: 0; }
   .tagline { font-size: 12.5px; color: var(--muted); margin-top: 1px; max-width: 460px; }
   .controls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 
@@ -954,12 +963,28 @@ const CSS = `
   .pages-title { font-size: 11px; color: var(--ink-2); margin: 12px 0 6px; }
   .pages { display: flex; flex-wrap: wrap; gap: 6px; max-height: 320px; overflow: auto;
     background: var(--surface-2); padding: 6px; border: 1px solid var(--border); border-radius: 8px; }
-  .page { height: 130px; width: auto; max-width: 230px; object-fit: contain; object-position: top left;
-    image-rendering: pixelated; background: #fff; border: 1px solid var(--border-strong); border-radius: 4px;
-    cursor: pointer; transition: border-color .12s, transform .12s; }
-  .page:hover { border-color: var(--flame); transform: translateY(-1px); }
-  .page.page-gone { width: 150px; height: 56px; background: var(--surface-2); border: 1px dashed var(--border-strong);
-    color: var(--muted); font-size: 10px; cursor: default; }
+.page { height: 130px; width: auto; max-width: 230px; object-fit: contain; object-position: top left;
+  image-rendering: pixelated; background: #fff; border: 1px solid var(--border-strong); border-radius: 4px;
+  cursor: pointer; transition: border-color .12s, transform .12s; }
+.page:hover { border-color: var(--flame); transform: translateY(-1px); }
+.page.page-gone { width: 150px; height: 56px; background: var(--surface-2); border: 1px dashed var(--border-strong);
+  color: var(--muted); font-size: 10px; cursor: default; }
+/* D22: keyboard-accessible thumbnail wrapper. <img.page> keeps its visuals;
+ the <button> only adds focus, semantics, and Enter/Space activation. */
+button.page-btn {
+  background: transparent; border: 0; padding: 0; margin: 0;
+  display: inline-block; cursor: pointer; line-height: 0; vertical-align: top;
+}
+button.page-btn:focus-visible { outline: 2px solid var(--flame); outline-offset: 2px; border-radius: 4px; }
+/* Propagate the legacy img:hover effect when the button itself is hovered so
+   keyboard activation and mouse hover look identical. */
+button.page-btn:hover .page { border-color: var(--flame); transform: translateY(-1px); }
+/* D23: visually-hidden until focused (skip-to-content link, etc.). */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.sr-only:focus { position: static; width: auto; height: auto; padding: 8px 12px;
+  clip: auto; margin: 4px 6px; background: var(--flame-tint); color: var(--flame-ink);
+  font-weight: 600; border-radius: 6px; }
 
   /* recent requests */
   .row-view { color: var(--flame-ink); font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; }
@@ -1121,11 +1146,14 @@ export function renderPage(port: number): string {
 </head>
 <body>
 
+<!-- D23: skip-to-content link, visually hidden until focused. -->
+<a href="#main-content" class="sr-only">Skip to dashboard content</a>
+
 <header class="topbar">
   <div class="brand">
     <span class="flame-dot"></span>
     <div>
-      <div class="wordmark">imgtokenx</div>
+      <h1 class="wordmark">imgtokenx</h1>
       <div class="tagline">Inspect how long context is compressed without sacrificing exact text.</div>
     </div>
   </div>
@@ -1134,6 +1162,9 @@ export function renderPage(port: number): string {
     <div id="frag-toggle" hx-get="/fragments/toggle" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
   </div>
 </header>
+
+<!-- D23: <main> encloses the dashboard's primary content; ARIA "main" landmark. -->
+<main id="main-content">
 
 <div id="frag-models" hx-get="/fragments/models" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
 
@@ -1173,8 +1204,10 @@ export function renderPage(port: number): string {
     <div id="frag-stats" hx-get="/fragments/stats" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
   </div>
 </section>
+</main>
 
-<div class="tray" x-data="{ toasts: [], next: 1 }"
+<div class="tray" role="status" aria-live="polite" aria-atomic="false" aria-label="Notifications"
+     x-data="{ toasts: [], next: 1 }"
      @pp-toast.window="const id = next++; toasts.push({ id, text: $event.detail.text }); setTimeout(() => toasts = toasts.filter(t => t.id !== id), 5000)">
   <template x-for="t in toasts" :key="t.id">
     <div class="toast"><span x-text="t.text"></span><button type="button" @click="toasts = toasts.filter(x => x.id !== t.id)" aria-label="dismiss">&times;</button></div>

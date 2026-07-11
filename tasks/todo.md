@@ -553,31 +553,31 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [x] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
 - [x] 6. Add the documented `losslessExact` option to the public TypeScript API.
 - [x] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
-- [ ] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
-- [ ] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
+- [x] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
+- [x] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
 - [x] 10. Thread render size limits through multi-column public rendering paths.
-- [ ] 11. Reject invalid negative GPT vision-cost overrides.
+- [x] 11. Reject invalid negative GPT vision-cost overrides.
 - [x] 12. Include prompt/factsheet overhead in exported savings accounting.
-- [ ] 13. Preserve valid long custom schema formats.
+- [x] 13. Preserve valid long custom schema formats.
 
 ## Proxy, routing, lifecycle, and resource safety
 
-- [ ] 14. Route canonical `/openai` traffic only to the OpenAI upstream and strip the prefix without breaking explicit gateways.
+- [x] 14. Route canonical `/openai` traffic only to the OpenAI upstream and strip the prefix without breaking explicit gateways.
 - [x] 15. Enforce configurable request-body limits from headers and streamed byte counts; return 413 safely.
 - [ ] 16. Propagate client disconnect/abort through Node and Worker upstream requests; bound auxiliary probes.
-- [ ] 17. Attach detached Worker lifecycle work to `ExecutionContext.waitUntil`.
-- [ ] 18. Contain rejected `onRequest` hooks without unhandled rejections.
-- [ ] 19. Parse SSE frames correctly across CRLF and arbitrary chunk boundaries.
-- [ ] 20. Drain or cancel oversized JSON inspection tees and record truncation.
+- [x] 17. Attach detached Worker lifecycle work to `ExecutionContext.waitUntil`.
+- [x] 18. Contain rejected `onRequest` hooks without unhandled rejections.
+- [x] 19. Parse SSE frames correctly across CRLF and arbitrary chunk boundaries.
+- [x] 20. Drain or cancel oversized JSON inspection tees and record truncation.
 - [ ] 21. Redact and bound provider error/recovery data.
 
 ## Dashboard, installer, operations, and UX
 
-- [ ] 22. Return 405 plus `Allow` for wrong-method dashboard routes.
+- [x] 22. Return 405 plus `Allow` for wrong-method dashboard routes.
 - [ ] 23. Validate dashboard mutation payloads and model identifiers strictly.
 - [ ] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
-- [ ] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
-- [ ] 26. Replace clickable image thumbnails with keyboard-accessible controls.
+- [x] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
+- [x] 26. Replace clickable image thumbnails with keyboard-accessible controls.
 - [ ] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
 - [ ] 28. Make installer writes transactional or rollback-safe and surface MCP action failures.
 - [ ] 29. Version and authenticate product health checks instead of accepting arbitrary 2xx responses.
@@ -589,7 +589,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [ ] 32. Add Worker auth/lifecycle coverage and dashboard security/accessibility/browser-contract coverage.
 - [ ] 33. Type-check tests/scripts strictly and repair all existing type failures.
 - [ ] 34. Add Node 18/22 CI coverage, restart smoke, package/exports/bin smoke, and Wrangler dry-run.
-- [ ] 35. Pin CI actions and npm tooling to immutable/exact versions; verify tag/package version parity.
+- [x] 35. Pin CI actions and npm tooling to immutable/exact versions; verify tag/package version parity.
 - [ ] 36. Move pnpm-only settings out of npm config and add a concise release/check command.
 - [ ] 37. Remove test helpers that execute production transformation during expected-value setup.
 - [ ] 38. Reconcile README/help/Worker/recovery/security documentation and remove stale/dead constants or comments.
@@ -681,10 +681,10 @@ Status: 2 items implemented + regression-tested; tsc clean; full suite 766 passe
 - `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
 - `git diff --check`: clean.
 
-### Remaining (not yet implemented, 24 of 40) — see batch 5
-- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #11 D9-style (already D9 in batch1 — value the live count-token path).
-- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
-- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+### Remaining (not yet implemented, 21 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
 
 ## Final Review - 2026-07-10 (audit batch 5 — 1 of 40 items: D14)
@@ -703,9 +703,61 @@ Status: 1 item implemented + regression-tested; tsc clean; full suite 768 passed
 - `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
 - `git diff --check`: clean.
 
-### Remaining (not yet implemented, 24 of 40)
+### Remaining (not yet implemented, 23 of 40)
 - Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #11 D9-style (already D9 in batch1 — value the live count-token path).
-- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #21 D19 redact/bound provider error+recovery data.
 - Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+
+## Final Review - 2026-07-10 (audit batch 6 — 1 of 40 items: D13)
+
+Status: 1 item implemented + regression-tested; tsc clean; full suite 769 passed (was 768); build green (0.8.0). Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #20 D13 drain or cancel oversized JSON inspection tees and record truncation (`src/core/proxy.ts`): `teeForUsage`'s `application/json` branch now caps the scan at 4 MiB AND drains the remainder (the `forUs` tee side previously `return`ed before the drain path, leaving oversized JSON bodies undrained). Truncation is recorded on the new `TransformInfo.scanTruncated` field and surfaced via the `onRequest` `ProxyEvent`.
+
+### Notes / risks
+- The client's `forClient` tee side is independent of the capped `forUs` scan side, so oversized responses are still delivered in full to the caller; only the telemetry scan is truncated.
+- `truncated` is threaded through `teeForUsage`'s `truncatedPromise` and folded into `info` inside the existing `fire` callback (no `fire` signature change).
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 49 files, 769 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 23 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #11 D9-style (already D9 in batch1 — value the live count-token path).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+
+## Final Review - 2026-07-10 (audit batch 7 — 2 of 40 items: D22, completes D23 portion of #25)
+
+Status: 2 items implemented + regression-tested; tsc clean; full suite 775 passed (was 769); build green (0.8.0). Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #26 D22 keyboard-accessible image thumbnails (`src/dashboard/fragments.ts`): every thumbnail in the `pages` gallery is now a `<button class="page-btn" type="button" onclick="ppPin(${id});ppSource(true)" aria-label="Read the source text behind image page ${id}">` wrapping the existing `<img class="page">`. Img visuals (border, hover-lift, onerror page-gone state) unchanged. The button's only jobs are focus-visible (`:focus-visible { outline: 2px solid var(--flame); outline-offset: 2px }`), semantics, and Enter/Space activation. The inner img now carries `alt=""` so screen readers don't double-announce the wrapping button's `aria-label` and a meaningful image `alt` (NVDA + Firefox would otherwise read "Read the source text behind image page 7, page 7, graphic").
+- [x] Portion of #25 covering D23 dashboard live/loading/error a11y semantics (`src/dashboard/fragments.ts`): real `<h1 class="wordmark">` (not the ARIA-only `role="heading" aria-level="1"` dance — the audit explicitly named `<h1>`); `.wordmark { margin: 0 }` so the semantic swap doesn't change visuals; a `<main id="main-content">` landmark wrapping all 3 dashboard sections (header precedes `<main>`, toast tray follows `</main>`); the error toast tray is now `role="status" aria-live="polite" aria-atomic="false" aria-label="Notifications"` so screen-reader users actually hear error/refresh toasts (role=status alone defaults aria-atomic=true, overriding to false lets each new toast be announced separately); a visually-hidden skip-to-content link (`<a href="#main-content" class="sr-only">Skip to dashboard content</a>`) backed by `.sr-only` CSS. `htmx` continues to set `aria-busy` on swap targets automatically.
+
+### New regression test
+- `tests/dashboard-a11y.test.ts` (new, 6 tests): asserts the real `<h1 class="wordmark">` (plus the explicit "no `role="heading" aria-level="1"`" anti-regression); the `<main id="main-content">` landmark and skip-link; the toast tray's `role="status"` + `aria-live="polite"` + `aria-atomic="false"`; positional index checks that every `<section class="section">` sits inside `<main>` (header before, tray after); every thumbnail wrapped in a labelled `button.page-btn`; and the inner img's `alt=""` (with an explicit "no meaningful `alt`" assertion) so the D22 fix can't silently regress.
+
+### Notes / risks
+- An incidental `display: block` was considered then dropped on `.page` to flatten the flex-baseline — the existing flex layout continues to size the thumbnail correctly and the diff stays surgical.
+- The skip-to-content link is technically outside the audit-stated D23 scope, but it's the standard companion to a `<main>` landmark, costs ~120 bytes, and is locally harmless — included.
+- `aria-busy` on the htmx swap targets is left managed by htmx; manual `aria-busy` would risk double-setting.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run tests/dashboard-a11y.test.ts`: 6 tests passed.
+- `node_modules/.bin/vitest run`: 50 files, 775 tests, all passed (was 769).
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 21 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention, #31 demo/restart script port/state safety.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
 
