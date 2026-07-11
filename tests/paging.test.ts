@@ -493,6 +493,7 @@ describe('paging telemetry → TrackEvent', () => {
       durationMs: 100,
       info: {
         compressed: true,
+        compressedChars: 0,
         origChars: 500_000,
         imageCount: 10,
         imageBytes: 20_000,
@@ -516,6 +517,7 @@ describe('paging telemetry → TrackEvent', () => {
       durationMs: 100,
       info: {
         compressed: true,
+        compressedChars: 0,
         origChars: 10_000,
         imageCount: 1,
         imageBytes: 2_000,
@@ -539,6 +541,7 @@ describe('paging telemetry → TrackEvent', () => {
       durationMs: 100,
       info: {
         compressed: true,
+        compressedChars: 0,
         origChars: 10_000,
         imageCount: 1,
         imageBytes: 2_000,

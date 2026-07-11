@@ -22,7 +22,7 @@ function mockUpstream(handler: (req: Request) => Promise<Response> | Response) {
   const real = globalThis.fetch;
   globalThis.fetch = ((req: Request | string | URL, init?: RequestInit) => {
     const r = req instanceof Request ? req : new Request(String(req), init);
-    return Promise.resolve(handler(r));
+    return Promise.resolve(handler(r as unknown as Request));
   }) as typeof fetch;
   return () => {
     globalThis.fetch = real;
@@ -87,7 +87,7 @@ describe('proxy usage extraction', () => {
   it('transforms OpenCode /anthropic/messages (no /v1) and records the model', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       const url = req.url;
       if (url.endsWith('/count_tokens')) {
         return new Response(JSON.stringify({ input_tokens: 9000 }), {
@@ -153,7 +153,7 @@ describe('proxy usage extraction', () => {
     // the baseline.
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       if (req.url.endsWith('/count_tokens')) {
         return new Response(JSON.stringify({ input_tokens: 9000 }), {
           status: 200,
@@ -216,7 +216,7 @@ describe('proxy usage extraction', () => {
     // Bearer auth — NOT the Anthropic upstream (pre-fix it 404'd there).
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'chatcmpl_1', object: 'chat.completion',
@@ -266,7 +266,7 @@ describe('proxy usage extraction', () => {
   it('routes GPT 5.6 chat completions to OpenAI, transforms once, and normalizes usage', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'chatcmpl_1',
@@ -331,7 +331,7 @@ describe('proxy usage extraction', () => {
   it('transforms provider-prefixed OpenAI chat but forwards through the generic upstream', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'chatcmpl_1',
@@ -378,7 +378,7 @@ describe('proxy usage extraction', () => {
   it('transforms OpenCode /openai/chat/completions requests without a /v1 segment', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'chatcmpl_1',
@@ -424,7 +424,7 @@ describe('proxy usage extraction', () => {
   it('normalizes Codex /responses root alias to the direct OpenAI /v1 upstream', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'resp_1',
@@ -476,7 +476,7 @@ describe('proxy usage extraction', () => {
   it('normalizes OpenAI /models root alias only for OpenAI-authenticated clients', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(JSON.stringify({ data: [] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -516,7 +516,7 @@ describe('proxy usage extraction', () => {
     // anthropic-version header pins the Anthropic route.
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(JSON.stringify({ data: [] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -547,7 +547,7 @@ describe('proxy usage extraction', () => {
   it('transforms OpenCode /openai/responses requests and records the model', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
-      upstreamRequests.push(req.clone());
+      upstreamRequests.push(req.clone() as unknown as Request);
       return new Response(
         JSON.stringify({
           id: 'resp_1',
@@ -1932,5 +1932,64 @@ describe('E2 request-body limit', () => {
     expect(clientBody.length).toBe(big.length);
     // The oversized JSON response was drained and flagged.
     expect(captured!.info?.scanTruncated).toBe(true);
+  });
+
+  it('enforces the streamed byte limit on passthrough routes', async () => {
+    let forwarded = false;
+    const restore = mockUpstream(() => { forwarded = true; return new Response('ok'); });
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array(3));
+        c.enqueue(new Uint8Array(3));
+        c.close();
+      },
+    });
+    const proxy = createProxy({ maxRequestBodyBytes: 5 });
+    const res = await proxy(new Request('http://localhost/compat/raw', {
+      method: 'POST', body, duplex: 'half',
+    } as RequestInit));
+    restore();
+    expect(res.status).toBe(413);
+    expect(forwarded).toBe(false);
+  });
+
+  it('does not forward an Anthropic key on canonical OpenAI routes', async () => {
+    let headers: Headers | undefined;
+    const restore = mockUpstream((req) => {
+      headers = req.headers;
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    const proxy = createProxy({ openAIApiKey: 'openai-key' });
+    await proxy(new Request('http://localhost/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': 'anthropic-key' },
+      body: JSON.stringify({ model: 'gpt-5.6', messages: [] }),
+    }));
+    restore();
+    expect(headers?.get('authorization')).toBe('Bearer openai-key');
+    expect(headers?.has('x-api-key')).toBe(false);
+  });
+
+  it('parses CR-framed SSE across arbitrary chunk boundaries', async () => {
+    const raw = 'event: message_start\rdata: {"message":{"usage":{"input_tokens":7}}}\r\r'
+      + 'event: message_delta\rdata: {"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}\r\r';
+    let captured: ProxyEvent | undefined;
+    const restore = mockUpstream(() => new Response(new ReadableStream<Uint8Array>({
+        start(c) {
+          const bytes = new TextEncoder().encode(raw);
+          for (const byte of bytes) c.enqueue(Uint8Array.of(byte));
+          c.close();
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } }));
+    const proxy = createProxy({ openAIApiKey: 'test', onRequest: (e) => { captured = e; } });
+    const res = await proxy(new Request('http://localhost/v1/chat/completions', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-5.6', messages: [] }),
+    }));
+    await res.text();
+    await new Promise((r) => setTimeout(r, 50));
+    restore();
+    expect(captured?.usage?.output_tokens).toBe(3);
+    expect(captured?.stopReason).toBe('end_turn');
   });
 });

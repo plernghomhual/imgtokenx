@@ -603,9 +603,18 @@ class FileTracker implements Tracker {
   private ensureOpen(): boolean {
     if (this.fd != null) return true;
     try {
-      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    } catch {
-      /* dir may already exist or be unmkable; openSync below will surface */
+      const dir = path.dirname(this.filePath);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      if (fs.lstatSync(dir).isSymbolicLink()) throw new Error('refusing symlink log directory');
+      if (fs.existsSync(this.filePath) && fs.lstatSync(this.filePath).isSymbolicLink()) {
+        throw new Error('refusing symlink log path');
+      }
+    } catch (err) {
+      if (!this.brokenLogged) {
+        console.error(`[imgtokenx] FileTracker disabled — unsafe/unusable path ${this.filePath}: ${(err as Error).message}`);
+        this.brokenLogged = true;
+      }
+      return false;
     }
     try {
       const st = fs.statSync(this.filePath);
@@ -614,7 +623,8 @@ class FileTracker implements Tracker {
       this.bytesWritten = 0;
     }
     try {
-      this.fd = fs.openSync(this.filePath, 'a');
+      this.fd = fs.openSync(this.filePath, 'a', 0o600);
+      fs.fchmodSync(this.fd, 0o600);
       return true;
     } catch (err) {
       if (!this.brokenLogged) {
@@ -709,7 +719,9 @@ async function maybeWriteBodySidecar(
 ): Promise<string | undefined> {
   try {
     // Lazy mkdir — only when we actually need to write.
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (fs.lstatSync(dir).isSymbolicLink()) throw new Error('symlink directories are unsafe');
+    fs.chmodSync(dir, 0o700);
   } catch {
     return undefined;
   }
@@ -1124,7 +1136,9 @@ export async function main(): Promise<void> {
   let imageDumpSeq = 0;
   if (imageDumpDir) {
     try {
-      fs.mkdirSync(imageDumpDir, { recursive: true });
+      fs.mkdirSync(imageDumpDir, { recursive: true, mode: 0o700 });
+      if (fs.lstatSync(imageDumpDir).isSymbolicLink()) throw new Error('symlink directories are unsafe');
+      fs.chmodSync(imageDumpDir, 0o700);
       console.log(`[imgtokenx] IMGTOKENX_DUMP_DIR set — dumping rendered PNGs to ${imageDumpDir}`);
     } catch (err) {
       console.warn(`[imgtokenx] IMGTOKENX_DUMP_DIR unusable (${(err as Error).message}) — image dumping disabled`);
@@ -1141,6 +1155,8 @@ export async function main(): Promise<void> {
   if (recoverableDir) {
     try {
       fs.mkdirSync(recoverableDir, { recursive: true, mode: 0o700 });
+      if (fs.lstatSync(recoverableDir).isSymbolicLink()) throw new Error('symlink directories are unsafe');
+      fs.chmodSync(recoverableDir, 0o700);
       console.log(`[imgtokenx] writing exact recovery sources to ${recoverableDir} (default-on; set IMGTOKENX_RECOVERABLE_DIR=off to disable)`);
     } catch (err) {
       console.warn(`[imgtokenx] recovery dir unusable (${(err as Error).message}) — recovery dumping disabled`);

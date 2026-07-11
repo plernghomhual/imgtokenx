@@ -79,6 +79,9 @@ export interface HistoryCollapseOptions {
    *  `colorByRole: true` is merged on top at the render call below — callers don't
    *  need to (and shouldn't) set it themselves. Default DENSE_RENDER_STYLE. */
   style: RenderStyle;
+  /** Maximum history images this call may emit. The caller supplies the remaining
+   *  request-wide Anthropic image budget. Default Infinity. */
+  maxImages: number;
 }
 
 export const HISTORY_DEFAULTS: HistoryCollapseOptions = {
@@ -90,6 +93,7 @@ export const HISTORY_DEFAULTS: HistoryCollapseOptions = {
   protectedPrefix: 0,
   reflow: true,
   style: DENSE_RENDER_STYLE,
+  maxImages: Number.POSITIVE_INFINITY,
 };
 
 /** Per-request telemetry surfaced back to TransformInfo. */
@@ -123,6 +127,7 @@ export interface HistoryCollapseInfo {
     | 'no_history'
     | 'prefix_too_short'
     | 'no_closed_prefix'
+    | 'too_many_images'
     | 'not_profitable'
     | 'render_empty';
   /** Dropped codepoints from the history render, merged into the
@@ -668,6 +673,10 @@ export async function collapseHistory(
       undefined,
       chunkSlot,
     );
+    if (imageBlocks.length + imgs.length > o.maxImages) {
+      info.reason = 'too_many_images';
+      return { messages, info };
+    }
     const markerCC = markerByEnd.get(chunkEnd);
     for (let k = 0; k < imgs.length; k++) {
       const img = imgs[k]!;

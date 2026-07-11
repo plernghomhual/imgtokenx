@@ -87,6 +87,7 @@ const RECENT_CAP = 50;
  *  RECENT_CAP so every visible recent-requests row can still resolve its
  *  image. Images are never written to disk — this ring is the only store. */
 const IMAGE_RING_CAP = 800;
+const IMAGE_RING_MAX_BYTES = 64 * 1024 * 1024;
 
 /** One rendered image held in the in-memory ring. `id` is a monotonic
  *  counter (never reused) so a RecentRow can reference its image even after
@@ -464,6 +465,8 @@ export class DashboardState {
    *  the ring via /proxy-latest-png?id=N. In-memory only — images are never
    *  persisted, so a restart starts this empty. */
   private images: ImageEntry[] = [];
+  private imageBytes = 0;
+  private statsCache?: { mtimeMs: number; size: number; body: string };
   /** Monotonic image id source. Never reset, never reused — an evicted id
    *  stays dangling on its RecentRow rather than pointing at a new image. */
   private nextImageId = 1;
@@ -542,12 +545,13 @@ export class DashboardState {
         ts: Date.now() / 1000,
         sourceText: info.imageSourceText,
       });
+      this.imageBytes += pngs[i]!.byteLength;
       ids.push(id);
     }
     // Evict the oldest entries past the cap. splice() keeps insertion order
     // so images[images.length - 1] is always the latest render.
-    if (this.images.length > IMAGE_RING_CAP) {
-      this.images.splice(0, this.images.length - IMAGE_RING_CAP);
+    while (this.images.length > IMAGE_RING_CAP || this.imageBytes > IMAGE_RING_MAX_BYTES) {
+      this.imageBytes -= this.images.shift()!.png.byteLength;
     }
     return ids;
   }
@@ -1421,6 +1425,19 @@ export class DashboardState {
    *  former `imgtokenx stats` CLI. */
   async serveApiStats(): Promise<Response> {
     if (!this.paths) return notConfigured('stats');
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(this.paths.eventsFile);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.statsCache = undefined;
+        return jsonResponse({ error: 'no events file yet', path: this.paths.eventsFile }, 404);
+      }
+      throw err;
+    }
+    if (this.statsCache?.mtimeMs === stat.mtimeMs && this.statsCache.size === stat.size) {
+      return new Response(this.statsCache.body, { headers: { 'content-type': 'application/json' } });
+    }
     const result = await aggregateEventsFile(this.paths.eventsFile);
     if (!result) {
       return jsonResponse({
@@ -1428,11 +1445,13 @@ export class DashboardState {
         path: this.paths.eventsFile,
       }, 404);
     }
-    return jsonResponse({
+    const body = JSON.stringify({
       parsed: result.parsed,
       dropped: result.dropped,
       summary: summaryToJson(result.summary),
     });
+    this.statsCache = { mtimeMs: stat.mtimeMs, size: stat.size, body };
+    return new Response(body, { headers: { 'content-type': 'application/json' } });
   }
 
   /** POST /api/compression — flip the global kill switch.

@@ -22,6 +22,22 @@ behavioral changes, patch = fixes).
   reader state without enabling imaging implicitly.
 
 ### Security / Correctness
+- Completed the pre-production hardening pass: provider-prefixed routing and
+  credentials are isolated, request bodies and response inspection are bounded,
+  disconnects cancel upstream work, Worker lifecycle tasks use `waitUntil`, SSE
+  parsing tolerates CRLF/chunk splits, and captured errors are redacted.
+- Anthropic transformations now share one request-wide 100-image budget across
+  native images, static slabs, reminders, tool results, and collapsed history;
+  optional transformations fail open without discarding a usable upstream
+  response, and unknown history blocks remain opaque ordering barriers.
+- Dashboard and local storage boundaries now enforce strict mutation inputs,
+  loopback/Host authentication, private no-store responses, accessible controls,
+  byte-bounded caches, transactional installer rollback, private file modes,
+  symlink rejection, and age/count/byte retention.
+- CI now checks Node 18 and 22 with immutable action revisions, strict-types
+  source/tests/scripts, restart/package/export/bin smokes, and a Worker dry-run;
+  release tags must match the package version and npm is installed at an exact
+  version.
 - Reflow markers are now counted as inline glyphs by the profitability gate,
   matching the renderer and preventing inflated history page estimates.
 - OpenAI-shaped traffic now requires both model scope and a reader-safe profile;

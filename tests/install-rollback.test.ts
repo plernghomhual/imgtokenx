@@ -1,5 +1,4 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -19,6 +18,12 @@ interface HomeFixture {
   repoRoot: string;
   cleanup: () => void;
 }
+
+const processOk: NonNullable<import('../src/install.js').InstallOptions['spawnSync']> = () => ({
+  stdout: '',
+  stderr: '',
+  status: 0,
+});
 
 function mkHomeFixture(label: string): HomeFixture {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `imgtokenx-${label}-`));
@@ -47,6 +52,7 @@ describe('install — atomic write + rollback', () => {
       repoRoot: fx.repoRoot,
       nodePath: '/usr/bin/node',
       port: 47899,
+      spawnSync: processOk,
     });
     expect(result.actions).toContain(`write ${path.join(fx.home, 'Library', 'LaunchAgents', 'com.imgtokenx.proxy.plist')}`);
     expect(result.actions).toContain(`write ${path.join(fx.home, '.imgtokenx', 'env.sh')}`);
@@ -64,14 +70,14 @@ describe('install — atomic write + rollback', () => {
     const before = 'export PATH=/usr/bin\nexport EDITOR=vim\n';
     fs.writeFileSync(zshrc, before);
     runInstall({
-      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899,
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
     });
     const after1 = fs.readFileSync(zshrc, 'utf8');
     expect(after1).toContain('export PATH=/usr/bin');
     expect(after1).toContain('# >>> imgtokenx auto-start >>>');
     // Run again — idempotent, the source block is added exactly once.
     runInstall({
-      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899,
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
     });
     const after2 = fs.readFileSync(zshrc, 'utf8');
     const matches = (after2.match(/# >>> imgtokenx auto-start >>>/g) ?? []).length;
@@ -80,10 +86,10 @@ describe('install — atomic write + rollback', () => {
 
   it('uninstall restores plist + zshrc idempotently (no leftovers)', () => {
     runInstall({
-      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899,
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
     });
     runUninstall({
-      home: fx.home, repoRoot: fx.repoRoot, port: 47899,
+      home: fx.home, repoRoot: fx.repoRoot, port: 47899, spawnSync: processOk,
     });
     // After uninstall, the auto-start block must be removed.
     const zshrc = path.join(fx.home, '.zshrc');

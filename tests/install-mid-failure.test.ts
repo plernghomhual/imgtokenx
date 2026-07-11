@@ -83,7 +83,13 @@ const launchAgentPath = (home: string): string =>
 const envPath = (home: string): string =>
   path.join(home, '.imgtokenx', 'env.sh');
 
-interface HomeFixture { home: string; repoRoot: string; cleanup: () => void }
+interface HomeFixture {
+  home: string;
+  repoRoot: string;
+  cleanup: () => void;
+  originalPlist?: string;
+  originalEnv?: string;
+}
 
 function mkHome(): HomeFixture {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-midfail-'));
@@ -141,10 +147,10 @@ describe('install — rollback restores pre-existing plist + env.sh when claude 
     const ePath = envPath(fx.home);
     fs.mkdirSync(path.dirname(laPath), { recursive: true });
     fs.mkdirSync(path.dirname(ePath), { recursive: true });
-    fx['_originalPlist'] = '<?xml version="1.0"?>\n<plist version="1.0"><dict><key>Label</key><string>com.imgtokenx.proxy</string></dict></plist>\n';
-    fx['_originalEnv'] = 'export FOO=bar\n';
-    fs.writeFileSync(laPath, fx['_originalPlist']!);
-    fs.writeFileSync(ePath, fx['_originalEnv']!);
+    fx.originalPlist = '<?xml version="1.0"?>\n<plist version="1.0"><dict><key>Label</key><string>com.imgtokenx.proxy</string></dict></plist>\n';
+    fx.originalEnv = 'export FOO=bar\n';
+    fs.writeFileSync(laPath, fx.originalPlist);
+    fs.writeFileSync(ePath, fx.originalEnv);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -155,8 +161,8 @@ describe('install — rollback restores pre-existing plist + env.sh when claude 
   it('throws AND restores plist + env.sh byte-for-byte', async () => {
     const laPath = launchAgentPath(fx.home);
     const ePath = envPath(fx.home);
-    const originalPlist = fx['_originalPlist']!;
-    const originalEnv = fx['_originalEnv']!;
+    const originalPlist = fx.originalPlist!;
+    const originalEnv = fx.originalEnv!;
 
     const install = await import('../src/install.js');
     expect(() => install.runUninstall({

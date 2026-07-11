@@ -51,7 +51,7 @@ describe('imgtokenx recover CLI', () => {
         path.join(dir, '2026-07-08T00-00-00_req001_model_rec_cafebabe_tool_result.txt'),
         'default dir exact source',
       );
-      const env = { ...process.env, HOME: home };
+      const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
       delete env.IMGTOKENX_RECOVERABLE_DIR;
       const run = spawnSync(
         process.execPath,

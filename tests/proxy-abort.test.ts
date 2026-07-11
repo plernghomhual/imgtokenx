@@ -31,7 +31,7 @@ function instrumentFetch(opts: {
   const forwardSignals: (AbortSignal | undefined)[] = [];
   globalThis.fetch = (async (req: Request | string | URL, init?: RequestInit) => {
     const r = req instanceof Request ? req : new Request(String(req), init);
-    const initSignal = init?.signal;
+    const initSignal = init?.signal ?? undefined;
     if (r.url.includes('/count_tokens')) {
       probeSignals.push(initSignal);
       if (opts.probe) return await opts.probe(initSignal as AbortSignal);
@@ -161,7 +161,8 @@ describe('E3 abort/timeout propagation (proxy)', () => {
     const proxy = createProxy({ transform: {}, onRequest: () => {} });
     const res = await proxy(buildMessagesRequest());
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toBe('imgtokenx upstream unreachable');
+    const body = await res.json() as { error?: string };
+    expect(body.error).toBe('imgtokenx upstream unreachable');
     restore();
   });
 
@@ -243,6 +244,26 @@ describe('E3 abort/timeout propagation (proxy)', () => {
     expect(forwardSignals[0]).toBeUndefined();
     // Probe gets the deadline timer even when no caller signal is supplied.
     expect(probeSignals[0]).toBeDefined();
+    restore();
+  });
+
+  it('cancels the response telemetry scanner when the caller aborts', async () => {
+    let eventFired!: () => void;
+    const fired = new Promise<void>((resolve) => { eventFired = resolve; });
+    const { restore } = instrumentFetch({
+      forward: async () => new Response(new ReadableStream<Uint8Array>({
+        start(c) { c.enqueue(enc.encode('event: ping\ndata: {}\n\n')); },
+      }), { headers: { 'content-type': 'text/event-stream' } }),
+    });
+    const proxy = createProxy({ transform: {}, onRequest: () => { eventFired(); } });
+    const ctrl = new AbortController();
+    const res = await proxy(buildMessagesRequest(), { signal: ctrl.signal });
+    ctrl.abort();
+    await Promise.race([
+      fired,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('scanner did not cancel')), 500)),
+    ]);
+    await res.body?.cancel();
     restore();
   });
 });

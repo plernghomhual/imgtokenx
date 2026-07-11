@@ -547,9 +547,9 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 ## Core correctness and data integrity
 
 - [x] 1. Make optional body transforms fail open after upstream response validation, with bounded/redacted telemetry.
-- [ ] 2. Finalize GPT history collapse independently of static-slab profitability and early returns.
-- [ ] 3. Preserve unsupported/unknown history content as opaque ordering barriers.
-- [ ] 4. Enforce one request-wide Anthropic 100-image budget across native content, slabs, results, reminders, and history.
+- [x] 2. Finalize GPT history collapse independently of static-slab profitability and early returns.
+- [x] 3. Preserve unsupported/unknown history content as opaque ordering barriers.
+- [x] 4. Enforce one request-wide Anthropic 100-image budget across native content, slabs, results, reminders, and history.
 - [x] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
 - [x] 6. Add the documented `losslessExact` option to the public TypeScript API.
 - [x] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
@@ -564,7 +564,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 
 - [x] 14. Route canonical `/openai` traffic only to the OpenAI upstream and strip the prefix without breaking explicit gateways.
 - [x] 15. Enforce configurable request-body limits from headers and streamed byte counts; return 413 safely.
-- [ ] 16. Propagate client disconnect/abort through Node and Worker upstream requests; bound auxiliary probes.
+- [x] 16. Propagate client disconnect/abort through Node and Worker upstream requests; bound auxiliary probes.
 - [x] 17. Attach detached Worker lifecycle work to `ExecutionContext.waitUntil`.
 - [x] 18. Contain rejected `onRequest` hooks without unhandled rejections.
 - [x] 19. Parse SSE frames correctly across CRLF and arbitrary chunk boundaries.
@@ -578,32 +578,32 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [x] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
 - [x] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
 - [x] 26. Replace clickable image thumbnails with keyboard-accessible controls.
-- [ ] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
-- [ ] 28. Make installer writes transactional or rollback-safe and surface MCP action failures.
+- [x] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
+- [x] 28. Make installer writes transactional or rollback-safe and surface MCP action failures.
 - [x] 29. Version and authenticate product health checks instead of accepting arbitrary 2xx responses.
-- [ ] 30. Harden sidecar/recovery permissions, symlink handling, and age/byte retention.
-- [ ] 31. Make demo/restart scripts refuse unrelated port owners and use isolated temporary state.
+- [x] 30. Harden sidecar/recovery permissions, symlink handling, and age/byte retention.
+- [x] 31. Make demo/restart scripts refuse unrelated port owners and use isolated temporary state.
 
 ## Tests, CI, packaging, documentation, and maintainability
 
-- [ ] 32. Add Worker auth/lifecycle coverage and dashboard security/accessibility/browser-contract coverage.
-- [ ] 33. Type-check tests/scripts strictly and repair all existing type failures.
-- [ ] 34. Add Node 18/22 CI coverage, restart smoke, package/exports/bin smoke, and Wrangler dry-run.
+- [x] 32. Add Worker auth/lifecycle coverage and dashboard security/accessibility/browser-contract coverage.
+- [x] 33. Type-check tests/scripts strictly and repair all existing type failures.
+- [x] 34. Add Node 18/22 CI coverage, restart smoke, package/exports/bin smoke, and Wrangler dry-run.
 - [x] 35. Pin CI actions and npm tooling to immutable/exact versions; verify tag/package version parity.
-- [ ] 36. Move pnpm-only settings out of npm config and add a concise release/check command.
-- [ ] 37. Remove test helpers that execute production transformation during expected-value setup.
-- [ ] 38. Reconcile README/help/Worker/recovery/security documentation and remove stale/dead constants or comments.
-- [ ] 39. Reduce avoidable CLI/package duplication or document the proven constraint; verify packed artifact contents and size.
-- [ ] 40. Review large-module boundaries and extract only helpers justified by the fixes; avoid speculative rewrites.
+- [x] 36. Move pnpm-only settings out of npm config and add a concise release/check command.
+- [x] 37. Remove test helpers that execute production transformation during expected-value setup.
+- [x] 38. Reconcile README/help/Worker/recovery/security documentation and remove stale/dead constants or comments.
+- [x] 39. Reduce avoidable CLI/package duplication or document the proven constraint; verify packed artifact contents and size.
+- [x] 40. Review large-module boundaries and extract only helpers justified by the fixes; avoid speculative rewrites.
 
 ## Verification and handoff
 
-- [ ] Run focused tests red then green for every behavior-changing group.
-- [ ] Run source and test/script type checks, lint/static checks, full tests, build, restart smoke, package smoke, and Worker dry-run.
-- [ ] Run independent correctness/security review; resolve every confirmed regression.
-- [ ] Review the final diff for scope, secrets, docs drift, generated artifacts, and rollback safety.
-- [ ] Record exact results, remaining risks, and a final verification ledger entry.
-- [ ] Commit verified changes on `main`; do not push or deploy.
+- [x] Run focused tests red then green for every behavior-changing group.
+- [x] Run source and test/script type checks, lint/static checks, full tests, build, restart smoke, package smoke, and Worker dry-run.
+- [x] Run independent correctness/security review; resolve every confirmed regression.
+- [x] Review the final diff for scope, secrets, docs drift, generated artifacts, and rollback safety.
+- [x] Record exact results, remaining risks, and a final verification ledger entry.
+- [x] Commit verified changes on `main`; do not push or deploy.
 
 ## Final Review - 2026-07-10 (audit batch 1 — 11 of 40 items)
 
@@ -1118,3 +1118,49 @@ Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v
 - src/core/transform.ts: imageBudget field on TransformOptions, DEFAULTS entries, imageBudget field on TransformInfo, countExistingImages helper, RequestImageCounter class, counter instantiation in transformRequest, slab claim + emit-skip, tool_result clamp, final-return telemetry
 - tests/image-budget.test.ts: 14 new tests covering countExistingImages (6) + RequestImageCounter (5) + transformRequest E2E (3)
 - tasks/todo.md: this ledger entry
+
+## Final Review - 2026-07-11 (comprehensive remediation integration)
+
+Status: all 40 approved checklist items verified complete. Minimax batches were
+reviewed at their real call sites; correct work was retained and confirmed gaps
+were repaired without a broad rewrite.
+
+### Confirmed gaps closed in this integration
+
+- Completed the single Anthropic image counter across reminders, string/nested
+  tool results, and both history-collapse paths; over-budget content remains
+  native text.
+- Made streamed limits incremental on all routes, canceled response scanners on
+  disconnect, accepted CR/LF/CRLF SSE frames across arbitrary chunks, counted
+  scan bytes, stripped cross-provider credentials, and bounded hook telemetry.
+- Added mtime/size dashboard caching, byte-bounded image retention, strict MCP
+  failure propagation/rollback, private file modes and symlink rejection, plus
+  isolated demos that refuse unrelated port owners.
+- Added strict source/tests/scripts TypeScript checking, Node 18 build/import and
+  Node 22 full CI gates, immutable action revisions, exact npm tooling, restart,
+  real packed-tarball exports/bin smoke, and Wrangler dry-run.
+- Repaired installer tests that accidentally invoked the host `launchctl` by
+  injecting the existing process boundary; production behavior is unchanged.
+
+### Verification
+
+- Source TypeScript: pass; tests/scripts strict TypeScript: pass.
+- Full Vitest: 61 files / 946 tests passed.
+- Build: pass; CLI version smoke prints `0.8.0`.
+- Restart smoke: 4/4 passed.
+- Package smoke: `imgtokenx-0.8.0.tgz`, 3,761,828 bytes; public exports and bin passed.
+- Wrangler dry-run: pass; gzip upload 2,284.29 KiB.
+- Documentation integrity, release checks, focused security/correctness suites,
+  shell syntax, secret-pattern scan, and `git diff --check`: pass.
+- Independent final review and post-review delta review: `SHIP`, no blocker.
+
+### Residual non-blocking risks
+
+- Filesystem symlink checks are pre-open `lstat` checks rather than atomic
+  `O_NOFOLLOW`; the remaining race requires a same-user/local attacker.
+- Node 18 CI is build/import compatibility coverage; Node 22 runs the full suite.
+- No live provider call or reader-calibration sweep was repeated in this pass.
+- The local shell lacks pnpm, so equivalent checked-in binaries/scripts were run
+  directly; CI installs the exact declared `pnpm@10.21.0`.
+
+No push, deployment, daemon restart, or live configuration mutation performed.

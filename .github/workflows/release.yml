@@ -50,5 +50,5 @@ jobs:
       # Requires npm >= 11.5; Node 22 ships older, so upgrade npm first.
       - if: steps.check.outputs.skip == 'false'
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11.5.2
           npm publish --access public --provenance

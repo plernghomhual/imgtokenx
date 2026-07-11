@@ -119,7 +119,7 @@ describe('Anthropic cache contract — our agreed model (EXPECTED FAIL today)', 
     const msgs = convo(15);
     // caller marks the END of an early segment (index 6) — a roaming breakpoint
     (msgs[6] as any).content = [
-      { type: 'text', text: (msgs[6].content as string), cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: (msgs[6]!.content as string), cache_control: { type: 'ephemeral' } },
     ];
     const body = enc({
       model: 'claude-3-5-sonnet',

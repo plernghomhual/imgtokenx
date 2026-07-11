@@ -16,6 +16,24 @@ import type { SessionsPaths } from '../src/sessions.js';
 import type { TrackEvent } from '../src/core/tracker.js';
 import type { StatsPayload, RecentPayload } from '../src/dashboard/types.js';
 
+interface SessionsJson {
+  count: number;
+  sessions: Array<{ id: string; claudeCode: unknown }>;
+}
+
+interface ApiStatsJson {
+  parsed: number;
+  summary: {
+    total: number;
+    ok2xx: number;
+    err4xx: number;
+    compressed: number;
+    passthrough: number;
+    origCharsTotal: number;
+    imageBytesTotal: number;
+  };
+}
+
 function makeTmp(): SessionsPaths {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-dashapi-'));
   return {
@@ -114,13 +132,13 @@ describe('serveSessionsJson', () => {
     ]);
     const res = await dash.serveSessionsJson();
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as SessionsJson;
     expect(body.count).toBe(2);
     expect(body.sessions).toHaveLength(2);
     // Most-recent-first
-    expect(body.sessions[0].id).toBe('bbbbbbbb');
-    expect(body.sessions[1].id).toBe('aaaaaaaa');
-    expect(body.sessions[0].claudeCode).toBeNull();
+    expect(body.sessions[0]!.id).toBe('bbbbbbbb');
+    expect(body.sessions[1]!.id).toBe('aaaaaaaa');
+    expect(body.sessions[0]!.claudeCode).toBeNull();
   });
 
   it('respects ?project filtering', async () => {
@@ -129,9 +147,9 @@ describe('serveSessionsJson', () => {
       ev({ first_user_sha8: 'bbbbbbbb', cwd: '/Users/me/code/other' }),
     ]);
     const res = await dash.serveSessionsJson({ project: 'imgtokenx' });
-    const body = await res.json();
+    const body = await res.json() as SessionsJson;
     expect(body.count).toBe(1);
-    expect(body.sessions[0].id).toBe('aaaaaaaa');
+    expect(body.sessions[0]!.id).toBe('aaaaaaaa');
   });
 
   it('returns 503 when DashboardState was built without paths', async () => {
@@ -152,7 +170,7 @@ describe('serveApiStats', () => {
     ]);
     const res = await dash.serveApiStats();
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as ApiStatsJson;
     expect(body.parsed).toBe(3);
     expect(body.summary.total).toBe(3);
     expect(body.summary.ok2xx).toBe(2);

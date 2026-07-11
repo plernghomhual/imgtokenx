@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { toTrackEvent, JsonLogTracker, noopTracker, type TrackEvent } from '../src/core/tracker.js';
 import type { ProxyEvent } from '../src/core/proxy.js';
+import type { TransformInfo } from '../src/core/transform.js';
+
+const transformInfo = (overrides: Partial<TransformInfo>): TransformInfo => ({
+  compressed: false,
+  origChars: 0,
+  compressedChars: 0,
+  imageCount: 0,
+  imageBytes: 0,
+  staticChars: 0,
+  dynamicChars: 0,
+  dynamicBlockCount: 0,
+  ...overrides,
+});
 
 describe('toTrackEvent', () => {
   it('flattens ProxyEvent + TransformInfo + Usage into a single record', () => {
@@ -11,7 +24,7 @@ describe('toTrackEvent', () => {
       status: 200,
       durationMs: 1234,
       firstByteMs: 200,
-      info: {
+      info: transformInfo({
         compressed: true,
         origChars: 16000,
         imageCount: 1,
@@ -31,7 +44,7 @@ describe('toTrackEvent', () => {
           osVersion: 'Darwin 25.0.0',
           today: '2026-05-18',
         },
-      },
+      }),
       usage: {
         input_tokens: 42,
         output_tokens: 7,
@@ -118,8 +131,8 @@ describe('toTrackEvent', () => {
         cache_read_input_tokens: 0,
       },
     });
-    expect(out.cache_creation_5m_tokens).toBeUndefined();
-    expect(out.cache_creation_1h_tokens).toBeUndefined();
+    expect(out.cache_create_5m_tokens).toBeUndefined();
+    expect(out.cache_create_1h_tokens).toBeUndefined();
     expect(out.web_search_requests).toBeUndefined();
   });
 
@@ -134,7 +147,7 @@ describe('toTrackEvent', () => {
       path: '/v1/messages',
       status: 200,
       durationMs: 50,
-      info: {
+      info: transformInfo({
         compressed: true,
         origChars: 30000,
         bucketChars: {
@@ -145,7 +158,7 @@ describe('toTrackEvent', () => {
           history: 300,
         },
         historyTextChars: 300,
-      },
+      }),
     });
     expect(out.bucket_chars).toEqual({
       static_slab: 27000,
@@ -163,7 +176,7 @@ describe('toTrackEvent', () => {
       path: '/v1/messages',
       status: 200,
       durationMs: 50,
-      info: {
+      info: transformInfo({
         compressed: true,
         origChars: 30000,
         factSheetItems: 7,
@@ -177,7 +190,7 @@ describe('toTrackEvent', () => {
           lossless_exact: 1,
           not_profitable: 3,
         },
-      },
+      }),
     });
     expect(out.fact_sheet_items).toBe(7);
     expect(out.fact_sheet_chars).toBe(240);
@@ -203,7 +216,7 @@ describe('toTrackEvent', () => {
       path: '/v1/messages',
       status: 200,
       durationMs: 10,
-      info: { compressed: false, reason: 'compress=false', origChars: 0 },
+      info: transformInfo({ compressed: false, reason: 'compress=false', origChars: 0 }),
     });
     expect(noBuckets.bucket_chars).toBeUndefined();
     expect(noBuckets.history_text_chars).toBeUndefined();
@@ -213,7 +226,7 @@ describe('toTrackEvent', () => {
       path: '/v1/messages',
       status: 200,
       durationMs: 10,
-      info: { compressed: true, origChars: 100, bucketChars: {} },
+      info: transformInfo({ compressed: true, origChars: 100, bucketChars: {} }),
     });
     expect(emptyBucketMap.bucket_chars).toBeUndefined();
   });

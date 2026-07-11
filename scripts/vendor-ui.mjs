@@ -14,6 +14,7 @@ let out =
   '// htmx 2.0.4 (BSD-2) + Alpine.js 3.14.9 (MIT), inlined so the dashboard\n' +
   '// works offline and ships inside the single-file npm package.\n';
 for (const [name, url] of PINS) {
+  if (!name || !url) throw new Error('invalid vendor pin');
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   const js = await res.text();

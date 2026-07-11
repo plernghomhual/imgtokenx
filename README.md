@@ -90,6 +90,15 @@ normally — imgtokenx compresses the *request* only, never the model's output.
 Recent turns stay text; the system prompt, tool docs, and older bulk history
 are imaged.
 
+Operational defaults are deliberately local and bounded: the dashboard binds
+to loopback, request bodies are capped, every Anthropic request stays within
+the provider's 100-image limit, and exact-source/log files use private
+directories and files. If you bind `HOST` off loopback, set a random
+`IMGTOKENX_DASHBOARD_TOKEN` (32+ characters); off-host `/healthz` additionally
+requires `IMGTOKENX_HEALTHZ_TOKEN`. Worker deployments that supply provider API
+keys require `IMGTOKENX_WORKER_SECRET` and callers must send it in
+`x-imgtokenx-secret`. Set `MAX_REQUEST_BODY_BYTES` to lower the request cap.
+
 ## The honest part
 
 - **Images are lossy — so exactness guards are ON by default.** Exact
@@ -208,8 +217,8 @@ recoverable refs are off. Pure-JS runtime (Node and edge/Workers);
 ## Development
 
 ```bash
-pnpm install && pnpm test
-pnpm run build                # regenerates dist/
+pnpm install
+pnpm run check                # strict types, tests, build, restart/package/Worker smokes
 ```
 
 ## FAQ

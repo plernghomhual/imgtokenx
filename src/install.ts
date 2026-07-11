@@ -37,6 +37,11 @@ interface BuildPlanOptions {
 export interface InstallOptions extends BuildPlanOptions {
   dryRun?: boolean;
   skipMcp?: boolean;
+  /** Process runner override for deterministic embedders/tests. */
+  spawnSync?: (command: string, args: string[], options: {
+    encoding: 'utf8';
+    stdio: ['ignore', 'pipe', 'pipe'];
+  }) => { status: number | null; error?: Error; stderr?: string | Buffer | null; stdout?: string | Buffer | null };
 }
 
 export interface InstallResult {
@@ -396,7 +401,7 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
     const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
     const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
       actionLog.push([cmd, ...args].map(q).join(' '));
-      const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const r = (opts.spawnSync ?? spawnSync)(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
       // ENOENT = binary missing. Tolerated silently: install/uninstall
       // shouldn't fail loudly for operators without claude / codex / opencode
       // installed locally (audit D20: missing-CLI is benign, --skip-mcp is
@@ -420,9 +425,9 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
     runStep('launchctl', ['kickstart', '-k', `${domain}/${LAUNCHD_LABEL}`], { ignoreFailure: true });
     if (!opts.skipMcp) {
       runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], { ignoreFailure: true });
-      runStep('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], { ignoreFailure: true });
+      runStep('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
       runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME], { ignoreFailure: true });
-      runStep('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp'], { ignoreFailure: true });
+      runStep('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
       updateOpencodeConfig(plan, undo, true);
     }
   } catch (err) {
@@ -448,7 +453,7 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
   const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
   const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
     actionLog.push([cmd, ...args].map(q).join(' '));
-    const r = spawnSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const r = (opts.spawnSync ?? spawnSync)(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     // ENOENT = binary missing. Tolerated silently when the CLI simply isn't
     // installed (audit D20: missing-CLI is benign, --skip-mcp is the
     // explicit opt-out). Real exec failures still throw so rollback can

@@ -42,7 +42,7 @@ describe('D1 fail-open on transform error', () => {
     });
 
     const config: ProxyConfig = { upstream: 'https://api.anthropic.com', apiKey: 'k' };
-    const proxy = createProxy(config, () => {});
+    const proxy = createProxy(config);
     const restore = mockUpstream();
 
     const body = {
@@ -69,5 +69,28 @@ describe('D1 fail-open on transform error', () => {
     expect(transformFailureTelemetry.count).toBeGreaterThan(0);
     expect(transformFailureTelemetry.lastErrorClass).toBe('Error');
     expect(transformFailureTelemetry.lastErrorClass).not.toContain('boom');
+  });
+
+  it('contains and redacts rejected onRequest hooks', async () => {
+    const logged: unknown[][] = [];
+    const error = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    let background: Promise<unknown> | undefined;
+    const restore = mockUpstream();
+    const proxy = createProxy({
+      onRequest: () => { throw new TypeError('secret provider payload'); },
+      waitUntil: (p) => { background = p; },
+    });
+    const res = await proxy(new Request('https://p/v1/messages', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'unsupported', messages: [] }),
+    }));
+    await res.text();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await background;
+    restore();
+    console.error = error;
+    expect(String(logged[0]?.[0])).toContain('TypeError');
+    expect(JSON.stringify(logged)).not.toContain('secret provider payload');
   });
 });

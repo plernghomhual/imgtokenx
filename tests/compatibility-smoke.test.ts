@@ -149,7 +149,9 @@ describe('client compatibility smoke matrix', () => {
     const res = await createProxy(config)(
       new Request(url, {
         method: 'POST',
-        headers,
+        headers: Object.fromEntries(Object.entries(headers).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        )),
         body: JSON.stringify(body),
       }),
     );
@@ -241,7 +243,9 @@ describe('client compatibility smoke matrix', () => {
       const res = await createProxy(config)(
         new Request(url, {
           method: 'POST',
-          headers,
+          headers: Object.fromEntries(Object.entries(headers).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          )),
           body: JSON.stringify(body),
         }),
       );

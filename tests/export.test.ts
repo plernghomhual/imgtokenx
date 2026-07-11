@@ -502,7 +502,7 @@ describe('runExportCore integration', () => {
     expect(tr.factsheetItemCount).toBeGreaterThanOrEqual(0);
     expect(tr.factsheetDropped).toBeGreaterThanOrEqual(0);
     // Old field must not exist
-    expect((tr as Record<string, unknown>)['factsheetTokenCount']).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(tr, 'factsheetTokenCount')).toBe(false);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   transformRequest,
 } from '../src/core/transform.js';
 import type { Message } from '../src/core/types.js';
+import { collapseHistory } from '../src/core/history.js';
 
 const imageBlock = (data = 'AAAA'): Message => ({
   role: 'user',
@@ -152,5 +153,24 @@ describe('Audit #4 D4 — transformRequest end-to-end', () => {
       // remaining starts at 4; any image this request emits gets claimed.
       expect(info.imageBudget.total).toBe(100);
     }
+  });
+});
+
+describe('Audit #4 D4 — history shares the request budget', () => {
+  it('keeps history native when no image slots remain', async () => {
+    const messages: Message[] = Array.from({ length: 16 }, (_, i) => ({
+      role: i % 2 ? 'assistant' : 'user',
+      content: `turn ${i} ${'history '.repeat(200)}`,
+    }));
+    const result = await collapseHistory(messages, () => true, {
+      keepTail: 2,
+      minCollapsePrefix: 2,
+      collapseChunk: 0,
+      freezeChunk: 0,
+      maxImages: 0,
+    });
+    expect(result.messages).toBe(messages);
+    expect(result.info.collapsedImages).toBe(0);
+    expect(result.info.reason).toBe('too_many_images');
   });
 });

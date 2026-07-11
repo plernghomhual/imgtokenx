@@ -11,7 +11,8 @@ PORT_ON=47824          # imgtokenx      -> b.sh (right)
 PORT_OFF=47823         # passthrough -> a.sh (left, plain but logged)
 LOG_ON="$HOME/.imgtokenx/ab-on.jsonl"
 LOG_OFF="$HOME/.imgtokenx/ab-off.jsonl"
-DUMP_DIR="/tmp/ab-png"   # imgtokenx arm dumps every rendered PNG here for debug/inspection (wiped each run)
+STATE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/imgtokenx-ab.XXXXXX")
+DUMP_DIR="$STATE_DIR/png"
 # Model under test: defaults to Fable 5 — the production default, where Opus is
 # OFF. Pass a model as the first arg to ADD it to the proxy's compress scope:
 #   bash setup.sh           -> Fable only (Opus off, matches production)
@@ -31,19 +32,25 @@ esac
 # incoming base would no longer equal this entry and imgtokenx would quietly stop compressing.
 MODELS="claude-fable-5"; [ "$MODEL" = "claude-fable-5" ] || MODELS="claude-fable-5,$MODEL"
 
-kill_port() { local p; p=$(lsof -ti tcp:"$1" 2>/dev/null || true); [ -n "$p" ] && kill "$p" 2>/dev/null || true; }
+kill_port() {
+  local p cmd
+  p=$(lsof -ti tcp:"$1" 2>/dev/null || true)
+  [ -z "$p" ] && return
+  cmd=$(ps -p "$p" -o command= 2>/dev/null || true)
+  case "$cmd" in *imgtokenx*|*dist/node.js*) kill "$p" ;; *) echo "refusing to kill unrelated port owner on :$1: $cmd"; exit 1 ;; esac
+}
 
 echo "[1/4] kill old proxies ($PORT_ON, $PORT_OFF)"
 kill_port "$PORT_ON"; kill_port "$PORT_OFF"; sleep 1
 
 echo "[2/4] build"
-pnpm run build >/tmp/ab-build.log 2>&1 || { echo "  build FAILED -> /tmp/ab-build.log"; exit 1; }
+pnpm run build >"$STATE_DIR/build.log" 2>&1 || { echo "  build FAILED -> $STATE_DIR/build.log"; exit 1; }
 
 echo "[3/4] start proxies (background, fresh logs)"
 : >"$LOG_ON"; : >"$LOG_OFF"
 rm -rf "$DUMP_DIR"; mkdir -p "$DUMP_DIR"   # fresh PNG dump for the imgtokenx (compress) arm; the passthrough arm renders nothing
-IMGTOKENX_LOG="$LOG_ON"  PORT="$PORT_ON"  IMGTOKENX_MODELS="$MODELS" IMGTOKENX_DUMP_DIR="$DUMP_DIR" nohup node dist/node.js >/tmp/ab-on.log  2>&1 & disown
-IMGTOKENX_LOG="$LOG_OFF" PORT="$PORT_OFF" IMGTOKENX_MODELS="$MODELS" IMGTOKENX_DISABLE=1            nohup node dist/node.js >/tmp/ab-off.log 2>&1 & disown
+IMGTOKENX_LOG="$LOG_ON"  PORT="$PORT_ON"  IMGTOKENX_MODELS="$MODELS" IMGTOKENX_DUMP_DIR="$DUMP_DIR" nohup node dist/node.js >"$STATE_DIR/on.log"  2>&1 & disown
+IMGTOKENX_LOG="$LOG_OFF" PORT="$PORT_OFF" IMGTOKENX_MODELS="$MODELS" IMGTOKENX_DISABLE=1            nohup node dist/node.js >"$STATE_DIR/off.log" 2>&1 & disown
 sleep 2
 
 echo "[4/4] seed working copies"

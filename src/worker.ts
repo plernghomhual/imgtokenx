@@ -56,6 +56,7 @@ export interface Env {
    *  with 403 + a hint instead of leaking the build version.
    *    npx wrangler secret put IMGTOKENX_HEALTHZ_TOKEN */
   IMGTOKENX_HEALTHZ_TOKEN?: string;
+  MAX_REQUEST_BODY_BYTES?: string;
 }
 
 /** Compare SHA-256 digests instead of the raw strings so the comparison
@@ -145,6 +146,9 @@ export default {
       openAIApiKey: env.OPENAI_API_KEY,
       // D21 off-host /healthz secret. Falsy = off-host only returns 403.
       healthzToken: env.IMGTOKENX_HEALTHZ_TOKEN,
+      maxRequestBodyBytes: env.MAX_REQUEST_BODY_BYTES
+        && Number.isFinite(Number(env.MAX_REQUEST_BODY_BYTES))
+        ? Math.max(0, Number(env.MAX_REQUEST_BODY_BYTES)) : undefined,
       transform,
       onRequest: (e) => {
         // Terse human-readable line (separate from the JSON event below;

@@ -1269,6 +1269,10 @@ export class RequestImageCounter {
     return allowed;
   }
 
+  skip(requested: number): void {
+    if (requested > 0) this.skipped += requested;
+  }
+
   toInfo(): { total: number; existing: number; used: number; skipped: number } {
     return {
       total: this.total,
@@ -1612,6 +1616,7 @@ async function runHistoryCollapseAndFinalize(
   opts: TransformOptions,
   droppedCodepoints: Map<number, number>,
   renderStyle: RenderStyle,
+  imageBudget: RequestImageCounter,
 ): Promise<{ body: Uint8Array; info: TransformInfo; collapsed: boolean }> {
   let collapsedFlag = false;
   if (Array.isArray(req.messages) && req.messages.length > 0) {
@@ -1643,9 +1648,10 @@ async function runHistoryCollapseAndFinalize(
     const { messages: newMessages, info: histInfo } = await collapseHistory(
       req.messages,
       historyProfitable,
-      { cols: o.cols, protectedPrefix: 0, reflow: o.reflow, style: renderStyle },
+      { cols: o.cols, protectedPrefix: 0, reflow: o.reflow, style: renderStyle, maxImages: imageBudget.remaining() },
     );
     if (histInfo.collapsedTurns > 0) {
+      imageBudget.claim(histInfo.collapsedImages);
       req.messages = newMessages;
       info.collapsedTurns = histInfo.collapsedTurns;
       info.collapsedChars = histInfo.collapsedChars;
@@ -1679,6 +1685,7 @@ async function runHistoryCollapseAndFinalize(
       info.historyReason = histInfo.reason;
     }
   }
+  if (Number.isFinite(imageBudget.total)) info.imageBudget = imageBudget.toInfo();
   info.outgoingTextChars = countOutgoingTextChars(req);
   const outBody = new TextEncoder().encode(JSON.stringify(req));
   return { body: outBody, info, collapsed: collapsedFlag };
@@ -1905,7 +1912,7 @@ export async function transformRequest(
 
   if (shouldKeepLosslessExact(info, o, combinedRaw)) {
     info.reason = 'lossless_exact';
-    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle);
+    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle, imageBudget);
     if (finalized.collapsed) {
       info.compressed = true;
       return { body: finalized.body, info };
@@ -1921,7 +1928,7 @@ export async function transformRequest(
     // If history collapses, we flip `info.compressed = true` and let the
     // library wrapper return reason='applied'; otherwise this still
     // populates `outgoingTextChars` for the regression denominator.
-    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle);
+    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle, imageBudget);
     if (finalized.collapsed) {
       info.compressed = true;
       return { body: finalized.body, info };
@@ -1998,7 +2005,7 @@ export async function transformRequest(
     info.reason = `not_profitable (slab=${combined.length} chars)`;
     bumpPassthrough(info, 'not_profitable');
     // Slab not profitable but history may still be collapsable — try before returning.
-    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle);
+    const finalized = await runHistoryCollapseAndFinalize(req, info, o, opts, droppedCodepoints, renderStyle, imageBudget);
     if (finalized.collapsed) {
       info.compressed = true;
       return { body: finalized.body, info };
@@ -2152,6 +2159,12 @@ export async function transformRequest(
           }
           const { blocks: imgs, pngs: rawPngs, dims: rawDims, droppedChars, droppedCodepoints: dcp, pixels } =
             await textToImageBlocks(reminderText, o.cols, numCols, true, renderStyle);
+          if (imgs.length > imageBudget.remaining()) {
+            imageBudget.skip(imgs.length);
+            processedExisting.push(blk);
+            continue;
+          }
+          imageBudget.claim(imgs.length);
           (info.imagePngs ??= []).push(...rawPngs);
           (info.imageDims ??= []).push(...rawDims);
           const srcCacheControl = (blk as { cache_control?: unknown }).cache_control;
@@ -2259,6 +2272,7 @@ export async function transformRequest(
                 }
                 const { blocks: imgs, pngs: rawPngs, dims: rawDims, droppedChars, droppedCodepoints: dcp, pixels } =
                   await textToImageBlocks(paged.text, o.cols, numCols, true, renderStyle);
+                imageBudget.claim(imgs.length);
                 (info.imagePngs ??= []).push(...rawPngs);
                 (info.imageDims ??= []).push(...rawDims);
                 for (const img of imgs) info.imageBytes += approxBlockBytes(img);
@@ -2326,13 +2340,19 @@ export async function transformRequest(
                   newInner.push(ib as TextBlock | ImageBlock);
                   continue;
                 }
-                const paged = truncateForBudget(innerTextR, o.maxImagesPerToolResult, denseGeo.cols, numCols, denseGeo.maxChars);
+                const remaining = imageBudget.remaining();
+                if (remaining === 0) {
+                  newInner.push(ib as TextBlock | ImageBlock);
+                  continue;
+                }
+                const paged = truncateForBudget(innerTextR, Math.min(o.maxImagesPerToolResult, remaining), denseGeo.cols, numCols, denseGeo.maxChars);
                 if (paged.truncated) {
                   info.truncatedToolResults = (info.truncatedToolResults ?? 0) + 1;
                   info.omittedChars = (info.omittedChars ?? 0) + paged.omittedChars;
                 }
                 const { blocks: imgs, pngs: rawPngs, dims: rawDims, droppedChars, droppedCodepoints: dcp, pixels } =
                   await textToImageBlocks(paged.text, o.cols, numCols, true, renderStyle);
+                imageBudget.claim(imgs.length);
                 (info.imagePngs ??= []).push(...rawPngs);
                 (info.imageDims ??= []).push(...rawDims);
                 const srcCacheControl = (ib as { cache_control?: unknown }).cache_control;
@@ -2410,9 +2430,10 @@ export async function transformRequest(
     const { messages: newMessages, info: histInfo } = await collapseHistory(
       req.messages,
       historyProfitable,
-      { cols: o.cols, protectedPrefix: slabAnchorIdx >= 0 ? slabAnchorIdx + 1 : 0, reflow: o.reflow, style: renderStyle },
+      { cols: o.cols, protectedPrefix: slabAnchorIdx >= 0 ? slabAnchorIdx + 1 : 0, reflow: o.reflow, style: renderStyle, maxImages: imageBudget.remaining() },
     );
     if (histInfo.collapsedTurns > 0) {
+      imageBudget.claim(histInfo.collapsedImages);
       req.messages = newMessages;
       info.collapsedTurns = histInfo.collapsedTurns;
       info.collapsedChars = histInfo.collapsedChars;

@@ -151,8 +151,26 @@ export class BodyTooLargeError extends Error {
  *  caller's own content-length check. Throws `BodyTooLargeError` past the cap. */
 async function readBodyWithLimit(req: Request, max?: number): Promise<Uint8Array> {
   if (max === undefined) return new Uint8Array(await req.arrayBuffer());
-  const full = new Uint8Array(await req.arrayBuffer());
-  if (full.byteLength > max) throw new BodyTooLargeError(full.byteLength, max);
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > max) {
+      await reader.cancel().catch(() => {});
+      throw new BodyTooLargeError(bytes, max);
+    }
+    chunks.push(value);
+  }
+  const full = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    full.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return full;
 }
 
@@ -196,7 +214,7 @@ function processSseEvent(
   // Parse `event:` + `data:` lines; continuation data: lines concatenate per SSE spec.
   let event = '';
   let data = '';
-  for (const line of block.split('\n')) {
+  for (const line of block.split(/\r\n|\r|\n/)) {
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) data += line.slice(5).replace(/^\s/, '');
   }
@@ -385,7 +403,7 @@ function readStopReasonFromJson(j: unknown): string | undefined {
  * Streams are scanned to EOF (final output_tokens is in message_delta; redacted_thinking
  * blocks can appear anywhere). 4xx bodies are capped at ERROR_BODY_MAX. 5xx is skipped.
  */
-function teeForUsage(res: Response): {
+function teeForUsage(res: Response, signal?: AbortSignal): {
   response: Response;
   usagePromise: Promise<Usage | undefined>;
   errorBodyPromise: Promise<string | undefined>;
@@ -409,6 +427,9 @@ function teeForUsage(res: Response): {
     const [forClient, forUs] = res.body.tee();
     const errorBodyPromise = (async (): Promise<string | undefined> => {
       const reader = forUs.getReader();
+      const abort = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
       const decoder = new TextDecoder();
       let out = '';
       try {
@@ -430,6 +451,7 @@ function teeForUsage(res: Response): {
       // Authorization values, leaked keys, or PII in 4xx bodies — scrub
       // before persisting to JSONL or logging to stderr.
       const capped = out.length > ERROR_BODY_MAX ? out.slice(0, ERROR_BODY_MAX) : out;
+      signal?.removeEventListener('abort', abort);
       return redactErrorBody(capped);
     })();
       return {
@@ -458,6 +480,10 @@ function teeForUsage(res: Response): {
     }
   const ct = (res.headers.get('content-type') ?? '').toLowerCase();
   const [forClient, forUs] = res.body.tee();
+  const scanReader = forUs.getReader();
+  const abortScan = () => { void scanReader.cancel(signal?.reason).catch(() => {}); };
+  if (signal?.aborted) abortScan();
+  else signal?.addEventListener('abort', abortScan, { once: true });
 
   // Single read loop resolves all three; exposed as separate promises for call-site readability.
   const scanResult = (async (): Promise<{
@@ -466,7 +492,7 @@ function teeForUsage(res: Response): {
     stopReason: string | undefined;
     truncated: boolean;
   }> => {
-    const reader = forUs.getReader();
+    const reader = scanReader;
     const decoder = new TextDecoder();
     let buf = '';
 
@@ -487,15 +513,10 @@ function teeForUsage(res: Response): {
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
-          // SSE events are terminated by a blank line. Normalize CRLF→LF so
-          // usage/output/stop-reason measurement works on either line ending
-          // (audit finding D12) — a raw `\r\n\r\n` stream would otherwise
-          // never split and silently lose the metrics.
-          buf = buf.replace(/\r\n/g, '\n');
-          let evEnd: number;
-          while ((evEnd = buf.indexOf('\n\n')) >= 0) {
-            const block = buf.slice(0, evEnd);
-            buf = buf.slice(evEnd + 2);
+          let match: RegExpExecArray | null;
+          while ((match = /\r\n\r\n|\n\n|\r\r/.exec(buf))) {
+            const block = buf.slice(0, match.index);
+            buf = buf.slice(match.index + match[0].length);
             processSseEvent(block, m, state);
           }
         }
@@ -508,10 +529,13 @@ function teeForUsage(res: Response): {
         // Buffer fully, capped at 4 MiB (audit D13: cap + drain oversized bodies).
         const MAX = 4 * 1024 * 1024;
         let done = false;
-        while (buf.length < MAX) {
+        let bytes = 0;
+        while (bytes < MAX) {
           const r = await reader.read();
           if (r.done) { done = true; break; }
-          buf += decoder.decode(r.value, { stream: true });
+          const remaining = MAX - bytes;
+          buf += decoder.decode(r.value.subarray(0, remaining), { stream: true });
+          bytes += r.value.byteLength;
         }
         const truncated = !done;
         if (truncated) {
@@ -552,7 +576,7 @@ function teeForUsage(res: Response): {
       /* ignore */
     }
     return { usage: undefined, measurement: undefined, stopReason: undefined, truncated: false };
-  })();
+  })().finally(() => signal?.removeEventListener('abort', abortScan));
 
   return {
     response: new Response(forClient, {
@@ -916,7 +940,9 @@ export function createProxy(config: ProxyConfig = {}) {
             stopReason,
           });
         } catch (hookErr) {
-          console.error('[imgtokenx] onRequest hook failed:', hookErr);
+          const cls = hookErr instanceof Error && hookErr.constructor?.name
+            ? hookErr.constructor.name : 'Error';
+          console.error(`[imgtokenx] onRequest hook failed (${cls})`);
         }
       };
       // D10: keep the post-processing alive on hosts that cancel work
@@ -1087,11 +1113,23 @@ export function createProxy(config: ProxyConfig = {}) {
         reqBodySha8 = await sha8Bytes(bodyIn);
       }
     } else {
-      bodyOut = req.body; // pass through unchanged
+      try {
+        bodyOut = config.maxRequestBodyBytes === undefined
+          ? req.body
+          : await readBodyWithLimit(req, config.maxRequestBodyBytes) as unknown as BodyInit;
+      } catch (e) {
+        if (!(e instanceof BodyTooLargeError)) throw e;
+        fire(413, undefined, 'request_entity_too_large');
+        return new Response(
+          JSON.stringify({ error: 'request entity too large', limit: config.maxRequestBodyBytes }),
+          { status: 413, headers: { 'content-type': 'application/json' } },
+        );
+      }
     }
 
     const outHeaders = filterHeaders(req.headers, STRIP_REQ_HEADERS);
     if (isOpenAIPath) {
+      outHeaders.delete('x-api-key');
       if (config.openAIApiKey) outHeaders.set('authorization', `Bearer ${config.openAIApiKey}`);
     } else if (config.apiKey && (!providerPrefixed || url.pathname.startsWith('/anthropic/'))) {
       outHeaders.set('x-api-key', config.apiKey);
@@ -1162,7 +1200,7 @@ export function createProxy(config: ProxyConfig = {}) {
 
     // Tee: client gets one side; scanner reads the other for usage/measurement/error body.
     const { response: teed, usagePromise, errorBodyPromise, measurementPromise, stopReasonPromise, truncatedPromise } =
-      teeForUsage(upstreamRes);
+      teeForUsage(upstreamRes, callerSignal);
 
     // Fire event in background once all five resolve (all share the same stream read).
     void Promise.all([
