@@ -647,6 +647,8 @@ export interface TransformInfo {
     readonly site: 'slab';
     readonly imageTokens: number;
     readonly textTokens: number;
+    /** Verbatim fact-sheet sidecar tokens priced into the image side (audit D5). */
+    readonly sidecarTextTokens?: number;
     /** `priorWarmTokens × (CC − CR)` added to image side. */
     readonly burnImageSide: number;
     /** `priorWarmImageTokens × (CC − CR)` added to text side (anti-flapping anchor). */

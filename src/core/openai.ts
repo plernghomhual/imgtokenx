@@ -491,12 +491,16 @@ function droppedCodepointsTop(droppedCodepoints: Map<number, number>): Record<st
   return out;
 }
 
-/** Shared gate: compute image vs text token cost and decide profitability. */
-function evalOpenAIGate(
+/** Shared gate: compute image vs text token cost and decide profitability.
+ *  `extraTextTokens` is sidecar text (e.g. the verbatim fact-sheet) that is always
+ *  added alongside the images — D5 prices it into the image side so a slab that is
+ *  profitable on its own is NOT imaged when the sidecar tips it back to text. */
+export function evalOpenAIGate(
   model: string,
   renderedText: string,
   cols: number,
   charsPerToken: number,
+  extraTextTokens = 0,
 ): { imageTokens: number; textTokens: number; profitable: boolean } {
   const profile = resolveGptProfile(model);
   const cellW = renderCellWidth(profile.style);
@@ -516,7 +520,7 @@ function evalOpenAIGate(
   );
   const imageTokens = estImages * visionTokensForModel(model, stripW, profile.maxHeightPx);
   const textTokens = renderedText.length / charsPerToken;
-  return { imageTokens, textTokens, profitable: imageTokens < textTokens };
+  return { imageTokens, textTokens, profitable: imageTokens + extraTextTokens < textTokens };
 }
 
 /** Shared image-part accumulation from rendered PNGs. */
@@ -719,11 +723,17 @@ export async function transformOpenAIChatCompletions(
     profile.stripCols,
   );
 
-  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken);
+  // D5: the verbatim fact-sheet sidecar is always added alongside the images, so
+  // price its token cost into the gate BEFORE rendering. If the sidecar tips the
+  // slab back to text, keep the exact native text (no imaging).
+  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+  const slabFsTokens = slabFactSheet.length / o.charsPerToken;
+  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
   info.gateEval = {
     site: 'slab',
     imageTokens: gate.imageTokens,
     textTokens: gate.textTokens,
+    sidecarTextTokens: slabFsTokens,
     burnImageSide: 0,
     burnTextSide: 0,
     profitable: gate.profitable,
@@ -764,7 +774,6 @@ export async function transformOpenAIChatCompletions(
   // Verbatim fact-sheet: precision-critical tokens (paths, ids, versions, flags)
   // pulled from the pre-image text so exact strings survive OCR loss. Deterministic
   // → stays inside the cached prefix. See src/core/factsheet.ts.
-  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
   recordFactSheetTelemetry(info, slabFactSheet);
   const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
     kind: 'static_slab',
@@ -960,11 +969,17 @@ export async function transformOpenAIResponses(
     profile.stripCols,
   );
 
-  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken);
+  // D5: the verbatim fact-sheet sidecar is always added alongside the images, so
+  // price its token cost into the gate BEFORE rendering. If the sidecar tips the
+  // slab back to text, keep the exact native text (no imaging).
+  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+  const slabFsTokens = slabFactSheet.length / o.charsPerToken;
+  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
   info.gateEval = {
     site: 'slab',
     imageTokens: gate.imageTokens,
     textTokens: gate.textTokens,
+    sidecarTextTokens: slabFsTokens,
     burnImageSide: 0,
     burnTextSide: 0,
     profitable: gate.profitable,
@@ -1003,7 +1018,6 @@ export async function transformOpenAIResponses(
   const imagePartsResp: ResponsesInputImagePart[] = images.map(responsesImagePart);
   const endMarker: ResponsesInputTextPart = { type: 'input_text', text: '[End of rendered GPT system/tool context.]' };
   // Verbatim fact-sheet (see src/core/factsheet.ts): exact tokens that survive OCR loss.
-  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
   recordFactSheetTelemetry(info, slabFactSheet);
   const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
     kind: 'static_slab',

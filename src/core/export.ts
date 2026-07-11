@@ -22,6 +22,7 @@ import { estimateImageCount, REPORT_CHARS_PER_TOKEN } from './transform.js';
 import { visionTokensForModel } from './openai.js';
 import {
   factSheetTextFromEntries,
+  factSheetTextComplete,
   extractFactSheetTokensAllPages,
   extractFactSheetEntriesAllPages,
 } from './factsheet.js';
@@ -261,6 +262,9 @@ export function exportImageTokens(model: string, width: number, height: number):
 export interface ExportTokenReport {
   textTokens: number;
   imageTokens: number;
+  /** Verbatim fact-sheet sidecar tokens added to the imaged prompt (audit D16).
+   *  Always priced into `imageTokens` so reported savings are not overstated. */
+  sidecarTokens: number;
   percentSaved: number;
   /** Count of unique identifier strings extracted across all pages (paths, SHAs, ids, …).
    *  This is a count of items, not an LLM token count. */
@@ -293,7 +297,12 @@ export function computeTokenReport(
   const stripW = 2 * PAD_X + cols * CELL_W;
   const estImages = estimateImageCount(sourceText, cols, 1, DENSE_CONTENT_CHARS_PER_IMAGE);
   const perStrip = exportImageTokens(model, stripW, MAX_HEIGHT_PX);
-  const imageTokens = Math.round(estImages * perStrip);
+  // Audit D16: the verbatim fact-sheet is always appended to the imaged prompt, so
+  // its token cost belongs on the image side of the savings ledger — otherwise the
+  // report overstates savings by the size of the sidecar.
+  const fsText = factSheetTextComplete(sourceText, DENSE_CONTENT_CHARS_PER_IMAGE);
+  const sidecarTokens = Math.round(fsText.length / REPORT_CHARS_PER_TOKEN);
+  const imageTokens = Math.round(estImages * perStrip) + sidecarTokens;
   const textTokens = Math.round(sourceText.length / REPORT_CHARS_PER_TOKEN);
   const percentSaved =
     textTokens > 0
@@ -303,6 +312,7 @@ export function computeTokenReport(
   return {
     textTokens,
     imageTokens,
+    sidecarTokens,
     percentSaved,
     factsheetItemCount: kept.length,
     factsheetDropped: dropped,
@@ -448,9 +458,14 @@ export async function runExportCore(
     DENSE_CONTENT_CHARS_PER_IMAGE,
   );
   const fsText = factSheetTextFromEntries(fsKept);
+  // Audit D16: price the verbatim fact-sheet sidecar into the real export ledger too,
+  // so the reported savings match the estimate and are not overstated.
+  const sidecarTokens = Math.round(fsText.length / REPORT_CHARS_PER_TOKEN);
+  imageTokens = imageTokens + sidecarTokens;
   const tokenReport: ExportTokenReport = {
     textTokens,
     imageTokens,
+    sidecarTokens,
     percentSaved,
     factsheetItemCount: fsKept.length,
     factsheetDropped: fsDropped,

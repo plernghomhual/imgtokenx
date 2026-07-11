@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { isImgtokenxSupportedGptModel } from '../src/core/applicability.js';
 import {
+  evalOpenAIGate,
   isClaudeModel,
   openAIVisionTokens,
   resolveVisionCost,
@@ -922,5 +923,29 @@ describe('GPT 5.6 Sol render profile', () => {
       if (previous === undefined) delete process.env.IMGTOKENX_GPT_PROFILES;
       else process.env.IMGTOKENX_GPT_PROFILES = previous;
     }
+  });
+});
+
+describe('D5 factsheet sidecar priced into the GPT gate', () => {
+  // A slab that is profitable as an image on its own must become unprofitable once
+  // the verbatim fact-sheet sidecar is added — imaging then keeps the exact native
+  // text instead of rendering. We verify the gate's property directly (no hard-coded
+  // profitability of any specific text).
+  const model = 'gpt-5.6';
+  const text = 'const value = computeHash(input);\n'.repeat(800); // dense code, clearly profitable
+
+  it('gate flips to unprofitable once the sidecar tips image cost over text cost', () => {
+    const base = evalOpenAIGate(model, text, 312, 1, 0);
+    expect(base.profitable).toBe(true);
+    // A sidecar just past the image↔text gap must flip the decision.
+    const flip = base.textTokens - base.imageTokens + 1;
+    const flipped = evalOpenAIGate(model, text, 312, 1, flip);
+    expect(flipped.profitable).toBe(false);
+  });
+
+  it('a small sidecar that does not cross the gap keeps the slab profitable', () => {
+    const base = evalOpenAIGate(model, text, 312, 1, 0);
+    const safe = Math.max(0, base.textTokens - base.imageTokens - 5);
+    expect(evalOpenAIGate(model, text, 312, 1, safe).profitable).toBe(true);
   });
 });

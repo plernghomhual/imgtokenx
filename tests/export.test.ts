@@ -283,6 +283,17 @@ describe('computeTokenReport', () => {
     const report = computeTokenReport('hello world const x = 1;', DEFAULT_EXPORT_COLS, DEFAULT_EXPORT_MODEL);
     expect(report.factsheetDropped).toBe(0);
   });
+
+  it('D16 prices the verbatim factsheet sidecar into imageTokens (no overstated savings)', () => {
+    const rich = 'deploy to https://example.com/a/b/c and git rev-parse HEAD for sha '.repeat(60);
+    const report = computeTokenReport(rich, DEFAULT_EXPORT_COLS, DEFAULT_EXPORT_MODEL);
+    expect(report.sidecarTokens).toBeGreaterThan(0);
+    // The sidecar is always part of the imaged cost: imageTokens >= sidecarTokens.
+    expect(report.imageTokens).toBeGreaterThanOrEqual(report.sidecarTokens);
+    // An identifier-free slab yields ~0 sidecar; the identifier-rich one must have a real one.
+    const bland = computeTokenReport(' '.repeat(37000), DEFAULT_EXPORT_COLS, DEFAULT_EXPORT_MODEL);
+    expect(report.sidecarTokens).toBeGreaterThan(bland.sidecarTokens);
+  });
 });
 
 // ---------------------------------------------------------------------------
