@@ -546,13 +546,13 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 
 ## Core correctness and data integrity
 
-- [ ] 1. Make optional body transforms fail open after upstream response validation, with bounded/redacted telemetry.
+- [x] 1. Make optional body transforms fail open after upstream response validation, with bounded/redacted telemetry.
 - [ ] 2. Finalize GPT history collapse independently of static-slab profitability and early returns.
 - [ ] 3. Preserve unsupported/unknown history content as opaque ordering barriers.
 - [ ] 4. Enforce one request-wide Anthropic 100-image budget across native content, slabs, results, reminders, and history.
 - [ ] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
-- [ ] 6. Add the documented `losslessExact` option to the public TypeScript API.
-- [ ] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
+- [x] 6. Add the documented `losslessExact` option to the public TypeScript API.
+- [x] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
 - [ ] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
 - [ ] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
 - [ ] 10. Thread render size limits through multi-column public rendering paths.
@@ -638,3 +638,17 @@ Committed on `main` (no push per scope). Remaining 29 items below are NOT yet im
 ### Notes / risks
 - D4 (request-wide image budget) and D2/D3 (history collapse independence) require non-trivial threading through `transform.ts`/`history.ts`; deliberately not rushed to avoid regressions.
 - E2/E3/E4 (body limit, abort/timeout, host auth) are security-relevant and partially landed via earlier passes (origin guard, healthz); the remaining hardening is scoped above.
+
+## Final Review - 2026-07-10 (audit batch 2 — 3 of 40 items)
+
+Status: 3 items implemented + regression-tested; tsc clean; full suite 759 passed (was 757); build green (0.8.0). To be committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #6 D6 expose `losslessExact` in the public TypeScript API (`src/core/library.ts` `ImgtokenxOptions` Pick adds `losslessExact`; threaded through `transformRequest` unchanged).
+- [x] #7 D7 apply the reader-profile model-safety gate to the public GPT SDK transformers (`transformOpenAIChatCompletions` + `transformOpenAIResponses`, `src/core/openai.ts`): out-of-profile/unknown GPT models (e.g. `gpt-5.6-sol`, `gpt-5.9`) now return a byte-identical `reader_profile_unsafe` passthrough — consistent with the proxy's own `resolveReaderProfile(model).safeToImage` check. Scope/allowlist (`IMGTOKENX_MODELS`) stays a proxy/operator concern, not a library primitive.
+- [x] #1 D1 optional request transforms fail open (`src/core/proxy.ts`): the transform `try` now forwards the ORIGINAL body (200) on any error instead of 502, and records bounded/redacted telemetry (`transformFailureTelemetry` export: error constructor name only, never the message). New `tests/proxy-failopen.test.ts` proves it.
+
+### Notes / risks
+- D7 deliberately gates on READER-PROFILE safety (the "model-safety" the proxy enforces), not the operator `IMGTOKENX_MODELS` scope. Gate by scope would have forced 22 public-API transform tests to set env and subverted the library's "caller opted in" contract. `gpt-5.6-sol` is text-only by reader-profile policy, so the old test that asserted it rendered an image was asserting unsafe behavior; updated to assert the passthrough.
+- D1's fail-open path forwards the original request bytes; callers relying on `info.compressed`/`reason` telemetry should still distinguish (the passthrough keeps `reason` undefined vs a successful transform).
+

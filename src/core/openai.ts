@@ -47,6 +47,7 @@ import {
 } from './openai-history.js';
 import { HISTORY_SYNTHETIC_INTRO, HISTORY_SYNTHETIC_OUTRO } from './history.js';
 import { factSheetTextComplete } from './factsheet.js';
+import { resolveReaderProfile } from './reader-profiles.js';
 import { countTokens as o200kCountTokens } from 'gpt-tokenizer/encoding/o200k_base';
 
 // Per-model GPT rendering + vision-cost profiles (portrait-strip width, image-token
@@ -654,6 +655,15 @@ export async function transformOpenAIChatCompletions(
     return { body, info };
   }
 
+  // Model-safety gate (mirrors the proxy): only image a GPT model whose reader
+  // profile permits it. Uncalibrated/unknown models default to a safe `false`
+  // (reader-profiles.ts), so this is a true passthrough — imgtokenx never renders
+  // image blocks for a model it can't safely image.
+  if (!resolveReaderProfile(req.model ?? null).safeToImage) {
+    info.reason = 'reader_profile_unsafe';
+    return { body, info };
+  }
+
   const firstUserIdx = req.messages.findIndex((m) => m.role === 'user');
   if (firstUserIdx < 0) {
     info.reason = 'no_user_message';
@@ -858,6 +868,14 @@ export async function transformOpenAIResponses(
     req = JSON.parse(new TextDecoder().decode(body));
   } catch (e) {
     info.reason = `parse_error: ${(e as Error).message}`;
+    return { body, info };
+  }
+
+  // Model-safety gate (mirrors the proxy): only image a GPT model whose reader
+  // profile permits it. Uncalibrated/unknown models default to safe (false) in
+  // reader-profiles.ts, so this is a true passthrough.
+  if (!resolveReaderProfile(req.model).safeToImage) {
+    info.reason = 'reader_profile_unsafe';
     return { body, info };
   }
 

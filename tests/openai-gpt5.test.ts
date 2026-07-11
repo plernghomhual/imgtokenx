@@ -886,15 +886,18 @@ describe('GPT 5.6 Sol render profile', () => {
     }
   });
 
-  it('renders Sol below the OpenAI 768px short-side resize floor', async () => {
+  it('keeps gpt-5.6-sol text-only (reader-profile gate, audit D7)', async () => {
     const body = enc.encode(JSON.stringify({
       model: 'gpt-5.6-sol',
       instructions: BIG_INSTRUCTIONS,
       input: [{ role: 'user', content: 'hello' }],
     }));
     const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
-    expect(result.info.compressed).toBe(true);
-    expect(result.info.firstImageWidth).toBe(764);
+    // reader-profiles.ts marks gpt-5.6-sol text-only until its raw-image profile
+    // clears the exact-recall bar — the public transformer must honor that gate
+    // (same as the proxy), so this is a true passthrough with no injected images.
+    expect(result.info.compressed).toBe(false);
+    expect(result.info.reason).toBe('reader_profile_unsafe');
   });
 
   it('merges IMGTOKENX_GPT_PROFILES style overrides with the Sol defaults', () => {

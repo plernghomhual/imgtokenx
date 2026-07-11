@@ -90,6 +90,21 @@ function readModelField(body: Uint8Array): string | null {
   }
 }
 
+/** Bounded/redacted telemetry for optional request-transform failures (audit D1).
+ *  Compression is optional, so a transform error fails open (original body is
+ *  forwarded). We keep only a count and the last error constructor name — never
+ *  the message, which can contain request text. Exposed for host dashboards. */
+export const transformFailureTelemetry = {
+  get count(): number {
+    return transformFailureCount;
+  },
+  get lastErrorClass(): string | undefined {
+    return transformFailureLastClass;
+  },
+};
+let transformFailureCount = 0;
+let transformFailureLastClass: string | undefined;
+
 /** Gzip via CompressionStream — available in Node 18+ and Cloudflare Workers. */
 async function gzipBytes(body: Uint8Array): Promise<Uint8Array> {
   // Cast: TS doesn't model Response(Uint8Array) even though it works in both runtimes.
@@ -819,6 +834,8 @@ export function createProxy(config: ProxyConfig = {}) {
     if (isMessages || isOpenAIChat || isOpenAIResponses) {
       const bodyIn = new Uint8Array(await req.arrayBuffer());
       try {
+        // bodyIn is captured above (before the try) so the fail-open catch can
+        // forward the original request even if the transform itself throws.
         const transformOpts =
           typeof config.transform === 'function' ? config.transform() : config.transform;
         // Fail-closed: unreadable model → no compression, not a risky guess.
@@ -888,11 +905,19 @@ export function createProxy(config: ProxyConfig = {}) {
           }
         }
       } catch (e) {
-        fire(502, undefined, `transform_error: ${(e as Error).message}`);
-        return new Response(JSON.stringify({ error: 'imgtokenx transform failed' }), {
-          status: 502,
-          headers: { 'content-type': 'application/json' },
-        });
+        // Fail-open (audit D1): compression is OPTIONAL, so a transform error must
+        // never block the request. Forward the ORIGINAL body untouched and record
+        // bounded/redacted telemetry — the error's constructor name only (the message
+        // can contain request text, so it is deliberately dropped), never the stack.
+        const cls = e instanceof Error && e.constructor?.name ? e.constructor.name : 'Error';
+        transformFailureCount += 1;
+        transformFailureLastClass = cls;
+        if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+          console.warn(`[imgtokenx] request transform failed; failing open (${cls})`);
+        }
+        bodyOut = bodyIn as unknown as BodyInit;
+        reqBodyBytes = bodyIn;
+        reqBodySha8 = await sha8Bytes(bodyIn);
       }
     } else {
       bodyOut = req.body; // pass through unchanged

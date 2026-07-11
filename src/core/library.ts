@@ -28,7 +28,11 @@ export type BytesLike = Uint8Array | ArrayBuffer | ArrayBufferView;
 export interface ImgtokenxOptions
   extends Pick<
     TransformOptions,
-    'charsPerToken' | 'historyAmortizationHorizon' | 'keepSharp' | 'emitRecoverable'
+    | 'charsPerToken'
+    | 'historyAmortizationHorizon'
+    | 'keepSharp'
+    | 'emitRecoverable'
+    | 'losslessExact'
   > {
   /** Test/debug-only bypass. Product hosts should prefer their dashboard setting. */
   readonly compress?: boolean;

@@ -295,9 +295,10 @@ describe('public library API', () => {
     expect(transformed.cache.markerCount).toBe(0);
   });
 
-  it('transforms GPT 5.5 chat completions using OpenAI image_url blocks', async () => {
+  it('transforms GPT 5.6 chat completions using OpenAI image_url blocks', async () => {
+    // gpt-5.6 is in the reader-profile allowlist, so the public transformer images it.
     const body = enc.encode(JSON.stringify({
-      model: 'gpt-5.5',
+      model: 'gpt-5.6',
       messages: [
         { role: 'system', content: 'System instruction. '.repeat(700) },
         { role: 'developer', content: 'Developer instruction. '.repeat(400) },
@@ -336,5 +337,22 @@ describe('public library API', () => {
     expect(out.tools[0].function.parameters.description).toBeUndefined();
     expect(out.tools[0].function.parameters.properties.path.description).toBeUndefined();
     expect(JSON.stringify(out)).not.toContain('cache_control');
+  });
+
+  it('gates GPT transformers on reader-profile safety — uncalibrated model is a true passthrough', async () => {
+    // gpt-5.9 has no reader profile → resolves to the safe default (safeToImage false),
+    // so it must NOT be imaged. The proxy applies the same gate; the public SDK
+    // transformers now do too (audit D7).
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.9',
+      messages: [
+        { role: 'system', content: 'System instruction. '.repeat(700) },
+        { role: 'user', content: 'hello' },
+      ],
+    }));
+    const r = await transformOpenAIChatCompletions(body, { charsPerToken: 1, minCompressChars: 1 });
+    expect(r.info.compressed).toBe(false);
+    expect(r.info.reason).toBe('reader_profile_unsafe');
+    expect(r.body).toBe(body); // byte-identical passthrough, no injected image blocks
   });
 });
