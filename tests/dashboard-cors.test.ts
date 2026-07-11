@@ -82,4 +82,42 @@ describe('dashboard GET origin guard', () => {
     );
     expect(res?.status).toBe(403);
   });
+
+  it('D18 returns 405 + Allow for wrong-method dashboard route (not proxy passthrough)', async () => {
+    // POST to a GET-only route must NOT fall through to the proxy; it must
+    // answer 405 with an Allow header.
+    const res = await dispatchDashboard(
+      dash,
+      dashboardPath('/proxy-stats')!,
+      fakeReq('POST', {}) as never,
+      new URL(`${ORIGIN}/proxy-stats`),
+      47821,
+    );
+    expect(res?.status).toBe(405);
+    expect(res?.headers.get('allow')).toBe('GET');
+  });
+
+  it('D18 allows POST with correct method to /api/compression', async () => {
+    const res = await dispatchDashboard(
+      dash,
+      dashboardPath('/api/compression')!,
+      fakeReq('GET', {}) as never,
+      new URL(`${ORIGIN}/api/compression`),
+      47821,
+    );
+    expect(res?.status).toBe(405);
+    expect(res?.headers.get('allow')).toBe('POST');
+  });
+
+  it('E5 sets no-store on served dashboard responses', async () => {
+    const res = await dispatchDashboard(
+      dash,
+      dashboardPath('/proxy-stats')!,
+      fakeReq('GET', {}) as never,
+      new URL(`${ORIGIN}/proxy-stats`),
+      47821,
+    );
+    expect(res).toBeDefined();
+    expect(res?.headers.get('cache-control')).toBe('no-store');
+  });
 });

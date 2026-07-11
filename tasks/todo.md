@@ -539,3 +539,102 @@ Verification:
 Remaining risks / notes:
 - Daemon deliberately NOT restarted (user has the tool switched off). dist rebuilt, so the next start serves the calibrated profiles.
 - 20x32 is the coarsest calibrated cell — savings on Sonnet/Haiku are real but smaller than Fable's 5x8; profitability gate still decides per request.
+
+# Comprehensive Pre-production Remediation - 2026-07-10
+
+Approved scope: implement every confirmed audit finding; preserve public behavior unless the audit identified it as unsafe or incorrect; add regression coverage before fixes; do not push or deploy.
+
+## Core correctness and data integrity
+
+- [ ] 1. Make optional body transforms fail open after upstream response validation, with bounded/redacted telemetry.
+- [ ] 2. Finalize GPT history collapse independently of static-slab profitability and early returns.
+- [ ] 3. Preserve unsupported/unknown history content as opaque ordering barriers.
+- [ ] 4. Enforce one request-wide Anthropic 100-image budget across native content, slabs, results, reminders, and history.
+- [ ] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
+- [ ] 6. Add the documented `losslessExact` option to the public TypeScript API.
+- [ ] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
+- [ ] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
+- [ ] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
+- [ ] 10. Thread render size limits through multi-column public rendering paths.
+- [ ] 11. Reject invalid negative GPT vision-cost overrides.
+- [ ] 12. Include prompt/factsheet overhead in exported savings accounting.
+- [ ] 13. Preserve valid long custom schema formats.
+
+## Proxy, routing, lifecycle, and resource safety
+
+- [ ] 14. Route canonical `/openai` traffic only to the OpenAI upstream and strip the prefix without breaking explicit gateways.
+- [ ] 15. Enforce configurable request-body limits from headers and streamed byte counts; return 413 safely.
+- [ ] 16. Propagate client disconnect/abort through Node and Worker upstream requests; bound auxiliary probes.
+- [ ] 17. Attach detached Worker lifecycle work to `ExecutionContext.waitUntil`.
+- [ ] 18. Contain rejected `onRequest` hooks without unhandled rejections.
+- [ ] 19. Parse SSE frames correctly across CRLF and arbitrary chunk boundaries.
+- [ ] 20. Drain or cancel oversized JSON inspection tees and record truncation.
+- [ ] 21. Redact and bound provider error/recovery data.
+
+## Dashboard, installer, operations, and UX
+
+- [ ] 22. Return 405 plus `Allow` for wrong-method dashboard routes.
+- [ ] 23. Validate dashboard mutation payloads and model identifiers strictly.
+- [ ] 24. Require safe host/auth boundaries for non-loopback dashboard exposure and block DNS rebinding.
+- [ ] 25. Add no-store/private caching policy and accessible main/heading/live/loading/error semantics.
+- [ ] 26. Replace clickable image thumbnails with keyboard-accessible controls.
+- [ ] 27. Add mtime/size-backed dashboard data caching and bound in-memory image retention by bytes.
+- [ ] 28. Make installer writes transactional or rollback-safe and surface MCP action failures.
+- [ ] 29. Version and authenticate product health checks instead of accepting arbitrary 2xx responses.
+- [ ] 30. Harden sidecar/recovery permissions, symlink handling, and age/byte retention.
+- [ ] 31. Make demo/restart scripts refuse unrelated port owners and use isolated temporary state.
+
+## Tests, CI, packaging, documentation, and maintainability
+
+- [ ] 32. Add Worker auth/lifecycle coverage and dashboard security/accessibility/browser-contract coverage.
+- [ ] 33. Type-check tests/scripts strictly and repair all existing type failures.
+- [ ] 34. Add Node 18/22 CI coverage, restart smoke, package/exports/bin smoke, and Wrangler dry-run.
+- [ ] 35. Pin CI actions and npm tooling to immutable/exact versions; verify tag/package version parity.
+- [ ] 36. Move pnpm-only settings out of npm config and add a concise release/check command.
+- [ ] 37. Remove test helpers that execute production transformation during expected-value setup.
+- [ ] 38. Reconcile README/help/Worker/recovery/security documentation and remove stale/dead constants or comments.
+- [ ] 39. Reduce avoidable CLI/package duplication or document the proven constraint; verify packed artifact contents and size.
+- [ ] 40. Review large-module boundaries and extract only helpers justified by the fixes; avoid speculative rewrites.
+
+## Verification and handoff
+
+- [ ] Run focused tests red then green for every behavior-changing group.
+- [ ] Run source and test/script type checks, lint/static checks, full tests, build, restart smoke, package smoke, and Worker dry-run.
+- [ ] Run independent correctness/security review; resolve every confirmed regression.
+- [ ] Review the final diff for scope, secrets, docs drift, generated artifacts, and rollback safety.
+- [ ] Record exact results, remaining risks, and a final verification ledger entry.
+- [ ] Commit verified changes on `main`; do not push or deploy.
+
+## Final Review - 2026-07-10 (audit batch 1 — 11 of 40 items)
+
+Status: 11 items implemented + regression-tested; tsc clean; full suite 757 passed; build green.
+Committed on `main` (no push per scope). Remaining 29 items below are NOT yet implemented.
+
+### Items completed (verified)
+- [x] #8 D8 `__proto__` schema cloning → null-proto objects (`src/core/schema-strip.ts` + `tests/schema-strip.test.ts`).
+- [x] #11 D15 reject negative GPT vision-cost overrides (`src/core/gpt-model-profiles.ts` `isValidVision` + `tests/gpt-vision-validation.test.ts`).
+- [x] #13 D17 preserve long custom JSON schema formats (removed FORMAT_MAX_LEN; `src/core/schema-strip.ts`, `tests/render.test.ts` assertion updated).
+- [x] #19 D12 CRLF/arbitrary-boundary SSE parsing (`src/core/proxy.ts` normalize `\r\n→\n` + `tests/proxy-usage.test.ts` CRLF test).
+- [x] #18 D11 contain rejected `onRequest` hooks (`src/core/proxy.ts` try/catch around hook call).
+- [x] #22 D18 dashboard wrong-method → 405 + Allow (`src/node.ts` `methodNotAllowed` + `tests/dashboard-cors.test.ts`).
+- [x] #25 E5 no-store on dashboard responses + 0600 on sidecar/recovery/export files (`src/node.ts`).
+- [x] #35 E6 pin CI actions to commit SHAs + verify tag==version (` .github/workflows/release.yml`).
+- [x] #9 D9 count-token probe uses same normalized path as the forward (`src/core/proxy.ts` + `tests/proxy-usage.test.ts` canonical test).
+- [x] #14 E1 route `/openai` to OpenAI upstream (prefix stripped, Bearer auth), custom (ocproxy) upstreams keep verbatim (`src/core/proxy.ts` + `tests/proxy-usage.test.ts`).
+- [x] #17 D10 attach post-processing to `ExecutionContext.waitUntil` (`src/core/proxy.ts` `waitUntil` config + `src/worker.ts` wiring + `tests/proxy-usage.test.ts`).
+
+### Remaining (not yet implemented)
+- Core correctness: #1 D1 fail-open transforms, #2 D2 GPT history collapse independent, #3 D3 preserve unsupported history state, #4 D4 request-wide 100-image budget (needs transform.ts counter threading — high-risk, deferred), #5 D5 factsheet pricing sidecar, #6 D6 expose `losslessExact` public API, #7 D7 GPT model-safety on public SDK transformers, #10 D14 multi-col size-limit threading, #12 D16 export savings overhead.
+- Proxy/lifecycle/resource: #15 E2 request-body 413 limit, #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 48 files, 757 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Notes / risks
+- D4 (request-wide image budget) and D2/D3 (history collapse independence) require non-trivial threading through `transform.ts`/`history.ts`; deliberately not rushed to avoid regressions.
+- E2/E3/E4 (body limit, abort/timeout, host auth) are security-relevant and partially landed via earlier passes (origin guard, healthz); the remaining hardening is scoped above.

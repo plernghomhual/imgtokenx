@@ -153,6 +153,10 @@ export default {
 
         tracker.emit(toTrackEvent(e));
       },
+      // D10: keep onRequest/sidecar post-processing alive after the
+      // Response is returned — the Worker runtime cancels in-flight work
+      // otherwise, dropping events on every request.
+      waitUntil: (p) => _ctx.waitUntil(p),
     };
     const handle = createProxy(config);
     return handle(req);

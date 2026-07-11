@@ -13,13 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     environment: release # must match the npm Trusted Publisher config
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v6
+      # Pinned to full-length commit SHAs (audit finding E6) to remove the
+      # mutable-tag supply-chain risk.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      # Audit finding E6: the pushed tag must equal package.json version, else
+      # we'd publish under the wrong name/version.
+      - name: Verify tag matches version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME}
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "tag $TAG does not match version v$VERSION" >&2
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       # Skip if this version is already on the registry (idempotent re-runs)
       - name: Check version not already published

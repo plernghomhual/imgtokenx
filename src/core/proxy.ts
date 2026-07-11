@@ -34,6 +34,12 @@ export interface ProxyConfig {
   transform?: TransformOptions | (() => TransformOptions);
   /** Called after every request — useful for logging / metrics in the host. */
   onRequest?: (event: ProxyEvent) => void | Promise<void>;
+  /** Host hook to keep async post-processing alive (audit finding D10).
+   *  In a Cloudflare Worker, the runtime cancels in-flight work once the
+   *  Response is returned — so `void finalize()` would drop the onRequest
+   *  event (and any sidecars) on every request. Pass `ctx.waitUntil`
+   *  from the Worker `fetch` handler to schedule it instead. */
+  waitUntil?: (p: Promise<unknown>) => void;
 }
 
 export interface ProxyEvent {
@@ -406,7 +412,11 @@ function teeForUsage(res: Response): {
           const { done, value } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
-          // SSE events are terminated by a blank line.
+          // SSE events are terminated by a blank line. Normalize CRLF→LF so
+          // usage/output/stop-reason measurement works on either line ending
+          // (audit finding D12) — a raw `\r\n\r\n` stream would otherwise
+          // never split and silently lose the metrics.
+          buf = buf.replace(/\r\n/g, '\n');
           let evEnd: number;
           while ((evEnd = buf.indexOf('\n\n')) >= 0) {
             const block = buf.slice(0, evEnd);
@@ -546,7 +556,9 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers): boolean {
   const isResponsesPath = pathname === '/v1/responses'
     || pathname.startsWith('/v1/responses/')
     || pathname === '/responses'
-    || pathname.startsWith('/responses/');
+    || pathname.startsWith('/responses/')
+    || pathname === '/openai/v1/responses'
+    || pathname === '/openai/responses';
   // /v1/models exists on BOTH APIs. Claude Code's subscription OAuth sends
   // `authorization: Bearer` with NO x-api-key, which would read as OpenAI auth
   // here and misroute an Anthropic models listing to the OpenAI upstream
@@ -562,6 +574,8 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers): boolean {
     && headers.has('authorization') && !headers.has('x-api-key');
   return pathname === '/v1/chat/completions'
     || pathname === '/chat/completions'
+    || pathname === '/openai/v1/chat/completions'
+    || pathname === '/openai/chat/completions'
     || pathname === '/v1/responses'
     || isResponsesPath
     || (isModelsPath && looksOpenAIAuth);
@@ -735,24 +749,36 @@ export function createProxy(config: ProxyConfig = {}) {
             info.baselineProbeStatus = 'ok';
           }
         }
-        await config.onRequest?.({
-          method: req.method,
-          path: url.pathname,
-          model: requestModel,
-          status,
-          durationMs: Date.now() - t0,
-          firstByteMs,
-          info,
-          usage,
-          error,
-          errorBody,
-          reqBodySha8,
-          reqBodyGz,
-          measurement,
-          stopReason,
-        });
+        // onRequest is a consumer-supplied hook; a throw must never
+        // escape as an unhandledRejection after the response is already
+        // sent (audit finding D11). Contain and report it.
+        try {
+          await config.onRequest?.({
+            method: req.method,
+            path: url.pathname,
+            model: requestModel,
+            status,
+            durationMs: Date.now() - t0,
+            firstByteMs,
+            info,
+            usage,
+            error,
+            errorBody,
+            reqBodySha8,
+            reqBodyGz,
+            measurement,
+            stopReason,
+          });
+        } catch (hookErr) {
+          console.error('[imgtokenx] onRequest hook failed:', hookErr);
+        }
       };
-      void finalize();
+      // D10: keep the post-processing alive on hosts that cancel work
+      // after the Response is sent (Cloudflare Workers). Fall back to
+      // fire-and-forget where no waitUntil is supplied (Node).
+      const fin = finalize();
+      if (config.waitUntil) config.waitUntil(fin);
+      else void fin;
     };
 
     // Transform only known shapes; everything else passes through.
@@ -764,7 +790,19 @@ export function createProxy(config: ProxyConfig = {}) {
       url.pathname,
       req.headers,
     );
-    const upstreamBase = providerPrefixed ? passthroughUpstream : isOpenAIPath ? openAIUpstream : upstream;
+    // E1: route `/openai/*` (provider-prefixed OpenAI) to the OpenAI
+    // upstream, not Anthropic — but ONLY against the canonical defaults. A
+    // custom (ocproxy-style) `upstream`/`openAIUpstream` keeps the prefix
+    // verbatim against that upstream. Gateway mode keeps its passthrough base.
+    const canonicalDefault =
+      config.provider !== 'cloudflare-ai-gateway'
+      && routes.anthropic === DEFAULT_UPSTREAM
+      && routes.openai === DEFAULT_OPENAI_UPSTREAM;
+    const upstreamBase = !providerPrefixed
+      ? (isOpenAIPath ? openAIUpstream : upstream)
+      : canonicalDefault
+        ? (isOpenAIPath ? openAIUpstream : passthroughUpstream)
+        : passthroughUpstream;
 
     let bodyOut: BodyInit | null = null;
     let info: TransformInfo | undefined;
@@ -821,11 +859,22 @@ export function createProxy(config: ProxyConfig = {}) {
             const ctHeaders = applyGatewayHeaders(filterHeaders(req.headers, STRIP_REQ_HEADERS));
             ctHeaders.set('content-type', 'application/json');
             if (config.apiKey) ctHeaders.set('x-api-key', config.apiKey);
-            // Mirror the actual outbound request base+path: count_tokens lives at
-            // `<messages-path>/count_tokens`, so provider-prefixed routes like
-            // `/anthropic/messages` probe `/anthropic/messages/count_tokens`.
-            const ctBase = providerPrefixed ? passthroughUpstream : upstream;
-            const ctUrl = ctBase + url.pathname + '/count_tokens';
+            // Mirror the ACTUAL outbound request base+path (audit finding D9):
+            // count_tokens lives at `<messages-path>/count_tokens`, and the path
+            // must be normalized EXACTLY like the main forward below — against the
+            // canonical Anthropic endpoint a `/anthropic` prefix is stripped, so
+            // the probe must probe `/v1/messages/count_tokens`, NOT
+            // `/anthropic/v1/messages/count_tokens` (which 404s and silently
+            // drops the baseline). Use the same base+normalized-path the forward uses.
+            const isAnthropicPrefixProbe =
+              url.pathname.startsWith('/anthropic/') || url.pathname === '/anthropic';
+            const stripPrefixProbe =
+              providerPrefixed &&
+              isAnthropicPrefixProbe &&
+              config.provider !== 'cloudflare-ai-gateway' &&
+              routes.anthropic === DEFAULT_UPSTREAM;
+            const ctRelPath = stripPrefixProbe ? stripProviderPrefix(url.pathname) : url.pathname;
+            const ctUrl = upstreamBase + ctRelPath + '/count_tokens' + url.search;
             baselinePromise = countTokensUpstream(ctUrl, ctBody, ctHeaders);
             // Null = no markers → cacheable=0 by definition, no probe needed.
             const ctCacheableBody = buildCacheablePrefixCountTokensBody(bodyIn);
@@ -873,17 +922,20 @@ export function createProxy(config: ProxyConfig = {}) {
     // /v1/chat/completions. This is what makes OpenCode's
     // ANTHROPIC_BASE_URL=…/anthropic work out of the box.
     const isAnthropicPrefix = url.pathname.startsWith('/anthropic/') || url.pathname === '/anthropic';
-    // Strip the `/anthropic` prefix only against the *canonical* Anthropic
-    // endpoint. A custom (ocproxy-style) upstream keeps the prefix verbatim —
-    // its routing depends on it (see gateway.test.ts / proxy-usage.test.ts).
+    const isOpenAIPrefix = url.pathname.startsWith('/openai/') || url.pathname === '/openai';
+    // Strip the provider prefix against the *canonical* endpoints only. Behind a
+    // custom (ocproxy-style) upstream or the AI Gateway the prefix is meaningful
+    // and must be forwarded verbatim (see gateway.test.ts / proxy-usage.test.ts).
     const stripPrefix =
       providerPrefixed
-      && isAnthropicPrefix
-      && config.provider !== 'cloudflare-ai-gateway'
-      && routes.anthropic === DEFAULT_UPSTREAM;
-    const outPath = isOpenAIPath && !providerPrefixed
-      ? openAIUpstreamPath(url.pathname, url.search, routes.stripOpenAIV1)
-      : (stripPrefix ? stripProviderPrefix(url.pathname) + url.search : path);
+      && canonicalDefault
+      && (isAnthropicPrefix || isOpenAIPrefix);
+    // Provider-prefixed OpenAI routes strip to `/v1/chat/completions` etc.
+    // and normalize via openAIUpstreamPath (root aliases, /v1 drop).
+    const relPath = stripPrefix ? stripProviderPrefix(url.pathname) : url.pathname;
+    const outPath = isOpenAIPath
+      ? openAIUpstreamPath(relPath, url.search, routes.stripOpenAIV1)
+      : relPath + url.search;
     const upstreamUrl = upstreamBase + outPath;
     let upstreamRes: Response;
     try {

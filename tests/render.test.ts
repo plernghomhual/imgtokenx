@@ -1191,7 +1191,7 @@ describe('transform', () => {
       });
     });
 
-    it('preserves short `format` tokens and strips long ones', async () => {
+    it('preserves all `format` tokens regardless of length (D17)', async () => {
       const got = await rewriteOne({
         type: 'object',
         properties: {
@@ -1199,7 +1199,8 @@ describe('transform', () => {
           who: { type: 'string', format: 'uri' }, // 3 chars, kept
           freeform: {
             type: 'string',
-            // 40-char "format" — almost certainly a description in disguise.
+            // Long custom formats are VALID schema semantics — must be kept,
+            // not deleted by a length heuristic (audit finding D17).
             format: 'a-very-long-format-string-that-is-prose',
           },
         },
@@ -1209,7 +1210,7 @@ describe('transform', () => {
         properties: {
           when: { type: 'string', format: 'date-time' },
           who: { type: 'string', format: 'uri' },
-          freeform: { type: 'string' }, // long format stripped
+          freeform: { type: 'string', format: 'a-very-long-format-string-that-is-prose' },
         },
       });
     });

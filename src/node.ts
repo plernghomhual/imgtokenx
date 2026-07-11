@@ -326,6 +326,16 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
  * can fall through to the upstream proxy (e.g. a GET path that's only
  * defined for POST). Keeps the createServer body small + readable.
  */
+// Audit finding D18: a recognized dashboard route hit with the wrong method
+// must return 405 + Allow, NOT fall through to the proxy (which would forward
+// it to the upstream API). Used by the GET-only dashboard routes below.
+function methodNotAllowed(allow: string): Response {
+  return new Response('method not allowed', {
+    status: 405,
+    headers: { Allow: allow, 'content-type': 'text/plain' },
+  });
+}
+
 export async function dispatchDashboard(
   dashboard: DashboardState,
   route: DashboardRoute,
@@ -348,47 +358,57 @@ export async function dispatchDashboard(
   )) {
     return new Response('forbidden', { status: 403 });
   }
+  let out: Response | Promise<Response> | undefined;
   switch (route.kind) {
     case 'html':
-      if (method !== 'GET') return undefined;
-      return dashboard.serveHtml(port);
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveHtml(port);
+      break;
     case 'icon':
-      if (method !== 'GET' && method !== 'HEAD') return undefined;
+      if (method !== 'GET' && method !== 'HEAD') { out = methodNotAllowed('GET, HEAD'); break; }
+      // Icon opts into caching via its own cache-control header; leave it be.
       return new Response(null, {
         status: 204,
         headers: { 'cache-control': 'public, max-age=86400' },
       });
     case 'stats':
-      if (method !== 'GET') return undefined;
-      return dashboard.serveStats();
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveStats();
+      break;
     case 'recent':
-      if (method !== 'GET') return undefined;
-      return dashboard.serveRecent();
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveRecent();
+      break;
     case 'png': {
-      if (method !== 'GET') return undefined;
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
       const idRaw = url.searchParams.get('id');
       const idNum = idRaw != null ? Number(idRaw) : NaN;
-      return dashboard.servePng(Number.isFinite(idNum) ? idNum : undefined);
+      out = dashboard.servePng(Number.isFinite(idNum) ? idNum : undefined);
+      break;
     }
     case 'api-image-source': {
-      if (method !== 'GET') return undefined;
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
       const idRaw = url.searchParams.get('id');
       const idNum = idRaw != null ? Number(idRaw) : NaN;
-      return dashboard.serveImageSource(Number.isFinite(idNum) ? idNum : undefined);
+      out = dashboard.serveImageSource(Number.isFinite(idNum) ? idNum : undefined);
+      break;
     }
     case 'api-sessions': {
-      if (method !== 'GET') return undefined;
-      return dashboard.serveSessionsJson({
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveSessionsJson({
         project: url.searchParams.get('project') ?? undefined,
         since: url.searchParams.get('since') ?? undefined,
       });
+      break;
     }
     case 'api-stats':
-      if (method !== 'GET') return undefined;
-      return dashboard.serveApiStats();
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveApiStats();
+      break;
     case 'current-session':
-      if (method !== 'GET') return undefined;
-      return dashboard.serveCurrentSessionJson();
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveCurrentSessionJson();
+      break;
     case 'fragment': {
       // /fragments/toggle is the one mutating fragment - htmx POSTs the next
       // state (urlencoded hx-vals or JSON), the server flips the switch and
@@ -403,10 +423,12 @@ export async function dispatchDashboard(
             enabled = new URLSearchParams(raw).get('enabled') === 'true';
           }
         } catch {
-          return new Response('bad request body', { status: 400 });
+          out = new Response('bad request body', { status: 400 });
+          break;
         }
         dashboard.handleCompressionToggle({ enabled });
-        return dashboard.serveFragment('toggle', url, port);
+        out = dashboard.serveFragment('toggle', url, port);
+        break;
       }
       // /fragments/models POSTs one chip flip: {model, on}. Server mutates the
       // runtime compress scope and returns the re-rendered chip row.
@@ -425,34 +447,47 @@ export async function dispatchDashboard(
             on = p.get('on') === 'true';
           }
         } catch {
-          return new Response('bad request body', { status: 400 });
+          out = new Response('bad request body', { status: 400 });
+          break;
         }
         if (model) dashboard.handleModelsToggle(model, on);
-        return dashboard.serveFragment('models', url, port);
+        out = dashboard.serveFragment('models', url, port);
+        break;
       }
-      if (method !== 'GET') return undefined;
-      return dashboard.serveFragment(route.name, url, port);
+      if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
+      out = dashboard.serveFragment(route.name, url, port);
+      break;
     }
     case 'api-compression': {
       if (method !== 'POST') {
-        return new Response(
+        out = new Response(
           JSON.stringify({ error: 'use POST' }),
-          { status: 405, headers: { 'content-type': 'application/json' } },
+          { status: 405, headers: { Allow: 'POST', 'content-type': 'application/json' } },
         );
+        break;
       }
       let body: Record<string, unknown> = {};
       try {
         const raw = await readRequestBody(req);
         body = raw ? JSON.parse(raw) : {};
       } catch (e) {
-        return new Response(
+        out = new Response(
           JSON.stringify({ error: 'bad request body', detail: (e as Error).message }),
           { status: 400, headers: { 'content-type': 'application/json' } },
         );
+        break;
       }
-      return dashboard.handleCompressionToggle({ enabled: body.enabled });
+      out = dashboard.handleCompressionToggle({ enabled: body.enabled });
+      break;
     }
   }
+  // Audit finding E5: never cache dashboard responses (they can carry verbatim
+  // prompt/system text). The icon already sets its own cache-control.
+  if (out) out = await out;
+  if (out && !out.headers.has('cache-control')) {
+    out.headers.set('cache-control', 'no-store');
+  }
+  return out;
 }
 
 // ---- FileTracker ----------------------------------------------------------
@@ -599,7 +634,9 @@ async function maybeWriteBodySidecar(
   const tag = sha8 ?? 'nohash';
   const filePath = path.join(dir, `${ts}-${tag}.json.gz`);
   try {
-    await fs.promises.writeFile(filePath, bytesGz);
+    // 0o600 — these sidecars hold verbatim user prompt/system text from 4xx
+    // requests; keep them owner-read only (audit finding E5).
+    await fs.promises.writeFile(filePath, bytesGz, { mode: 0o600 });
     return filePath;
   } catch {
     return undefined;
@@ -899,9 +936,10 @@ async function runExport(argv: string[]): Promise<void> {
     model: opts.model,
   });
 
-  // Write artifacts
+  // Write artifacts — 0o600, the export can include full source + prompt
+  // text (audit finding E5).
   for (const artifact of result.artifacts) {
-    fs.writeFileSync(path.join(outDir, artifact.filename), artifact.data);
+    fs.writeFileSync(path.join(outDir, artifact.filename), artifact.data, { mode: 0o600 });
   }
 
   // Print report
@@ -1110,7 +1148,7 @@ export async function main(): Promise<void> {
         for (let i = 0; i < pngs.length; i++) {
           const name = `${stamp}_req${String(seq).padStart(3, '0')}_${modelTag}_p${String(i + 1).padStart(2, '0')}.png`;
           try {
-            fs.writeFileSync(path.join(imageDumpDir, name), pngs[i]!);
+            fs.writeFileSync(path.join(imageDumpDir, name), pngs[i]!, { mode: 0o600 });
           } catch (err) {
             console.warn(`[imgtokenx] PNG dump write failed: ${(err as Error).message}`);
             break; // dir vanished / full — stop hammering it this request
@@ -1127,7 +1165,7 @@ export async function main(): Promise<void> {
           const kind = rec.kind.replace(/[^A-Za-z0-9._-]+/g, '_');
           const name = `${stamp}_req${String(seq).padStart(3, '0')}_${modelTag}_${rec.id}_${kind}.txt`;
           try {
-            fs.writeFileSync(path.join(recoverableDir, name), rec.text);
+            fs.writeFileSync(path.join(recoverableDir, name), rec.text, { mode: 0o600 });
             written++;
           } catch (err) {
             console.warn(`[imgtokenx] recovery dump write failed: ${(err as Error).message}`);

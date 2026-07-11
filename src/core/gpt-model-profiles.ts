@@ -199,11 +199,18 @@ function resolveBuiltin(m: string): GptModelProfile {
 let envRaw: string | null = null;
 let envMap: Map<string, GptModelProfile> = new Map();
 
+function isNonNegNum(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0;
+}
+
 function isValidVision(v: unknown): v is GptVisionCost {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
-  if (o.regime === 'tile') return Number.isFinite(o.base) && Number.isFinite(o.perTile);
-  if (o.regime === 'patch') return Number.isFinite(o.multiplier) && Number.isFinite(o.patchCap);
+  // Non-negative only: a negative base/per-tile/multiplier/cap would yield
+  // negative image-token math and nonsensical "profitable" transforms
+  // (audit finding D15).
+  if (o.regime === 'tile') return isNonNegNum(o.base) && isNonNegNum(o.perTile);
+  if (o.regime === 'patch') return isNonNegNum(o.multiplier) && isNonNegNum(o.patchCap);
   return false;
 }
 

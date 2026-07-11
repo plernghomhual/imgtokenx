@@ -145,6 +145,124 @@ describe('proxy usage extraction', () => {
     ).toBe(true);
   });
 
+  it('D9 canonical /anthropic prefix is stripped for BOTH forward and count_tokens probe', async () => {
+    // Default upstream (api.anthropic.com, canonical) — the /anthropic
+    // routing prefix is just an OpenCode hint and must be stripped for the
+    // forward AND the count_tokens probe. Before the fix the probe hit
+    // `/anthropic/v1/messages/count_tokens` and 404'd, silently dropping
+    // the baseline.
+    const upstreamRequests: Request[] = [];
+    const restore = mockUpstream(async (req) => {
+      upstreamRequests.push(req.clone());
+      if (req.url.endsWith('/count_tokens')) {
+        return new Response(JSON.stringify({ input_tokens: 9000 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          id: 'msg_1', type: 'message', role: 'assistant',
+          content: [{ type: 'text', text: 'hello' }],
+          usage: { input_tokens: 120, output_tokens: 7, cache_read_input_tokens: 0 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    let captured: ProxyEvent | undefined;
+    const proxy = createProxy({
+      apiKey: 'sk-anthropic-test',
+      transform: { charsPerToken: 1, minCompressChars: 1 },
+      onRequest: (e) => { captured = e; },
+    });
+
+    const reqBody = JSON.stringify({
+      model: 'claude-fable-5',
+      max_tokens: 1,
+      system: 'System instruction. '.repeat(900),
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    const res = await proxy(
+      new Request('http://localhost/anthropic/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': 'sk-anthropic-test' },
+        body: reqBody,
+      }),
+    );
+    await res.text();
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    // Forward dropped the prefix.
+    expect(
+      upstreamRequests.some((r) => r.url === 'https://api.anthropic.com/v1/messages'),
+    ).toBe(true);
+    // Probe dropped the prefix too — NOT the double-prefixed 404 path.
+    expect(
+      upstreamRequests.some((r) => r.url === 'https://api.anthropic.com/v1/messages/count_tokens'),
+    ).toBe(true);
+    expect(
+      upstreamRequests.some((r) => r.url.endsWith('/anthropic/v1/messages/count_tokens')),
+    ).toBe(false);
+    // Probe succeeded → baseline measured.
+    expect(captured?.info?.baselineTokens).toBe(9000);
+  });
+
+  it('E1 routes /openai-prefixed chat completions to the OpenAI upstream (not Anthropic)', async () => {
+    // OpenCode/provider routing can hit /openai/v1/chat/completions. That
+    // must reach api.openai.com/v1/chat/completions (prefix stripped) with
+    // Bearer auth — NOT the Anthropic upstream (pre-fix it 404'd there).
+    const upstreamRequests: Request[] = [];
+    const restore = mockUpstream(async (req) => {
+      upstreamRequests.push(req.clone());
+      return new Response(
+        JSON.stringify({
+          id: 'chatcmpl_1', object: 'chat.completion',
+          choices: [{ message: { role: 'assistant', content: 'hello' } }],
+          usage: { prompt_tokens: 55, completion_tokens: 7, total_tokens: 62 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    let captured: ProxyEvent | undefined;
+    const proxy = createProxy({
+      openAIApiKey: 'sk-test',
+      transform: { charsPerToken: 1, minCompressChars: 1 },
+      onRequest: (e) => { captured = e; },
+    });
+
+    const reqBody = JSON.stringify({
+      model: 'gpt-5.6',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    const res = await proxy(
+      new Request('http://localhost/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: reqBody,
+      }),
+    );
+    await res.text();
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    expect(captured?.model).toBe('gpt-5.6');
+    // Forward went to OpenAI, prefix stripped.
+    const fwd = upstreamRequests.find((r) => r.url.endsWith('/v1/chat/completions'));
+    expect(fwd).toBeDefined();
+    expect(fwd!.url).toBe('https://api.openai.com/v1/chat/completions');
+    // Bearer auth applied (OpenAI style), not x-api-key.
+    expect(fwd!.headers.get('authorization')).toBe('Bearer sk-test');
+    expect(fwd!.headers.has('x-api-key')).toBe(false);
+    expect(
+      upstreamRequests.some((r) => r.url.includes('api.anthropic.com')),
+    ).toBe(false);
+  });
+
   it('routes GPT 5.6 chat completions to OpenAI, transforms once, and normalizes usage', async () => {
     const upstreamRequests: Request[] = [];
     const restore = mockUpstream(async (req) => {
@@ -1203,6 +1321,58 @@ describe('proxy usage extraction', () => {
     expect(captured!.usage?.output_tokens).toBe(42);
   });
 
+  it('measures SSE chars/usage across CRLF line endings (D12)', async () => {
+    // Same stream but every separator is \r\n (Cloudflare/Windows-style SSE).
+    const CRLF = '\r\n';
+    const sseBody =
+      `event: message_start${CRLF}` +
+      `data: ${JSON.stringify({
+        type: 'message_start',
+        message: {
+          id: 'msg_m1', type: 'message', role: 'assistant', content: [],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        },
+      })}${CRLF}${CRLF}` +
+      `event: content_block_delta${CRLF}` +
+      `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello "}}${CRLF}${CRLF}` +
+      `event: content_block_delta${CRLF}` +
+      `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}${CRLF}${CRLF}` +
+      `event: message_delta${CRLF}` +
+      `data: {"type":"message_delta","delta":{},"usage":{"output_tokens":42}}${CRLF}${CRLF}` +
+      `event: message_stop${CRLF}` +
+      `data: {"type":"message_stop"}${CRLF}${CRLF}`;
+
+    const restore = mockUpstream(
+      () =>
+        new Response(sseBody, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+    );
+
+    let captured: ProxyEvent | undefined;
+    const proxy = createProxy({
+      transform: {},
+      onRequest: (e) => { captured = e; },
+    });
+
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: SAMPLE_REQ_BODY,
+      }),
+    );
+    await res.text();
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    expect(captured).toBeDefined();
+    // Before the fix, CRLF streams never split → textChars 0, output_tokens undefined.
+    expect(captured!.measurement?.textChars).toBe(11); // 'hello ' + 'world'
+    expect(captured!.usage?.output_tokens).toBe(42);
+  });
+
   it('measures SSE thinking_delta chars and counts redacted_thinking blocks', async () => {
     // Extended thinking turn: a `thinking` block and a `redacted_thinking`
     // block. The redacted block has no readable chars (server-encrypted
@@ -1607,5 +1777,47 @@ describe('proxy usage extraction', () => {
 
     expect(captured).toBeDefined();
     expect(captured!.stopReason).toBeUndefined();
+  });
+
+  it('D10 schedules finalize via waitUntil when provided', async () => {
+    // In a Cloudflare Worker the runtime cancels in-flight work once the
+    // Response is returned; without waitUntil the onRequest event is dropped.
+    const scheduled: Promise<unknown>[] = [];
+    let captured: ProxyEvent | undefined;
+    const proxy = createProxy({
+      transform: {},
+      onRequest: (e) => { captured = e; },
+      waitUntil: (p) => { scheduled.push(p); },
+    });
+
+    const restore = mockUpstream(
+      () =>
+        new Response(
+          JSON.stringify({
+            id: 'msg_1', type: 'message', role: 'assitant',
+            content: [{ type: 'text', text: 'hi' }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: SAMPLE_REQ_BODY,
+      }),
+    );
+    await res.text();
+    // The event may only have been scheduled, not yet resolved.
+    await Promise.all(scheduled);
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    // waitUntil was plumbed AND the event actually fired.
+    expect(scheduled.length).toBeGreaterThan(0);
+    expect(captured).toBeDefined();
+    expect(captured!.usage?.output_tokens).toBe(1);
   });
 });

@@ -80,9 +80,6 @@ const SCHEMA_VERBATIM_KEYS = new Set([
   'pattern',
 ]);
 
-/** Real `format` tokens (date-time, uri, email…) are short; anything longer is a description. */
-const FORMAT_MAX_LEN = 32;
-
 /** Strip long-form metadata from a JSON Schema node, preserving the structural
  *  keys a tool-use validator needs. Strips: description, title, examples,
  *  default, $schema, $id, $comment, long format. Recurses into
@@ -95,14 +92,13 @@ export function stripSchemaDescriptions(node: unknown, depth = 0): unknown {
   if (!node || typeof node !== 'object') return node;
 
   const obj = node as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
+  // Null-prototype so an untrusted property name like `__proto__` becomes an
+  // own property instead of reassigning the object's prototype (prototype
+  // pollution → corrupted/weakened tool contracts). See audit finding D8.
+  const out = Object.create(null) as Record<string, unknown>;
 
   for (const [k, v] of Object.entries(obj)) {
     if (SCHEMA_STRIP_KEYS.has(k)) continue;
-
-    if (k === 'format' && typeof v === 'string' && v.length > FORMAT_MAX_LEN) {
-      continue; // long format = description in disguise
-    }
 
     if (SCHEMA_VERBATIM_KEYS.has(k)) {
       out[k] = v;
@@ -115,7 +111,7 @@ export function stripSchemaDescriptions(node: unknown, depth = 0): unknown {
       typeof v === 'object' &&
       !Array.isArray(v)
     ) {
-      const nested: Record<string, unknown> = {};
+      const nested = Object.create(null) as Record<string, unknown>;
       for (const [pk, pv] of Object.entries(v as Record<string, unknown>)) {
         nested[pk] = stripSchemaDescriptions(pv, depth + 1);
       }
