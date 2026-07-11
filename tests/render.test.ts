@@ -2353,22 +2353,46 @@ describe('transform', () => {
       ).toBe(true);
     });
 
-    it('tiny body (142 chars): rejected by pre-filter (below MIN_COMPRESS_CHARS)', () => {
+    it('tiny body (142 chars): rejected by pre-filter (below MIN_COMPRESS_CHARS)', async () => {
+      // AUDIT FIX #37: the prior version of this test asserted only
+      // `text.length < 2000`, which tests the FIXTURE, not the production
+      // branch. If MIN_COMPRESS_CHARS shifted to e.g. 1500 or 2500 in
+      // src/core/transform.ts, this test would silently keep passing.
+      // Now actually invokes transformRequest with this fixture wrapped in a
+      // real Anthropic request envelope, and asserts the production branch
+      // (`info.compressed === false`, `info.reason` mentions below_min_chars).
       const shape = BELOW_MIN_CHARS_TINY;
-      // The gate isn't reached for inputs < minCompressChars (default 2000) —
-      // the transformRequest pre-filter short-circuits. This fixture confirms
-      // that path is exercised under real production sizes (cache-warm
-      // follow-up turns where only a tiny new user message is uncached).
-      // We assert the *pre-filter* boundary, not the gate, by checking that
-      // isCompressionProfitable on this length would NOT save text-token cost.
       const text = synthesizeText(shape);
+      // Fixture-shape invariant kept for readability of the regression story.
       expect(text.length).toBeLessThan(2000);
+      const req = JSON.stringify({
+        model: 'claude-fable-5',
+        messages: [{ role: 'user', content: text }],
+      });
+      const { info } = await transformRequest(new TextEncoder().encode(req));
+      // Pin the actual production contract: pre-filter MUST short-circuit
+      // small inputs and surface the reason. The reason includes
+      // `below_min_chars (N < THRESHOLD)` per src/core/transform.ts, so we
+      // assert the prefix so a reason-string rename doesn't break us.
+      expect(info.compressed).toBe(false);
+      expect(info.reason).toMatch(/below_min_chars/);
     });
 
-    it('borderline (1123 chars): below pre-filter, never hits gate', () => {
+    it('borderline (1123 chars): below pre-filter, never hits gate', async () => {
+      // AUDIT FIX #37: same regression contract as the tiny test above, but
+      // at a borderline fixture size. Pre-filter must still short-circuit and
+      // the reason must mention below_min_chars — not just assert the
+      // fixture's own length.
       const shape = BELOW_MIN_CHARS_BORDERLINE;
       const text = synthesizeText(shape);
       expect(text.length).toBeLessThan(2000);
+      const req = JSON.stringify({
+        model: 'claude-fable-5',
+        messages: [{ role: 'user', content: text }],
+      });
+      const { info } = await transformRequest(new TextEncoder().encode(req));
+      expect(info.compressed).toBe(false);
+      expect(info.reason).toMatch(/below_min_chars/);
     });
   });
 });

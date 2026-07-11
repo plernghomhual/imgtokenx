@@ -964,6 +964,38 @@ Status: 1 item implemented + regression-tested; tsc clean (0); vitest 58 files /
 - Dashboard/installer/ops: #30 D20 sidecar perms/symlink/retention, #31 D20 demo/restart script port/state safety.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck tests/scripts, #34 Node 18/22 CI coverage, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #39 CLI/package duplication, #40 large-module boundary review.
 - SKIP: #4 D4 request-wide 100-image budget (high-risk — deferred).
+## Final Review - 2026-07-10 (audit batch 14 \u2014 2 of 40 items: #37, #36)
+
+Status: 2 items implemented + regression-tested; tsc clean (0); vitest focused tests pass:
+- tests/release-check.test.ts 7/7
+- tests/render.test.ts 146/146 (full file)
+Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v0.8.0"; git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #37 remove transform-executing test helpers. The two pre-filter tests at tests/render.test.ts:2351-2370 used to assert only `text.length < 2000`, which tested the FIXTURE not the production branch. If MIN_COMPRESS_CHARS shifted to e.g. 1500 or 2500 in src/core/transform.ts, the old tests would have silently kept passing. Rewritten to ACTUALLY invoke `transformRequest` with the fixture wrapped in a real Anthropic request envelope and assert `info.compressed === false` + `info.reason` matches `/below_min_chars/`. Indentation at closing `});` and body lines tightened from 12-space / 8-space to canonical 4-space / 6-space after the first-pass off-by-one indent slip.
+- [x] #36 move pnpm-only settings out of npm config and add a concise release/check command. Three concrete fixes:
+  - **.pnpmrc (NEW)**: holds the pnpm-only settings (`minimum-release-age=4320`, `minimum-release-age-exclude=@cloudflare/*`, `ignore-pnpmfile=true`) with explanatory comments. Doc anchor `https://pnpm.io/settings#minimumreleaseageexclude` added next to the exclude glob so a future maintainer can verify syntax after a pnpm upgrade.
+  - **.npmrc (rewritten)**: comment-only header pointing at .pnpmrc. Reads cleanly under both npm and pnpm; `npm install` no longer warns about unknown config keys.
+  - **scripts/release-check.mjs (NEW)**: concise pre-publish verifier \u2014 checks (1) SemVer-mandatory version field with optional pre-release tag per SemVer 2.0 (end-anchored regex so `\"0.8.0\\n\"` or `\"1.2.3-foo\"` fails), (2) `pnpm-lock.yaml` present, (3) `test:restart` script present (audit #34), (4) no pnpm-only keys leaked back into .npmrc (audit #36 regression). Exits non-zero with fixable message on any failure; exits 0 with one confirmation line.
+
+### New regression tests
+- **tests/release-check.test.ts (NEW, 7 tests)**: exercises the release-check verifier via `spawnSync` in a sandboxed cwd with synthetic files. Covers all 4 failure paths + green-path OK + "report ALL failures, not just the first" contract. Uses ESM-portable `THIS_DIR = path.dirname(fileURLToPath(import.meta.url))` (the prior `__dirname` would have crashed under any ESM-aware runner; vitest happens to polyfill it but plain `node --test` doesn't).
+
+### Verification
+- `node_modules/.bin/tsc --noEmit`: exit 0.
+- `node_modules/.bin/vitest run tests/release-check.test.ts`: 7/7 passed (356ms).
+- `node_modules/.bin/vitest run tests/render.test.ts`: 146/146 passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `node scripts/release-check.mjs` (live repo): `release:check OK: ready to release v0.8.0`.
+- `git diff --check`: exit 0.
+- Pre-commit reviewer pass: ship.
+
+### Remaining (not yet implemented, 14 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading \u2014 high-risk, deferred).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation.
+- Dashboard/installer/ops: #30 D20 full sidecar/recovery permissions + symlink widening, #31 D20 demo/restart script port/state safety.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck tests/scripts, #34 Node 18/22 CI coverage, #39 CLI/package duplication, #40 large-module boundary review.
+- SKIP: #4 D4 request-wide 100-image budget (high-risk \u2014 deferred).
 ## Final Review - 2026-07-10 (audit batch 10 \u2014 1 of 40 items: #23 D19)
 
 Status: 1 item implemented + regression-tested; tsc clean (0); vitest 54 files / 850 tests pass (was 821 after Batch 9); build green (0.8.0); git diff --check clean. Committed on `main` (no push per scope).
