@@ -555,7 +555,7 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [x] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
 - [ ] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
 - [ ] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
-- [ ] 10. Thread render size limits through multi-column public rendering paths.
+- [x] 10. Thread render size limits through multi-column public rendering paths.
 - [ ] 11. Reject invalid negative GPT vision-cost overrides.
 - [x] 12. Include prompt/factsheet overhead in exported savings accounting.
 - [ ] 13. Preserve valid long custom schema formats.
@@ -681,8 +681,30 @@ Status: 2 items implemented + regression-tested; tsc clean; full suite 766 passe
 - `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
 - `git diff --check`: clean.
 
-### Remaining (not yet implemented, 25 of 40)
-- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #10 D14 multi-col size-limit threading, #11 D9-style (already D9 in batch1 — value the live count-token path).
+### Remaining (not yet implemented, 24 of 40) — see batch 5
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #11 D9-style (already D9 in batch1 — value the live count-token path).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
+
+## Final Review - 2026-07-10 (audit batch 5 — 1 of 40 items: D14)
+
+Status: 1 item implemented + regression-tested; tsc clean; full suite 768 passed (was 766); build green (0.8.0). Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #10 D14 thread render size limits through the multi-column public rendering path (`src/core/render.ts` + `src/core/library.ts`): `renderTextToPngsMultiCol` and `renderTextToPngsReflowMultiCol` now take `maxHeightPx` (default `MAX_HEIGHT_PX`) and `maxCharsPerImage` (default `READABLE_CHARS_PER_IMAGE`); the internal `hardLinesPerImg` and per-image char budget now honor them, and the single-col fallback passes `maxHeightPx`. `renderTextToImages` threads `opts.maxHeightPx` + `opts.maxCharsPerImage` into both the single- and multi-column branches.
+
+### Notes / risks
+- The proxy's internal slab path already bounds height to `MAX_HEIGHT_PX` by design; D14 only concerns the public/configurable rendering path. The slab `transform.ts` calls to `renderTextToPngsMultiCol` (lines 1470, 1911) intentionally keep the design defaults and were left unchanged.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 49 files, 768 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 24 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #11 D9-style (already D9 in batch1 — value the live count-token path).
 - Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
 - Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
 - Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.

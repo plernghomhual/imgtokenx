@@ -636,6 +636,8 @@ export interface TransformInfo {
   factSheetChars?: number;
   /** Count of `rec_*` recovery refs emitted in this request. */
   recoverableRefs?: number;
+  /** Audit D13: the upstream JSON body exceeded the 4 MiB scan cap and was drained/truncated. */
+  scanTruncated?: boolean;
   /** Blocks/chars kept as native text by `losslessExact` because recovery was off. */
   losslessExactKept?: number;
   losslessExactChars?: number;

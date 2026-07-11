@@ -1897,4 +1897,40 @@ describe('E2 request-body limit', () => {
     restore();
     expect(res.status).toBe(200);
   });
+
+  it('D13 drains an oversized JSON response tee and records truncation', async () => {
+    // Response body > 4 MiB so teeForUsage caps its scan at MAX and must drain
+    // the rest (audit D13) instead of leaving the forUs side hanging.
+    const big = JSON.stringify({
+      model: 'claude-fable-5',
+      system: 'x'.repeat(4_300_000),
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    let captured: ProxyEvent | undefined;
+    const restore = mockUpstream(
+      () => new Response(big, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const proxy = createProxy({ transform: {}, onRequest: (e) => { captured = e; } });
+    const res = await proxy(
+      new Request('http://localhost/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: SAMPLE_REQ_BODY,
+      }),
+    );
+    const clientBody = await res.text();
+    // Give the onRequest callback a tick to fire (it's behind a void promise).
+    await new Promise((r) => setTimeout(r, 20));
+    restore();
+
+    expect(res.status).toBe(200);
+    // The client still receives the FULL upstream body — the tee's forClient side
+    // is independent of the capped forUs scan side.
+    expect(clientBody.length).toBe(big.length);
+    // The oversized JSON response was drained and flagged.
+    expect(captured!.info?.scanTruncated).toBe(true);
+  });
 });

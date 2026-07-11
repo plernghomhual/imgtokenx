@@ -364,6 +364,7 @@ function teeForUsage(res: Response): {
   errorBodyPromise: Promise<string | undefined>;
   measurementPromise: Promise<OutputMeasurement | undefined>;
   stopReasonPromise: Promise<string | undefined>;
+  truncatedPromise: Promise<boolean>;
 } {
   // No body at all: nothing to extract on either path.
   if (!res.body) {
@@ -373,6 +374,7 @@ function teeForUsage(res: Response): {
       errorBodyPromise: Promise.resolve(undefined),
       measurementPromise: Promise.resolve(undefined),
       stopReasonPromise: Promise.resolve(undefined),
+      truncatedPromise: Promise.resolve(false),
     };
   }
   // 4xx: tee for the error body but skip usage scanning entirely.
@@ -399,28 +401,30 @@ function teeForUsage(res: Response): {
       }
       return out.length > ERROR_BODY_MAX ? out.slice(0, ERROR_BODY_MAX) : out;
     })();
-    return {
-      response: new Response(forClient, {
-        status: res.status,
-        statusText: res.statusText,
-        headers: res.headers,
-      }),
-      usagePromise: Promise.resolve(undefined),
-      errorBodyPromise,
-      measurementPromise: Promise.resolve(undefined),
-      stopReasonPromise: Promise.resolve(undefined),
-    };
-  }
-  // 5xx: skip both (the host already synthesizes an error message).
-  if (res.status >= 500) {
-    return {
-      response: res,
-      usagePromise: Promise.resolve(undefined),
-      errorBodyPromise: Promise.resolve(undefined),
-      measurementPromise: Promise.resolve(undefined),
-      stopReasonPromise: Promise.resolve(undefined),
-    };
-  }
+      return {
+        response: new Response(forClient, {
+          status: res.status,
+          statusText: res.statusText,
+          headers: res.headers,
+        }),
+        usagePromise: Promise.resolve(undefined),
+        errorBodyPromise,
+        measurementPromise: Promise.resolve(undefined),
+        stopReasonPromise: Promise.resolve(undefined),
+        truncatedPromise: Promise.resolve(false),
+      };
+    }
+    // 5xx: skip both (the host already synthesizes an error message).
+    if (res.status >= 500) {
+      return {
+        response: res,
+        usagePromise: Promise.resolve(undefined),
+        errorBodyPromise: Promise.resolve(undefined),
+        measurementPromise: Promise.resolve(undefined),
+        stopReasonPromise: Promise.resolve(undefined),
+        truncatedPromise: Promise.resolve(false),
+      };
+    }
   const ct = (res.headers.get('content-type') ?? '').toLowerCase();
   const [forClient, forUs] = res.body.tee();
 
@@ -429,6 +433,7 @@ function teeForUsage(res: Response): {
     usage: Usage | undefined;
     measurement: OutputMeasurement | undefined;
     stopReason: string | undefined;
+    truncated: boolean;
   }> => {
     const reader = forUs.getReader();
     const decoder = new TextDecoder();
@@ -465,16 +470,31 @@ function teeForUsage(res: Response): {
         }
         buf += decoder.decode();
         if (buf.trim().length > 0) processSseEvent(buf, m, state); // trailing partial event
-        return { usage: state.usage, measurement: m, stopReason: state.stopReason };
+        return { usage: state.usage, measurement: m, stopReason: state.stopReason, truncated: false };
       }
 
       if (ct.includes('application/json')) {
-        // Buffer fully, capped at 4 MiB.
+        // Buffer fully, capped at 4 MiB (audit D13: cap + drain oversized bodies).
         const MAX = 4 * 1024 * 1024;
+        let done = false;
         while (buf.length < MAX) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
+          const r = await reader.read();
+          if (r.done) { done = true; break; }
+          buf += decoder.decode(r.value, { stream: true });
+        }
+        const truncated = !done;
+        if (truncated) {
+          // D13: drain the rest of an oversized JSON body so the tee's forUs
+          // side reaches EOF and its buffer is released instead of holding the
+          // stream open / leaking memory.
+          try {
+            while (true) {
+              const { done: d } = await reader.read();
+              if (d) break;
+            }
+          } catch {
+            /* ignore */
+          }
         }
         try {
           const j = JSON.parse(buf);
@@ -482,9 +502,10 @@ function teeForUsage(res: Response): {
             usage: normalizeUsage(j?.usage),
             measurement: measureFromMessageJson(j),
             stopReason: readStopReasonFromJson(j),
+            truncated,
           };
         } catch {
-          return { usage: undefined, measurement: undefined, stopReason: undefined };
+          return { usage: undefined, measurement: undefined, stopReason: undefined, truncated };
         }
       }
     } catch {
@@ -499,7 +520,7 @@ function teeForUsage(res: Response): {
     } catch {
       /* ignore */
     }
-    return { usage: undefined, measurement: undefined, stopReason: undefined };
+    return { usage: undefined, measurement: undefined, stopReason: undefined, truncated: false };
   })();
 
   return {
@@ -512,6 +533,7 @@ function teeForUsage(res: Response): {
     errorBodyPromise: Promise.resolve(undefined),
     measurementPromise: scanResult.then((s) => s.measurement),
     stopReasonPromise: scanResult.then((s) => s.stopReason),
+    truncatedPromise: scanResult.then((s) => s.truncated),
   };
 }
 
@@ -1033,18 +1055,20 @@ export function createProxy(config: ProxyConfig = {}) {
     const firstByteMs = Date.now() - t0;
 
     // Tee: client gets one side; scanner reads the other for usage/measurement/error body.
-    const { response: teed, usagePromise, errorBodyPromise, measurementPromise, stopReasonPromise } =
+    const { response: teed, usagePromise, errorBodyPromise, measurementPromise, stopReasonPromise, truncatedPromise } =
       teeForUsage(upstreamRes);
 
-    // Fire event in background once all four resolve (all share the same stream read).
+    // Fire event in background once all five resolve (all share the same stream read).
     void Promise.all([
       usagePromise.catch(() => undefined),
       errorBodyPromise.catch(() => undefined),
       measurementPromise.catch(() => undefined),
       stopReasonPromise.catch(() => undefined),
-    ]).then(([usage, errorBody, measurement, stopReason]) =>
-      fire(upstreamRes.status, info, undefined, firstByteMs, usage, errorBody, measurement, stopReason),
-    );
+      truncatedPromise.catch(() => false),
+    ]).then(([usage, errorBody, measurement, stopReason, truncated]) => {
+      if (truncated && info) info.scanTruncated = true; // audit D13: record oversized-body truncation
+      fire(upstreamRes.status, info, undefined, firstByteMs, usage, errorBody, measurement, stopReason);
+    });
 
     return new Response(teed.body, {
       status: upstreamRes.status,
