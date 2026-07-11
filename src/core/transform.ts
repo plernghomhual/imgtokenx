@@ -89,8 +89,17 @@ export interface TransformOptions {
   /** Soft-wrap column count. */
   cols?: number;
   /** Hard upper bound on images per tool_result; source text truncated with a paging
-   *  marker above this to stay under Anthropic's 100-image/request cap. Default 10. */
+   *  marker above this. Default 10. (Pre-D4: capped implicitly at 100/request by the
+   *  API; the request-wide cap is now enforced separately — see maxImagesPerRequest.) */
   maxImagesPerToolResult?: number;
+  /** Audit #4 D4: hard upper bound on images per REQUEST (Anthropic 100-image cap).
+   *  Counts pre-existing image blocks in req.messages PLUS every image this request
+   *  will emit. When the request is about to exceed the cap, each emission site
+   *  fails open to plain text rather than partially imaging. Default 100. */
+  maxImagesPerRequest?: number;
+  /** Anthropic-only: when true (default), the budget is enforced; when false, the
+   *  counter is a no-op (total = Infinity). Other providers have different limits. */
+  applyAnthropicImageBudget?: boolean;
   /** Pack N text columns side-by-side per image. Default 1. Auto-clamped to stay
    *  under 2000 px wide. OCR ordering risk at N≥2: model must read col 1 top-to-bottom
    *  before col 2. */
@@ -147,6 +156,9 @@ const DEFAULTS: Required<TransformOptions> = {
   // 312 cols × 5 px + 8 px pad = 1568 px slab width (Anthropic standard edge).
   cols: DENSE_CONTENT_COLS,
   maxImagesPerToolResult: 10,
+  // Anthropic Messages API caps every request at 100 images (audit #4 D4).
+  maxImagesPerRequest: 100,
+  applyAnthropicImageBudget: true,
   charsPerToken: 4,
   historyAmortizationHorizon: 1,
   priorWarmTokens: 0,
@@ -615,6 +627,11 @@ export interface TransformInfo {
   imageSourceText?: string;
   reminderImgs?: number;
   toolResultImgs?: number;
+  /** Audit #4 D4: shared Anthropic 100-image budget tracking. `existing` is the count
+   *  of pre-existing image blocks in `req.messages`. `used` is what this request
+   *  actually emitted. `skipped` is what we wanted to emit but couldn't because the
+   *  budget was exhausted. Absent when `applyAnthropicImageBudget` is false. */
+  imageBudget?: { total: number; existing: number; used: number; skipped: number };
   /** Chars of tool docs moved to the system-text Tool Reference (not imaged). */
   toolDocsChars?: number;
   /** Codepoints missing from the atlas (rendered as blank cells). Telemetry for atlas tuning. */
@@ -1186,6 +1203,82 @@ function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
   };
 }
 
+// --- image budget (audit #4 D4) -----------------------------------------------
+// Anthropic caps every Messages request at 100 images. Pre-fix, only the per-
+// tool_result paging (maxImagesPerToolResult=10) constraining independently meant
+// imgtokenx could synthesize a request that the API then rejected with 400.
+// RequestImageCounter is the single source of truth: every emission site calls
+// `counter.claim(n)` BEFORE rendering, and either fits in the budget or falls
+// back to plain text. The counter is instantiated once per transformRequest so
+// per-site claims compose into one shared `used` total.
+
+/** Count pre-existing `{ type: 'image' }` blocks across the request body — these
+ *  are images the caller already sent (user content, tool_result content arrays,
+ *  anywhere Anthropic counts as an image). Returns 0 when no images are present.
+ *  Recurses into `tool_result.content` arrays. Skips `tool_use` blocks (Anthropic
+ *  API rejects images inside tool_use args at request time). */
+export function countExistingImages(messages: ReadonlyArray<Message> | undefined): number {
+  if (!Array.isArray(messages)) return 0;
+  let n = 0;
+  for (const m of messages) {
+    const content = m.content;
+    if (typeof content === 'string') continue;
+    if (!Array.isArray(content)) continue;
+    for (const blk of content) {
+      if (!blk || typeof blk !== 'object') continue;
+      const t = (blk as { type?: string }).type;
+      if (t === 'image') {
+        n++;
+        continue;
+      }
+      if (t === 'tool_result' && Array.isArray((blk as ToolResultBlock).content)) {
+        for (const sub of (blk as ToolResultBlock).content as Array<ContentBlock>) {
+          if (sub && typeof sub === 'object' && (sub as { type?: string }).type === 'image') {
+            n++;
+          }
+        }
+      }
+    }
+  }
+  return n;
+}
+
+/** Single-instance per-request image budget. Thread to every emission site;
+ *  each site calls `claim(n)` before rendering and either fits or falls back
+ *  to plain text. */
+export class RequestImageCounter {
+  readonly total: number;
+  readonly existing: number;
+  used: number = 0;
+  skipped: number = 0;
+
+  constructor(messages: ReadonlyArray<Message> | undefined, total: number) {
+    this.total = Math.max(0, total);
+    this.existing = countExistingImages(messages);
+  }
+
+  remaining(): number {
+    return Math.max(0, this.total - this.existing - this.used);
+  }
+
+  claim(requested: number): number {
+    const r = requested > 0 ? requested : 0;
+    const allowed = Math.min(r, this.remaining());
+    this.used += allowed;
+    this.skipped += r - allowed;
+    return allowed;
+  }
+
+  toInfo(): { total: number; existing: number; used: number; skipped: number } {
+    return {
+      total: this.total,
+      existing: this.existing,
+      used: this.used,
+      skipped: this.skipped,
+    };
+  }
+}
+
 // --- paging / truncation ---------------------------------------------------
 // Anthropic caps requests at 100 images. Huge tool_results (find trees,
 // log dumps) are truncated with a paging marker before render.
@@ -1672,6 +1765,16 @@ export async function transformRequest(
   };
   const { cellW, cellH } = cellDims(renderStyle);
 
+  // Audit #4 D4: shared Anthropic 100-image budget. Counts pre-existing image
+  // blocks in `req.messages` (including tool_result content arrays) and threads
+  // the remaining budget to every emission site (slab, reminders, tool_results).
+  // Each site fails open to plain text when the remaining budget can't fit its
+  // planned render. Total = Infinity when applyAnthropicImageBudget is false.
+  const imageBudget = new RequestImageCounter(
+    req.messages,
+    o.applyAnthropicImageBudget ? o.maxImagesPerRequest : Number.POSITIVE_INFINITY,
+  );
+
   // 1. Pull system text out. Split into:
   //    - billingLine: Claude Code's per-turn random header (must NOT be cached).
   //    - dynamicText: <env>/<context>/... blocks (per-turn, kept as text).
@@ -1912,6 +2015,18 @@ export async function transformRequest(
     numCols > 1
       ? await renderTextToPngsMultiCol(combinedWithHeader, slabCols, numCols, renderStyle)
       : await renderTextToPngs(combinedWithHeader, slabCols, renderStyle);
+  // Audit #4 D4: claim from the request-wide image budget. If the budget is
+  // already exhausted by pre-existing images, we still rendered (cheap relative
+  // to the gate's work) but emit nothing. If the slab wants more than the
+  // budget allows, we keep the FIRST `allowed` images (cache anchor at the
+  // front of the prefix) and drop the rest — the trailing pages are still
+  // text-equivalent and the model still sees the full content via the
+  // fact-sheet sidecar.
+  const slabAllowed = imageBudget.claim(images.length);
+  if (slabAllowed === 0 && images.length > 0) {
+    info.reason = 'image_budget_exhausted';
+  }
+  const slabImages = slabAllowed > 0 ? images.slice(0, slabAllowed) : [];
   const imageBlocks: ImageBlock[] = [];
   for (let i = 0; i < images.length; i++) {
     const img = images[i]!;
@@ -1922,9 +2037,11 @@ export async function transformRequest(
     for (const [cp, n] of img.droppedCodepoints) {
       droppedCodepoints.set(cp, (droppedCodepoints.get(cp) ?? 0) + n);
     }
-    const imageBlock = makeImageBlock(b64, i === images.length - 1);
+    // Audit #4 D4: skip emission for images beyond the claimed budget slice.
+    if (i >= slabImages.length) continue;
+    const imageBlock = makeImageBlock(b64, i === slabImages.length - 1);
     imageBlocks.push(
-      i === images.length - 1 && systemStaticCacheControl !== undefined
+      i === slabImages.length - 1 && systemStaticCacheControl !== undefined
         ? { ...imageBlock, cache_control: systemStaticCacheControl }
         : imageBlock,
     );
@@ -2122,8 +2239,20 @@ export async function transformRequest(
                 bumpPassthrough(info, 'not_profitable');
                 rewritten.push(blk);
               } else {
+                // Audit #4 D4: clamp per-tool-result cap by request-wide remaining
+                // budget. If the request already has 95 pre-existing images, this
+                // tool_result can only emit 5 more regardless of its own size. If
+                // the budget is already fully consumed, emit plain text (NOT an
+                // empty recovery ref — the model would lose the content entirely).
+                const remaining = imageBudget.remaining();
+                if (remaining === 0) {
+                  bumpPassthrough(info, 'below_threshold');
+                  rewritten.push(blk);
+                  continue;
+                }
+                const effectivePerResult = Math.min(o.maxImagesPerToolResult, remaining);
                 // Paging: truncate before render if it would blow the image cap.
-                const paged = truncateForBudget(innerR, o.maxImagesPerToolResult, denseGeo.cols, numCols, denseGeo.maxChars);
+                const paged = truncateForBudget(innerR, effectivePerResult, denseGeo.cols, numCols, denseGeo.maxChars);
                 if (paged.truncated) {
                   info.truncatedToolResults = (info.truncatedToolResults ?? 0) + 1;
                   info.omittedChars = (info.omittedChars ?? 0) + paged.omittedChars;
@@ -2388,6 +2517,7 @@ export async function transformRequest(
   }
   info.outgoingTextChars = countOutgoingTextChars(req);
   const outBody = new TextEncoder().encode(JSON.stringify(req));
+  info.imageBudget = imageBudget.toInfo();
   return { body: outBody, info };
 }
 
