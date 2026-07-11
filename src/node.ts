@@ -31,6 +31,11 @@ import {
   type ExportResult,
 } from './core/export.js';
 import { redactErrorBody } from './core/redact.js';
+import {
+  parseModelsPayload,
+  parseTogglePayload,
+  badRequest as badRequest,
+} from './dashboard-mutations.js';
 import { readExportTextFile } from './export-collect.js';
 import {
   toTrackEvent,
@@ -420,48 +425,34 @@ export async function dispatchDashboard(
       out = dashboard.serveCurrentSessionJson();
       break;
     case 'fragment': {
-      // /fragments/toggle is the one mutating fragment - htmx POSTs the next
-      // state (urlencoded hx-vals or JSON), the server flips the switch and
-      // returns the re-rendered toggle markup.
+      // /fragments/toggle is the one mutating fragment — htmx POSTs the next
+      // state and the server flips the global kill switch and returns the
+      // re-rendered toggle markup. Body is strict JSON via parseTogglePayload;
+      // any malformed payload returns a typed 400 the dashboard can surface.
       if (route.name === 'toggle' && method === 'POST') {
-        let enabled = false;
         try {
           const raw = await readRequestBody(req);
-          try {
-            enabled = (JSON.parse(raw) as { enabled?: unknown }).enabled === true;
-          } catch {
-            enabled = new URLSearchParams(raw).get('enabled') === 'true';
-          }
-        } catch {
-          out = new Response('bad request body', { status: 400 });
-          break;
+          const { enabled } = parseTogglePayload(raw);
+          dashboard.handleCompressionToggle({ enabled });
+          out = dashboard.serveFragment('toggle', url, port);
+        } catch (err) {
+          out = badRequest(err);
         }
-        dashboard.handleCompressionToggle({ enabled });
-        out = dashboard.serveFragment('toggle', url, port);
         break;
       }
-      // /fragments/models POSTs one chip flip: {model, on}. Server mutates the
-      // runtime compress scope and returns the re-rendered chip row.
+      // /fragments/models POSTs one chip flip: {model, on}. The model id goes
+      // through validateModelId (1-80 chars, [A-Za-z0-9._-] starting alpha)
+      // before any disk persistence, so a malformed or hostile id returns a
+      // 400 instead of being silently written to ~/.config/imgtokenx/config.json.
       if (route.name === 'models' && method === 'POST') {
-        let model = '';
-        let on = false;
         try {
           const raw = await readRequestBody(req);
-          try {
-            const j = JSON.parse(raw) as { model?: unknown; on?: unknown };
-            model = typeof j.model === 'string' ? j.model : '';
-            on = j.on === true;
-          } catch {
-            const p = new URLSearchParams(raw);
-            model = p.get('model') ?? '';
-            on = p.get('on') === 'true';
-          }
-        } catch {
-          out = new Response('bad request body', { status: 400 });
-          break;
+          const { model, on } = parseModelsPayload(raw);
+          dashboard.handleModelsToggle(model, on);
+          out = dashboard.serveFragment('models', url, port);
+        } catch (err) {
+          out = badRequest(err);
         }
-        if (model) dashboard.handleModelsToggle(model, on);
-        out = dashboard.serveFragment('models', url, port);
         break;
       }
       if (method !== 'GET') { out = methodNotAllowed('GET'); break; }
@@ -476,18 +467,15 @@ export async function dispatchDashboard(
         );
         break;
       }
-      let body: Record<string, unknown> = {};
+      // Same strict-JSON contract as /fragments/toggle — single source of
+      // truth in parseTogglePayload.
       try {
         const raw = await readRequestBody(req);
-        body = raw ? JSON.parse(raw) : {};
-      } catch (e) {
-        out = new Response(
-          JSON.stringify({ error: 'bad request body', detail: (e as Error).message }),
-          { status: 400, headers: { 'content-type': 'application/json' } },
-        );
-        break;
+        const { enabled } = parseTogglePayload(raw);
+        out = dashboard.handleCompressionToggle({ enabled });
+      } catch (err) {
+        out = badRequest(err);
       }
-      out = dashboard.handleCompressionToggle({ enabled: body.enabled });
       break;
     }
   }
