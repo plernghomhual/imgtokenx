@@ -194,6 +194,35 @@ export function staleFreshnessHints(text: string): string {
 }
 
 /**
+ * True when a message carries at least one block type imgtokenx cannot safely
+ * serialize into the history image: a `thinking` block (Anthropic's encrypted
+ * reasoning trace), an unknown future block kind (audio, server-tool state,
+ * documents, etc.), or any non-text/tool block we don't recognise. The
+ * `collapseHistory` planner treats this as a hard barrier and pulls the
+ * collapse boundary back to just BEFORE the message, so the original message
+ * — including its opaque block — survives verbatim in the kept tail.
+ * Audit #3 D3: history serialization must preserve unsupported provider state.
+ */
+export function messageHasOpaqueBlock(content: string | ContentBlock[]): boolean {
+  if (typeof content === 'string') return false;
+  if (!Array.isArray(content)) return false;
+  for (const blk of content) {
+    if (!blk || typeof blk !== 'object') continue;
+    const t = (blk as { type?: string }).type;
+    if (t === 'thinking') return true; // Anthropic: encrypted reasoning trace
+    if (
+      t !== 'text' &&
+      t !== 'tool_use' &&
+      t !== 'tool_result' &&
+      t !== 'image'
+    ) {
+      return true; // unknown / future block kind
+    }
+  }
+  return false;
+}
+
+/**
  * Linearise content blocks to a single string. Drops thinking blocks (only the
  * most-recent assistant turn needs bit-perfect thinking, and it's in the live tail).
  * Inline images collapse to [image] to avoid double-encoding.
@@ -516,10 +545,29 @@ export async function collapseHistory(
           ),
         )
       : rawCutoff;
-  const boundary = findClosedPrefixBoundary(messages, cutoff);
+  let boundary = findClosedPrefixBoundary(messages, cutoff);
   if (boundary < 0) {
     info.reason = 'no_closed_prefix';
     return { messages, info };
+  }
+  // Audit #3 D3: pull the boundary back to just BEFORE any message that carries a
+  // thinking / unknown / future block kind. Sweeping such a message into the history
+  // image drops its unsupported provider state silently (no text to render, no
+  // JSON to stringify, no [image] placeholder that preserves the bytes). The
+  // kept tail naturally carries the original message — including its opaque block —
+  // verbatim, so the model still sees the reasoning trace / audio / future state.
+  let opaqueBarrierIdx = -1;
+  for (let i = protectedPrefix; i <= boundary; i++) {
+    if (messageHasOpaqueBlock(messages[i]!.content)) {
+      opaqueBarrierIdx = i;
+    }
+  }
+  if (opaqueBarrierIdx >= 0) {
+    boundary = opaqueBarrierIdx - 1;
+    if (boundary < protectedPrefix) {
+      info.reason = 'no_closed_prefix';
+      return { messages, info };
+    }
   }
   // Need at least minCollapsePrefix turns in [protectedPrefix..boundary] — collapsing
   // 2-3 turns is net cost (cache-amortization math doesn't work at small scale).

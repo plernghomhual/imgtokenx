@@ -22,6 +22,7 @@ import {
   staleFreshnessHints,
   messagesToHistoryText,
   collapseHistory,
+  messageHasOpaqueBlock,
   HISTORY_DEFAULTS,
 } from '../src/core/history.js';
 import { transformRequest, isCompressionProfitable } from '../src/core/transform.js';
@@ -805,6 +806,152 @@ describe('transformRequest history compression (always-on)', () => {
       ),
     ];
     expect(all.filter((b: { cache_control?: unknown }) => b && b.cache_control !== undefined).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit #3 D3: history serialization must preserve unsupported provider state.
+// Anthropic `thinking` blocks and any unknown / future block kind (audio,
+// server-tool state, documents, etc.) cannot be safely rendered into the
+// history image — `blocksToText` silently drops them, and an OCR-only copy of
+// "the model was reasoning about X" loses X. `collapseHistory` must treat
+// such messages as a hard boundary and leave them in the live tail verbatim.
+// ---------------------------------------------------------------------------
+describe('Audit #3 D3 — opaque barriers in Anthropic history (thinking, unknown blocks)', () => {
+  // The break-even predicate that ships with transform.ts (mirrors the one in
+  // the collapseHistory describe block above). Local to this describe so the
+  // audit-specific tests stay self-contained and don't depend on inner-block
+  // consts from a sibling suite.
+  const profitable = isCompressionProfitable;
+
+  it('messageHasOpaqueBlock returns true for thinking, false for known kinds', () => {
+    const thinkingMsg = asst([
+      // @ts-expect-error — `thinking` is a real Anthropic block but not in our pared-down types union.
+      { type: 'thinking', thinking: 'chain of thought', signature: 'sig' },
+    ]);
+    expect(messageHasOpaqueBlock(thinkingMsg.content)).toBe(true);
+
+    // Known text/tool/image blocks are NOT opaque.
+    expect(messageHasOpaqueBlock('plain text')).toBe(false);
+    expect(
+      messageHasOpaqueBlock([
+        { type: 'text', text: 'visible' },
+        { type: 'tool_use', id: 'x', name: 't', input: {} },
+      ]),
+    ).toBe(false);
+
+    // Unknown future block kinds (e.g. audio, server-tool state) are opaque.
+    // @ts-expect-error — 'audio' is a hypothetical future block kind, not in our types union.
+    expect(messageHasOpaqueBlock([{ type: 'audio', data: '...' }])).toBe(true);
+    // @ts-expect-error — 'document' is a hypothetical future block kind.
+    expect(messageHasOpaqueBlock([{ type: 'document', source: '...' }])).toBe(true);
+  });
+
+  it('collapseHistory stops BEFORE a thinking block and preserves it in the kept tail', async () => {
+    // 20-turn transcript: a thinking block at index 12 (mid-range), then more plain
+    // turns. The pre-fix behavior swept the thinking into the history image and
+    // dropped the reasoning trace silently. Post-fix: the boundary pulls back to
+    // 11, the thinking message at 12 stays in the live tail verbatim.
+    const msgs: Message[] = [];
+    for (let i = 0; i < 20; i++) {
+      const body = `turn ${i}: ` + 'x'.repeat(2800);
+      msgs.push(i % 2 === 0 ? usr(body) : asst(body));
+    }
+    // Inject a thinking block at index 12 (assistant turn). Use a real shape
+    // (verified against Anthropic's public Messages API schema).
+    msgs[12] = asst([
+      // @ts-expect-error — `thinking` is a real Anthropic block, not in our pared-down types union.
+      { type: 'thinking', thinking: 'private reasoning the model must not lose', signature: 'sig_abc' },
+    ]);
+    // Capture the original thinking message object for the keep-tail assertion below.
+    const thinkingMsg = msgs[12];
+
+    const { messages: out, info } = await collapseHistory(msgs, profitable, {
+      keepTail: 2,
+      minCollapsePrefix: 5,
+      cols: 100,
+      collapseChunk: 0, // legacy moving boundary — pins the pulled-back boundary exactly
+    });
+
+    // No early bail — the prefix before the barrier is still long enough to collapse.
+    expect(info.reason).toBe(undefined);
+    // Collapsed range ends at or before the barrier (index 12). The closed-prefix
+    // boundary snaps naturally; the opaque pull-back ensures we never include 12.
+    expect(info.collapsedTurns).toBeLessThanOrEqual(12 - 0); // 0 = protectedPrefix default
+
+    // The thinking message survives in the kept tail as the SAME object reference
+    // (byte-identical, including the original thinking block with its signature).
+    const tailIdx = out.findIndex(
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some(
+          (b) => b && typeof b === 'object' && (b as { type?: string }).type === 'thinking',
+        ),
+    );
+    expect(tailIdx).toBeGreaterThan(0); // not in the synthetic history, not the head
+    expect(out[tailIdx]).toBe(thinkingMsg);
+  });
+
+  it('collapseHistory bails with no_closed_prefix when the FIRST collapsible message is opaque', async () => {
+    // The very first message in the collapse range carries a thinking block. There
+    // is nothing before it to image, and we must not sweep the thinking into the
+    // image, so the planner returns no_closed_prefix and the original transcript
+    // is preserved unchanged.
+    const msgs: Message[] = [
+      // protectedPrefix=0 (default). The thinking block at index 0 means the
+      // entire range is opaque — the boundary pulls back to -1 (no_closed_prefix).
+      // @ts-expect-error — `thinking` is a real Anthropic block.
+      asst([{ type: 'thinking', thinking: 'reasoning before any collapsible turn', signature: 'sig' }]),
+    ];
+    for (let i = 1; i <= 12; i++) {
+      const body = `turn ${i}: ` + 'x'.repeat(2800);
+      msgs.push(i % 2 === 0 ? usr(body) : asst(body));
+    }
+    const { messages: out, info } = await collapseHistory(msgs, profitable, {
+      keepTail: 2,
+      minCollapsePrefix: 5,
+      cols: 100,
+      collapseChunk: 0,
+    });
+    expect(info.reason).toBe('no_closed_prefix');
+    expect(info.collapsedTurns).toBe(0);
+    // The thinking message is preserved byte-identical (it never left the live tail).
+    expect(out[0]).toBe(msgs[0]);
+  });
+
+  it('collapseHistory treats an unknown future block kind as an opaque barrier', async () => {
+    // Hypothetical future block kind (e.g. `audio`, `document`) the renderer does
+    // not understand. The planner must treat it identically to a thinking block
+    // and pull the boundary back so the unknown-state message stays in the tail.
+    const msgs: Message[] = [];
+    for (let i = 0; i < 20; i++) {
+      const body = `turn ${i}: ` + 'x'.repeat(2800);
+      msgs.push(i % 2 === 0 ? usr(body) : asst(body));
+    }
+    // @ts-expect-error — 'audio' is a hypothetical future block kind.
+    msgs[8] = asst([{ type: 'audio', data: 'base64-bytes-the-model-needs' }]);
+    const audioMsg = msgs[8];
+
+    const { messages: out, info } = await collapseHistory(msgs, profitable, {
+      keepTail: 2,
+      minCollapsePrefix: 5,
+      cols: 100,
+      collapseChunk: 0,
+    });
+
+    expect(info.reason).toBe(undefined);
+    // Collapse stops before the unknown-kind message.
+    expect(info.collapsedTurns).toBeLessThanOrEqual(8);
+    // The unknown message survives byte-identical in the kept tail.
+    const audioTailIdx = out.findIndex(
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some(
+          (b) => b && typeof b === 'object' && (b as { type?: string }).type === 'audio',
+        ),
+    );
+    expect(audioTailIdx).toBeGreaterThan(0);
+    expect(out[audioTailIdx]).toBe(audioMsg);
   });
 });
 

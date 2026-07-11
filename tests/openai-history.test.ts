@@ -49,10 +49,41 @@ describe('responsesItemsToTurns', () => {
     expect(turns[1]!.text).toContain('[tool_result]');
   });
 
-  it('drops reasoning items (empty text, not opaque)', () => {
+  it('treats reasoning items as opaque barriers (audit #3 D3)', () => {
+    // Reasoning carries model-internal state (chain-of-thought, summaries, encrypted
+    // reasoning blobs) that we don't know how to render. A previous "drop silently"
+    // behavior swept reasoning into the history image and lost the state — the
+    // planner must treat reasoning as OPAQUE so findClosedBoundary breaks BEFORE
+    // it, the original item survives in the kept tail, and the model still has it.
     const [t] = responsesItemsToTurns([{ type: 'reasoning', summary: [] }]);
     expect(t!.text).toBe('');
-    expect(t!.opaque).toBe(false);
+    expect(t!.opaque).toBe(true);
+  });
+
+  it('planner stops BEFORE a reasoning item (barrier; reasoning preserved in the kept tail)', async () => {
+    // 40 plain turns, then a reasoning item at index 18, then more plain turns. The
+    // planner's findClosedBoundary hits the opaque at 18 and breaks — the boundary
+    // sits BEFORE 18, so turn 18 itself stays in the live tail along with everything
+    // after it. Without the opaque-on-reasoning fix, the planner would sweep past
+    // the reasoning item and lose it inside the history image.
+    const turns = plainTurns(40, 1000);
+    turns[18] = { text: '', openIds: [], closeIds: [], opaque: true };
+    const plan = await planGptCollapse(turns, 0, yes, { collapseChunk: 0 });
+    expect(plan.images.length).toBeGreaterThan(0);
+    // Collapse MUST stop before the opaque turn.
+    expect(plan.endExclusive).toBeLessThanOrEqual(18);
+  });
+
+  it('planner refuses to collapse at all when the very first collapsible turn is reasoning', async () => {
+    // 12 plain turns (boundary available) followed by a reasoning item at the start of
+    // the would-be collapse range. The opaque at the range's start must trigger
+    // no_closed_prefix — collapsing the reasoning into the image is forbidden, and
+    // there is nothing BEFORE the barrier to image.
+    const turns = plainTurns(12, 1000);
+    turns[0] = { text: '', openIds: [], closeIds: [], opaque: true };
+    const plan = await planGptCollapse(turns, 0, yes, { collapseChunk: 0 });
+    expect(plan.images).toHaveLength(0);
+    expect(plan.reason).toMatch(/no_closed_prefix|prefix_too_short/);
   });
 
   it('marks unknown item kinds opaque (collapse barrier)', () => {

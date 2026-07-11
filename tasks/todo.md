@@ -1083,3 +1083,19 @@ Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v
   - `compress=false` / `parse_error` / `no_user_message` / `reader_profile_unsafe`: still early-return (no history anchor available).
   - `collapseHistory=false`: still skips Phase 2 entirely (operator opt-out).
   3 new D2 regression tests in tests/openai-gpt5.test.ts: D2.A (no-slab request collapses history), D2.B (below_min_chars slab still collapses history), D2.C (collapseHistory=false still disables history in the no-slab case). The pre-existing Chat/Responses history-collapse tests (which go through the slab path) continue to pass unchanged — the fix is additive.
+
+## Final Review - 2026-07-10 (audit batch 17 — 1 of 38 items: #3 D3)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest focused tests pass:
+- tests/openai-history.test.ts 24/24 (updated reasoning + 2 new planner tests)
+- tests/history.test.ts 30/30 (3 new Anthropic opaque-barrier tests)
+- tests/openai-gpt5.test.ts 43/43 (D2 batch 16 still green)
+- tests/anthropic-cache-align.test.ts 9/9
+- Surrounding test guardrails 8 files / 134 tests still green
+Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v0.8.0"; git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #3 D3 preserve unsupported/unknown history content as opaque ordering barriers. Two side-by-side fixes:
+  - **OpenAI (src/core/openai-history.ts):** `responsesItemToTurn` for `reasoning` items now returns `opaque: true` (was: `opaque: false`). The planner's existing `findClosedBoundary` and `isClosedPrefix` already break on `t.opaque`, so the planner needed no change. Reasoning items now become hard barriers — the collapse stops BEFORE the reasoning, the original item survives in the kept tail verbatim. Updated the existing regression test that asserted the old broken behavior, plus 2 new planner tests (barrier at index 18, barrier at index 0).
+  - **Anthropic (src/core/history.ts):** Added exported `messageHasOpaqueBlock(content: string | ContentBlock[]): boolean` that returns true for `thinking` blocks (Anthropic encrypted reasoning) OR any unknown future kind (audio, document, etc.). In `collapseHistory`, after the initial `findClosedPrefixBoundary` call computes the closed-prefix boundary, walk `[protectedPrefix..boundary]` for opaque messages; pull `boundary` back to `opaqueBarrierIdx - 1`; if that leaves nothing to collapse, return `no_closed_prefix`. Changed `const boundary` → `let boundary` to allow the re-assignment. The kept tail naturally carries the original opaque message byte-identical because `collapseHistory` splices `messages.slice(collapseLen)` unchanged. 4 new tests: unit test for `messageHasOpaqueBlock`, thinking block in middle (boundary pulled back, thinking in tail by reference equality), thinking at start (bails with no_closed_prefix), unknown future kind (audio, boundary pulled back).
+- The collapseChunk grid snap is preserved: `boundary` is computed via `findClosedPrefixBoundary(cutoff)` (where `cutoff` is grid-snapped) and then pulled back. The grid-snap lives on `cutoff`, not on `boundary`. minCollapsePrefix is preserved: the pull-back can still trip `prefix_too_short` if the remaining range is too short.

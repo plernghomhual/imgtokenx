@@ -476,7 +476,13 @@ function responsesItemToTurn(item: unknown, idx: number): HistoryTurn {
   const o = (item ?? {}) as Record<string, unknown>;
   const type = typeof o.type === 'string' ? o.type : undefined;
   if (type === 'reasoning') {
-    return { text: '', openIds: [], closeIds: [], opaque: false };
+    // Reasoning items carry model-internal state (chain-of-thought, summaries, encrypted
+    // reasoning blobs). Sweeping them into the history image drops that state silently
+    // because we don't know how to render it. Mark OPAQUE: findClosedBoundary breaks
+    // at the first opaque turn, so the collapse stops BEFORE this item and the
+    // original reasoning item survives in the kept tail verbatim. Same data-integrity
+    // contract as unknown-kind items (item_reference etc.) below. Audit #3 D3.
+    return { text: '', openIds: [], closeIds: [], opaque: true };
   }
   if (type === 'function_call') {
     const callId =
