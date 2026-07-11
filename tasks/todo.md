@@ -550,14 +550,14 @@ Approved scope: implement every confirmed audit finding; preserve public behavio
 - [ ] 2. Finalize GPT history collapse independently of static-slab profitability and early returns.
 - [ ] 3. Preserve unsupported/unknown history content as opaque ordering barriers.
 - [ ] 4. Enforce one request-wide Anthropic 100-image budget across native content, slabs, results, reminders, and history.
-- [ ] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
+- [x] 5. Price complete factsheet sidecars before rendering and keep exact native text when imaging is unprofitable.
 - [x] 6. Add the documented `losslessExact` option to the public TypeScript API.
 - [x] 7. Apply GPT model-safety gates consistently to public SDK transformers and proxy paths.
 - [ ] 8. Preserve hostile schema keys such as `__proto__` without prototype corruption.
 - [ ] 9. Normalize Anthropic schema handling consistently for primary and token-count requests.
 - [ ] 10. Thread render size limits through multi-column public rendering paths.
 - [ ] 11. Reject invalid negative GPT vision-cost overrides.
-- [ ] 12. Include prompt/factsheet overhead in exported savings accounting.
+- [x] 12. Include prompt/factsheet overhead in exported savings accounting.
 - [ ] 13. Preserve valid long custom schema formats.
 
 ## Proxy, routing, lifecycle, and resource safety
@@ -662,4 +662,28 @@ Status: 1 item implemented + regression-tested; tsc clean; full suite 763 passed
 ### Notes / risks
 - The streamed check buffers the full body via `arrayBuffer()` then compares (not a true incremental stream cancel), so memory is still allocated before rejection. Acceptable for the operator-configured cap; a hard incremental cancel would need a ReadableStream wrapper. Flagged, not blocking.
 - `BodyTooLargeError` is exported so hosts/tests can distinguish it from transform failures.
+
+## Final Review - 2026-07-10 (audit batch 4 — 2 of 40 items: D5, D16)
+
+Status: 2 items implemented + regression-tested; tsc clean; full suite 766 passed (was 763); build green (0.8.0). Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #5 D5 price the complete factsheet sidecar before rendering and keep exact native text when imaging is unprofitable (`src/core/openai.ts`): `evalOpenAIGate` now takes `extraTextTokens`; the verbatim fact-sheet sidecar (`factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE)`) is computed BEFORE the gate in both chat + responses slab paths and added to the image-side cost. When the sidecar tips `imageTokens + extra ≥ textTokens`, the slab stays native text (`OversizeReason` set to `factsheet_sidecar_keeps_text`). The gate telemetry call is reused (no duplicate). `GateEval.sidecarTextTokens` added (`src/core/transform.ts`); `evalOpenAIGate` exported for testing. New `tests/openai-gpt5.test.ts` D5 block proves the flip both ways.
+- [x] #12 D16 include the factsheet overhead in the exported savings accounting (`src/core/export.ts`): `computeTokenReport` (pure estimate) and the real export ledger now compute `sidecarTokens = factSheetTextComplete / REPORT_CHARS_PER_TOKEN` and price it into `imageTokens`, with `ExportTokenReport.sidecarTokens` added so reported savings are not overstated. New `tests/export.test.ts` D16 test.
+
+### Notes / risks
+- D5 reuses the existing `evalOpenAIGate` contract (profitable/threshold/imageTokens/textTokens/_debug). The sidecar is added only to the gate decision cost, matching how the real render path later appends the same sidecar to the output — so a slab that would be "profitable on image alone but unprofitable once the mandatory verbatim sidecar is added" correctly stays text (preserving precision-critical identifiers byte-exact).
+- D16's real-ledger path also extracts factsheet across ALL pages (`extractFactSheetEntriesAllPages`) so the sidecar accounts for identifiers appearing on page 3+, consistent with the estimate which sweeps the full combined text.
+
+### Verification
+- `node_modules/.bin/tsc` (--noEmit): exit 0.
+- `node_modules/.bin/vitest run`: 49 files, 766 tests, all passed.
+- `PATH=node_modules/.bin:$PATH node scripts/build.mjs`: exit 0; version smoke 0.8.0.
+- `git diff --check`: clean.
+
+### Remaining (not yet implemented, 25 of 40)
+- Core correctness: #2 D2 GPT history collapse independent of slab profitability, #3 D3 preserve unsupported history as opaque barriers, #4 D4 request-wide 100-image budget (transform.ts threading — high-risk, deferred), #10 D14 multi-col size-limit threading, #11 D9-style (already D9 in batch1 — value the live count-token path).
+- Proxy/lifecycle/resource: #16 E3 abort/timeout propagation, #20 D13 oversized JSON tee drain/cancel, #21 D19 redact/bound provider error+recovery data.
+- Dashboard/installer/ops: #23 D19 validate model-id payloads, #24 E4 non-loopback host/auth + DNS-rebind, #26 D22 keyboard-accessible thumbnails, #27 D23 live/loading/error a11y, #28 D20 transactional install/rollback, #29 D21 versioned/authenticated health check, #30 D20 sidecar perms/symlink/retention.
+- Tests/CI/docs: #32 worker/dashboard security+a11y coverage, #33 F2 strict typecheck of tests/scripts, #34 Node 18/22 CI, #36 pnpm-in-npm config, #37 remove transform-executing test helpers, #38 D24 docs reconcile + dead-constant removal, #39 CLI/package duplication, #40 large-module boundary review.
 

@@ -17,7 +17,9 @@ import {
   CELL_H,
   CELL_W,
   MAX_HEIGHT_PX,
+  READABLE_CHARS_PER_IMAGE,
 } from '../src/core/render.js';
+import { renderTextToImages } from '../src/core/library.js';
 import { encodeGrayPng, bytesToBase64 } from '../src/core/png.js';
 import {
   transformRequest,
@@ -2434,5 +2436,23 @@ describe('colorByRole (structure-through slot string)', () => {
     // PNG IHDR colorType byte: sig(8) + len(4) + "IHDR"(4) + ihdr[9] = offset 25.
     expect(colored.png[25]).toBe(2); // 2 = truecolor RGB
     expect(plain.png[25]).toBe(0); // 0 = grayscale
+  });
+});
+
+describe('D14 multi-column public render respects maxHeightPx + maxCharsPerImage', () => {
+  // Audit D14: the multi-column branch of renderTextToImages used to ignore the
+  // caller's size limits (hard-coded MAX_HEIGHT_PX / READABLE_CHARS_PER_IMAGE).
+  const text = Array.from({ length: 2500 }, () => 'const value = computeHash(input);').join('\n');
+
+  it('caps every page height at maxHeightPx', async () => {
+    const small = await renderTextToImages(text, { multiCol: 'auto', maxHeightPx: 300 });
+    expect(small.pages.length).toBeGreaterThan(1);
+    for (const p of small.pages) expect(p.height).toBeLessThanOrEqual(300);
+  });
+
+  it('smaller maxCharsPerImage yields more (smaller) pages', async () => {
+    const wide = await renderTextToImages(text, { multiCol: 2, maxCharsPerImage: READABLE_CHARS_PER_IMAGE });
+    const tight = await renderTextToImages(text, { multiCol: 2, maxCharsPerImage: 2000 });
+    expect(tight.pages.length).toBeGreaterThan(wide.pages.length);
   });
 });

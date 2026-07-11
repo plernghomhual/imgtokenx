@@ -228,7 +228,7 @@ export async function renderTextToImages(
 
   const imgs =
     numCols > 1
-      ? await renderTextToPngsMultiCol(source, cols, numCols, style)
+      ? await renderTextToPngsMultiCol(source, cols, numCols, style, maxHeightPx, maxChars)
       : await renderTextToPngsWithCharLimit(source, cols, maxChars, style, maxHeightPx);
 
   let droppedChars = 0;

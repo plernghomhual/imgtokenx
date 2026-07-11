@@ -1045,19 +1045,21 @@ export async function renderTextToPngsMultiCol(
   cols: number = DEFAULT_COLS,
   numCols: number = 2,
   style: RenderStyle = {},
+  maxHeightPx: number = MAX_HEIGHT_PX,
+  maxCharsPerImage: number = READABLE_CHARS_PER_IMAGE,
 ): Promise<RenderedImage[]> {
   const cellW = renderCellWidth(style);
   const cellH = renderCellHeight(style);
-  if (numCols <= 1) return renderTextToPngs(text, cols, style);
+  if (numCols <= 1) return renderTextToPngs(text, cols, style, maxHeightPx);
   if (multiColWidth(cols, numCols, cellW) > MAX_WIDTH_PX) {
     // Clamp to widest fitting count rather than throw (bad CLI flag recovery).
     numCols = maxFittingCols(cols, cellW);
-    if (numCols <= 1) return renderTextToPngs(text, cols, style);
+    if (numCols <= 1) return renderTextToPngs(text, cols, style, maxHeightPx);
   }
 
   const markerScale = Math.max(1, Math.floor(style.markerScale ?? 1));
   const lines = wrapLines(text, cols, markerScale, style.font);
-  const hardLinesPerImg = Math.max(1, Math.floor((MAX_HEIGHT_PX - 2 * PAD_Y) / cellH));
+  const hardLinesPerImg = Math.max(1, Math.floor((maxHeightPx - 2 * PAD_Y) / cellH));
   const linesPerImg = Math.min(hardLinesPerImg, readableLinesPerColumn(cols));
   const linesPerImage = linesPerImg * numCols;
 
@@ -1070,7 +1072,7 @@ export async function renderTextToPngsMultiCol(
   const pages = splitWrappedLinesIntoReadablePages(
     lines,
     linesPerImage,
-    READABLE_CHARS_PER_IMAGE * Math.max(1, numCols | 0),
+    maxCharsPerImage * Math.max(1, numCols | 0),
   );
   for (let i = 0; i < pages.length; i++) {
     const slice = pages[i]!;
@@ -1096,9 +1098,11 @@ export async function renderTextToPngsReflowMultiCol(
   cols: number = DEFAULT_COLS,
   numCols: number = 2,
   style: RenderStyle = {},
+  maxHeightPx: number = MAX_HEIGHT_PX,
+  maxCharsPerImage: number = READABLE_CHARS_PER_IMAGE,
 ): Promise<RenderedImage[]> {
   const packed = reflow(text);
-  return renderTextToPngsMultiCol(packed ?? text, cols, numCols, style);
+  return renderTextToPngsMultiCol(packed ?? text, cols, numCols, style, maxHeightPx, maxCharsPerImage);
 }
 
 export interface RenderDensePagesOptions {
