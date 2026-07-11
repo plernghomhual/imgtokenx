@@ -14,13 +14,31 @@ import { spawnSync } from 'node:child_process';
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 const OUT = 'dist';
+const tscBin = process.platform === 'win32' ? 'tsc.cmd' : 'tsc';
+
+// Probe the toolchain BEFORE wiping dist/: a tsc missing from PATH used to
+// surface as a mute `exit 1` (spawnSync ENOENT leaves status null and .error
+// was never checked) with dist/ already emptied.
+const probe = spawnSync(tscBin, ['--version'], { encoding: 'utf8', shell: false });
+if (probe.error || probe.status !== 0) {
+  console.error(
+    `✗ cannot run '${tscBin}': ${probe.error ? probe.error.message : `exit ${probe.status}`}\n` +
+      `  hint: run via \`pnpm run build\` so node_modules/.bin is on PATH`,
+  );
+  process.exit(1);
+}
+
 if (existsSync(OUT)) await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
 
-const tsc = spawnSync(process.platform === 'win32' ? 'tsc.cmd' : 'tsc', ['-p', 'tsconfig.json'], {
+const tsc = spawnSync(tscBin, ['-p', 'tsconfig.json'], {
   stdio: 'inherit',
   shell: false,
 });
+if (tsc.error) {
+  console.error(`✗ tsc failed to spawn: ${tsc.error.message}`);
+  process.exit(1);
+}
 if (tsc.status !== 0) process.exit(tsc.status ?? 1);
 console.log('✓ emitted dist/ library modules + declarations');
 
@@ -39,8 +57,24 @@ await build({
     __IMGTOKENX_VERSION__: JSON.stringify(pkg.version),
     __IMGTOKENX_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
-  // Atlas is inlined as a base64 string in src/core/atlas.ts, so no external assets.
+  // No external assets: atlases are base64 strings in TS modules. But those
+  // four modules total ~4.8 MB and ALREADY ship unbundled in dist/core/ for
+  // the library exports — inlining them again doubled the atlas payload in
+  // the tarball. Externalize them and import the dist/core copies at runtime
+  // (both files live in the same published package, so the relative import
+  // from dist/node.js always resolves).
   external: [],
+  plugins: [
+    {
+      name: 'atlas-dedup',
+      setup(b) {
+        b.onResolve({ filter: /^\.\/atlas[a-z0-9-]*\.js$/ }, (args) => ({
+          path: args.path.replace('./', './core/'),
+          external: true,
+        }));
+      },
+    },
+  ],
   banner: { js: '#!/usr/bin/env node' },
 });
 

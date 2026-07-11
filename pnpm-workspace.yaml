@@ -8,5 +8,15 @@ onlyBuiltDependencies:
 # (publish → discovered → unpublished within hours/days). Legitimate
 # security patches also wait 3 days; that's a deliberate trade-off for a
 # repo we update manually.
+# NOTE: this yaml is the ONLY place pnpm reads these settings from — a
+# previous audit pass parked them in a `.pnpmrc` file, which pnpm does not
+# read at all (its config chain is .npmrc + pnpm-workspace.yaml).
 minimumReleaseAge: 4320  # minutes (= 3 days)
-# minimumReleaseAgeExclude:  # add packages here if a fast follow is needed
+# @cloudflare/* (workers-types, wrangler's engine deps) iterate faster than
+# the 3-day window — exclude so Workers tooling updates aren't blocked.
+# https://pnpm.io/settings#minimumreleaseageexclude
+minimumReleaseAgeExclude:
+  - "@cloudflare/*"
+# Don't apply .pnpmfile.cjs overrides. We don't ship one today; belt-and-braces
+# lockout so a future pnpmfile can't quietly rewrite dependency semantics.
+ignorePnpmfile: true

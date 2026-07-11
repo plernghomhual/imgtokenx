@@ -22,6 +22,16 @@ import { createProxy } from '../src/core/proxy.js';
 import { countCacheControlMarkers } from '../src/core/measurement.js';
 import { HISTORY_SYNTHETIC_INTRO } from '../src/core/history.js';
 
+/** Poll until the fire-and-forget proxy work lands instead of sleeping a
+ *  fixed tick (flaked on slow CI). Times out loudly, never passes vacuously. */
+async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > timeoutMs) throw new Error('proxy event did not settle in time');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 // These proxy contracts intentionally exercise the opt-in generic GPT path.
 // Preserve the developer shell while making the suite independent of it.
 let ambientImgtokenxModels: string | undefined;
@@ -462,8 +472,8 @@ describe('e2e cache alignment — Anthropic /v1/messages through the real proxy'
 
   it('ROUTING + AUTH: forwards to the configured upstream; only count_tokens side calls (dual probe with a marker)', async () => {
     const cap = await driveAnthropic(anthropicBody({ slabChars: 80_000, turns: turns(4, 20) }));
-    // count_tokens is fire-and-forget — give it a tick before asserting.
-    await new Promise((r) => setTimeout(r, 30));
+    // count_tokens is fire-and-forget — wait for both probes before asserting.
+    await settle(() => cap.sidePaths.length >= 2);
     cap.restore();
 
     expect(cap.main).toHaveLength(1);

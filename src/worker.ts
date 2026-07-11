@@ -77,6 +77,46 @@ async function secretsMatch(a: string, b: string): Promise<boolean> {
 const truthy = (v: string | undefined, fallback: boolean): boolean =>
   v == null ? fallback : v === '1' || v.toLowerCase() === 'true';
 
+// Numeric env with fallback: unset, empty, or non-numeric (NaN/Infinity)
+// values keep the documented default instead of poisoning the transform
+// options with NaN.
+const numeric = (v: string | undefined, fallback: number): number =>
+  v && Number.isFinite(Number(v)) ? Number(v) : fallback;
+
+/** Env → TransformOptions. Exported for direct testability of the env
+ *  parsing (garbage values must fall back to documented defaults, never NaN). */
+export function workerTransformOptions(env: Env): TransformOptions {
+  return {
+    compress: truthy(env.COMPRESS, true),
+    compressTools: truthy(env.COMPRESS_TOOLS, true),
+    compressReminders: truthy(env.COMPRESS_REMINDERS, true),
+    compressToolResults: truthy(env.COMPRESS_TOOL_RESULTS, true),
+    minCompressChars: numeric(env.MIN_COMPRESS_CHARS, 2000),
+    // 500 chars — CPU/latency floor only, not a correctness guard. The
+    // No floors — the content-aware `isCompressionProfitable()` gate
+    // decides per-block based on actual pixel cost vs text cost. Host
+    // can still set a floor via env if they want observability buckets
+    // (e.g. MIN_TOOL_RESULT_CHARS=200 to skip absurdly small dumps).
+    minReminderChars: numeric(env.MIN_REMINDER_CHARS, 0),
+    minToolResultChars: numeric(env.MIN_TOOL_RESULT_CHARS, 0),
+    // Omit by default so OpenAI-shaped requests use their model profile.
+    // A non-numeric COLS is ignored (falls back to model profile) rather
+    // than injecting NaN into the render geometry.
+    ...(env.COLS && Number.isFinite(Number(env.COLS)) ? { cols: Number(env.COLS) } : {}),
+    // R2 multi-column ON (2 cols) — single-col drops below break-even on
+    // real tool-doc slabs. Override via MULTI_COL=1 if OCR misreads layout.
+    // Non-numeric values keep the documented default 2 (Number("abc")|0
+    // would otherwise silently collapse to 1 column).
+    multiCol: Math.max(1, numeric(env.MULTI_COL, 2) | 0),
+    // Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
+    // instead of being imaged — default-on. No recovery sidecar here:
+    // Workers has no writable filesystem for the rec_* dump, so this is
+    // the only exactness guard on this deploy target. Override with
+    // LOSSLESS_EXACT=0/false to disable.
+    losslessExact: truthy(env.LOSSLESS_EXACT, true),
+  };
+}
+
 export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     // ── Caller auth ────────────────────────────────────────────────────
@@ -107,31 +147,7 @@ export default {
       req.headers.delete('x-imgtokenx-secret');
     }
 
-    const transform: TransformOptions = {
-      compress: truthy(env.COMPRESS, true),
-      compressTools: truthy(env.COMPRESS_TOOLS, true),
-      compressReminders: truthy(env.COMPRESS_REMINDERS, true),
-      compressToolResults: truthy(env.COMPRESS_TOOL_RESULTS, true),
-      minCompressChars: env.MIN_COMPRESS_CHARS ? Number(env.MIN_COMPRESS_CHARS) : 2000,
-      // 500 chars — CPU/latency floor only, not a correctness guard. The
-      // No floors — the content-aware `isCompressionProfitable()` gate
-      // decides per-block based on actual pixel cost vs text cost. Host
-      // can still set a floor via env if they want observability buckets
-      // (e.g. MIN_TOOL_RESULT_CHARS=200 to skip absurdly small dumps).
-      minReminderChars: env.MIN_REMINDER_CHARS ? Number(env.MIN_REMINDER_CHARS) : 0,
-      minToolResultChars: env.MIN_TOOL_RESULT_CHARS ? Number(env.MIN_TOOL_RESULT_CHARS) : 0,
-      // Omit by default so OpenAI-shaped requests use their model profile.
-      ...(env.COLS ? { cols: Number(env.COLS) } : {}),
-      // R2 multi-column ON (2 cols) — single-col drops below break-even on
-      // real tool-doc slabs. Override via MULTI_COL=1 if OCR misreads layout.
-      multiCol: env.MULTI_COL ? Math.max(1, Number(env.MULTI_COL) | 0) : 2,
-      // Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
-      // instead of being imaged — default-on. No recovery sidecar here:
-      // Workers has no writable filesystem for the rec_* dump, so this is
-      // the only exactness guard on this deploy target. Override with
-      // LOSSLESS_EXACT=0/false to disable.
-      losslessExact: truthy(env.LOSSLESS_EXACT, true),
-    };
+    const transform: TransformOptions = workerTransformOptions(env);
     const trackingOn = truthy(env.IMGTOKENX_TRACK, true);
     // Workers Logs ingests stdout as separate log lines. Emit one JSON line
     // per event so downstream (Logpush → R2/S3) reads the same JSONL shape

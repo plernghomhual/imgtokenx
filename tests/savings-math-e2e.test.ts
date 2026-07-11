@@ -23,6 +23,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createProxy, type ProxyEvent } from '../src/core/proxy.js';
 import { countTokens as o200k } from 'gpt-tokenizer/encoding/o200k_base';
 
+/** Poll until the fire-and-forget proxy work lands instead of sleeping a
+ *  fixed tick (flaked on slow CI). Times out loudly, never passes vacuously. */
+async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > timeoutMs) throw new Error('proxy event did not settle in time');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 // The GPT cases intentionally exercise an opt-in model. Preserve the developer
 // shell while pinning this file's scope so CI and local runs behave identically.
 let ambientImgtokenxModels: string | undefined;
@@ -98,7 +108,7 @@ async function driveAndCapture(path: string, body: string): Promise<{ event: Pro
     }),
   );
   await res.text();
-  await new Promise((r) => setTimeout(r, 30)); // let onRequest fire
+  await settle(() => event !== undefined); // onRequest is behind a detached promise
   cap.restore();
   return { event: event!, out: cap.main[0]?.body ?? '' };
 }

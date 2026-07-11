@@ -342,7 +342,9 @@ function updateOpencodeConfig(plan: InstallPlan, undo: UndoStep[], installing: b
   cfg.mcp = mcp;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   backup(file, undo);
-  writeFileAtomic(file, JSON.stringify(cfg, null, 2) + '\n');
+  // opencode.json can hold MCP server env/secrets from other tools — keep it
+  // owner-only rather than the writeFileAtomic 0o644 default.
+  writeFileAtomic(file, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
   undo.push({
     log: `${installing ? 'upsert' : 'remove'} ${MCP_SERVER_NAME} in ${file}`,
     revert: () => {

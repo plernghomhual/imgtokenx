@@ -669,6 +669,13 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers): boolean {
     || pathname.startsWith('/v1/models/')
     || pathname === '/models'
     || pathname.startsWith('/models/');
+  // `/openai/`-prefixed models paths carry an explicit provider hint, so they
+  // route to OpenAI unconditionally — the auth heuristic below only exists to
+  // disambiguate the bare `/v1/models`, which exists on both APIs.
+  const isPrefixedModelsPath = pathname === '/openai/v1/models'
+    || pathname.startsWith('/openai/v1/models/')
+    || pathname === '/openai/models'
+    || pathname.startsWith('/openai/models/');
   const isResponsesPath = pathname === '/v1/responses'
     || pathname.startsWith('/v1/responses/')
     || pathname === '/responses'
@@ -694,6 +701,7 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers): boolean {
     || pathname === '/openai/chat/completions'
     || pathname === '/v1/responses'
     || isResponsesPath
+    || isPrefixedModelsPath
     || (isModelsPath && looksOpenAIAuth);
 }
 

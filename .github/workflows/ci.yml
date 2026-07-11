@@ -35,11 +35,26 @@ jobs:
       - if: matrix.node == 22
         run: pnpm test
       - run: pnpm run build
+      # vitest 4 needs Node >=20, so Node 18 (the package.json floor) gets the
+      # widest coverage available without it: import every export-map subpath
+      # and run the bundled CLI end-to-end.
       - if: matrix.node == 18
-        run: node --input-type=module -e "await import('./dist/core/index.js'); await import('./dist/core/proxy.js')"
+        run: |
+          node --input-type=module -e "
+            await import('./dist/core/index.js');
+            await import('./dist/core/library.js');
+            await import('./dist/core/measurement.js');
+            await import('./dist/core/applicability.js');
+            await import('./dist/core/proxy.js');
+            await import('./dist/node.js');
+            await import('./dist/worker.js');
+          "
+          node bin/cli.js --version
       - if: matrix.node == 22
         run: pnpm run test:restart
       - if: matrix.node == 22
         run: pnpm run test:package
       - if: matrix.node == 22
         run: pnpm run test:worker
+      - if: matrix.node == 22
+        run: pnpm run release:check

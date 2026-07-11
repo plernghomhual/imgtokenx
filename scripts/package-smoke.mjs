@@ -9,6 +9,7 @@ const dir = mkdtempSync(join(tmpdir(), 'imgtokenx-pack-'));
 /** @param {string} cmd @param {string[]} args @param {string} [cwd] */
 const run = (cmd, args, cwd = root) => {
   const out = spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, npm_config_cache: join(dir, 'cache') } });
+  if (out.error) throw new Error(`${cmd} ${args.join(' ')} failed to spawn: ${out.error.message}`);
   if (out.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed:\n${out.stderr || out.stdout}`);
   return out.stdout.trim();
 };

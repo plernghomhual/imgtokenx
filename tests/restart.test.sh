@@ -172,10 +172,15 @@ test_port_in_use() {
 # reach `node bin/cli.js`.
 test_rejects_unknown_args() {
   local sandbox="$1" logf="$2"
-  if ( cd "$REPO" && "$SCRIPT" --no-build --port 47899 >/dev/null 2>&1 ); then
+  local errf="$sandbox/stderr.txt"
+  if ( cd "$REPO" && "$SCRIPT" --no-build --port 47899 >/dev/null 2>"$errf" ); then
     return 1
   fi
-  grep -q "node bin/cli.js" "$logf" && return 1
+  # Positive assertion first: the script must say WHY it bailed. (Previously
+  # this test only ran `! grep` against a calls.log that was never created —
+  # grep's "No such file" error made the assertion pass vacuously.)
+  grep -q "unknown argument" "$errf" || return 1
+  if [ -f "$logf" ] && grep -q "node bin/cli.js" "$logf"; then return 1; fi
   return 0
 }
 

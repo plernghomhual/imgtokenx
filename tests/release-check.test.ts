@@ -8,7 +8,8 @@
  *  tests/install-rollback.test.ts uses for runInstall/runUninstall.
  *
  *  Coverage matrix:
- *    1. green path (all 4 checks pass) → exit 0 + OK line
+ *    1. green path (all checks pass)   → exit 0 + OK line
+ *    1b. dist/ artifacts missing       → exit 1 + dist error
  *    2. version field missing         → exit 1 + version error
  *    3. version non-SemVer ("v1")     → exit 1 + version error
  *    4. pnpm-lock.yaml missing        → exit 1 + lockfile error
@@ -62,7 +63,7 @@ function runInSandbox(files: Record<string, string>): SpawnOut {
 }
 
 describe('release:check (audit #36 + audit #34)', () => {
-  it('exits 0 with the OK line when all four checks pass', () => {
+  it('exits 0 with the OK line when all checks pass', () => {
     const r = runInSandbox({
       'package.json': JSON.stringify({
         name: 'imgtokenx',
@@ -71,9 +72,25 @@ describe('release:check (audit #36 + audit #34)', () => {
       }),
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
       '.npmrc': '# npm-compatible only\n',
+      'dist/core/index.js': 'export {};\n',
+      'dist/node.js': '#!/usr/bin/env node\n',
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('release:check OK: ready to release v0.8.0');
+  });
+
+  it('exits 1 when dist/ artifacts are missing (unbuilt tree must not bless a release)', () => {
+    const r = runInSandbox({
+      'package.json': JSON.stringify({
+        name: 'imgtokenx',
+        version: '0.8.0',
+        scripts: { 'test:restart': 'bash tests/restart.test.sh' },
+      }),
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/dist\/core\/index\.js missing/);
+    expect(r.stderr).toMatch(/dist\/node\.js missing/);
   });
 
   it('exits 1 with a clear error when package.json has no version field', () => {

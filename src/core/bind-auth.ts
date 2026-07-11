@@ -170,12 +170,26 @@ export function bindAuthResponse(req: BindAuthRequest, opts: BindAuthOpts): Resp
     );
   }
   const presented = req.headers.get('authorization') ?? '';
-  if (presented !== `Bearer ${opts.secret}`) {
+  if (!timingSafeEqualStr(presented, `Bearer ${opts.secret}`)) {
     return reject('missing or invalid Bearer token', 401, {
       'www-authenticate': `Bearer realm="imgtokenx"`,
     });
   }
   return null;
+}
+
+/** Constant-time string compare (pure JS — this module is runtime-agnostic,
+ *  so no node:crypto.timingSafeEqual and no async crypto.subtle like
+ *  worker.ts's secretsMatch). XOR-folds over the presented value's full
+ *  length; only the expected value's length is observable, and that isn't
+ *  secret material. */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  let diff = a.length ^ b.length;
+  const bLen = Math.max(b.length, 1);
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i % bLen);
+  }
+  return diff === 0;
 }
 
 function reject(detail: string, status: number, extra: Record<string, string> = {}): Response {

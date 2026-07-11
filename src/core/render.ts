@@ -568,7 +568,8 @@ function blitGlyph(
 }
 
 /**
- * Blit a grayscale atlas glyph at pixel (x, y) using max-blending. EVAL-ONLY (style.aa).
+ * Blit a grayscale atlas glyph at pixel (x, y) using max-blending. Used when
+ * `style.aa` is true — the production default (DENSE_RENDER_STYLE has aa: true).
  * Returns cells advanced (1 or 2), or 0 if absent from the gray atlas.
  */
 function blitGlyphGray(

@@ -1,6 +1,18 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { createProxy, type ProxyEvent } from '../src/core/proxy.js';
 
+/** Deterministic replacement for the old fixed 20ms sleep: the proxy fires
+ *  onRequest behind a detached promise after the response body drains, so
+ *  poll until the capture lands instead of hoping one timer tick is enough
+ *  (flaked on slow CI). Times out loudly rather than passing vacuously. */
+async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > timeoutMs) throw new Error('proxy event did not settle in time');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 // These proxy contracts intentionally exercise the opt-in generic GPT path.
 // Preserve the developer shell while making the suite independent of it.
 let ambientImgtokenxModels: string | undefined;
@@ -74,7 +86,7 @@ describe('proxy usage extraction', () => {
     // Drain the client-side body so the tee is forced to finish.
     await res.text();
     // Give the onRequest callback a tick to fire (it's behind a void promise).
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -132,7 +144,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     const main = upstreamRequests.find((r) => r.url === 'http://ocproxy.test/anthropic/messages');
@@ -192,7 +204,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     // Forward dropped the prefix.
@@ -247,7 +259,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured?.model).toBe('gpt-5.6');
@@ -312,7 +324,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(upstreamRequests).toHaveLength(1);
@@ -460,7 +472,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(upstreamRequests).toHaveLength(1);
@@ -583,7 +595,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(upstreamRequests).toHaveLength(1);
@@ -646,7 +658,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -679,7 +691,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -722,7 +734,7 @@ describe('proxy usage extraction', () => {
     );
     // Drain the client side so the tee can complete.
     const clientBody = await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -759,7 +771,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -807,7 +819,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -857,7 +869,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -898,7 +910,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -938,7 +950,7 @@ describe('proxy usage extraction', () => {
       );
       await res.text();
     }
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captures.length >= 2);
     restore();
 
     expect(captures.length).toBe(2);
@@ -986,7 +998,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => sidePaths.length >= 1);
     restore();
 
     // No cache_control markers in SAMPLE_REQ_BODY → second probe is skipped.
@@ -1196,7 +1208,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1244,7 +1256,7 @@ describe('proxy usage extraction', () => {
     );
     expect(res.status).toBe(200);
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1308,7 +1320,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1364,7 +1376,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1424,7 +1436,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1481,7 +1493,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1534,7 +1546,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1574,7 +1586,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1616,7 +1628,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1656,7 +1668,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1695,7 +1707,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1736,7 +1748,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1772,7 +1784,7 @@ describe('proxy usage extraction', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(captured).toBeDefined();
@@ -1812,7 +1824,7 @@ describe('proxy usage extraction', () => {
     await res.text();
     // The event may only have been scheduled, not yet resolved.
     await Promise.all(scheduled);
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     // waitUntil was plumbed AND the event actually fired.
@@ -1923,7 +1935,7 @@ describe('E2 request-body limit', () => {
     );
     const clientBody = await res.text();
     // Give the onRequest callback a tick to fire (it's behind a void promise).
-    await new Promise((r) => setTimeout(r, 20));
+    await settle(() => captured !== undefined);
     restore();
 
     expect(res.status).toBe(200);

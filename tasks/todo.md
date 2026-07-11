@@ -1164,3 +1164,50 @@ were repaired without a broad rewrite.
   directly; CI installs the exact declared `pnpm@10.21.0`.
 
 No push, deployment, daemon restart, or live configuration mutation performed.
+
+---
+
+## 2026-07-11 — Post-audit remediation: "everything, inline" pass (final)
+
+### Completed items (all inline, no subagents)
+
+**Batch 1 + Batch 2 (approved plan):**
+- [x] build.mjs: tsc probe before dist wipe + `.error` checks; package-smoke run() `.error` check
+- [x] proxy.ts: `/openai/v1/models` + `/openai/models` prefixed-path routing (explicit provider hint) + 3 routing tests
+- [x] install.ts: opencode.json written 0600 + perms test
+- [x] transform.ts: lossy-truncation comment corrected (telemetry already existed via info.imageBudget)
+- [x] worker.ts: Number.isFinite env guards extracted to exported workerTransformOptions() + 13 fuzz tests (tests/worker-env.test.ts)
+- [x] Stale comments fixed: atlas-gray.ts:3, render.ts:571, node.ts bind-auth warning/help (correct env var names)
+- [x] release-check.mjs: dist artifact existence check + sandbox test fixture updated + missing-dist test
+- [x] ci.yml: Node 18 smoke imports all 7 subpaths + CLI --version; release:check on Node 22
+- [x] restart.test.sh: stderr assertion for unknown-arg rejection (no vacuous grep)
+- [x] fragments.ts: WCAG AA ink colors (--good-ink/--warn-ink/--bad-ink, light ≥5.8:1 measured; dark base colors already 5.07–6.39:1)
+
+**Previously-deferred + low findings:**
+- [x] Dashboard security headers: CSP (self-only + unsafe-inline/unsafe-eval for vendored htmx & hx-vals js:), X-Content-Type-Options: nosniff on HTML/JSON/PNG, X-Frame-Options: DENY + header tests
+- [x] Atlas packaging de-dup: 4 atlas modules externalized from dist/node.js via esbuild plugin (8.2M → 3.5M; tarball still 2.7M, single atlas copy); verified via packed-tarball bin smoke
+- [x] setTimeout-as-sync test refactor: 31 sleeps in proxy-usage + 5 in routing-default/failopen/cache-stability/savings-math replaced with deterministic settle() condition-polling (loud 2s timeout, never vacuous)
+- [x] Image-budget content-survival test: 97 existing images + big slab → used ≤ 3, skipped > 0, total images ≤ 100, well-formed PNGs
+- [x] XSS regression tests (tests/dashboard-xss.test.ts): path/model in recent table, session id/project/ClaudeCode fields, attribute quote-breakout
+- [x] redact.ts: ip pattern ordered before phone pattern (specific→generic)
+- [x] pnpm config consolidation: dead .pnpmrc deleted; minimumReleaseAgeExclude + ignorePnpmfile now ACTIVE in pnpm-workspace.yaml; .npmrc comment-only
+- [x] .gitignore: transcript-dump glob (20*_agentsmd-instructions-*.md)
+- [x] bind-auth.ts: constant-time Bearer compare (pure-JS XOR fold; runtime-agnostic counterpart to worker.ts secretsMatch)
+- [x] handleModelsToggle re-validation REVERTED after test proved env-sourced custom model names are legit; escaping is the defense (documented in jsdoc)
+- [x] history.ts unification: investigated, NOT tractable — files share only superficially similar boundary logic on different types (Message[] vs HistoryTurn[]); render layer already shared via renderTextToPngs; unification risks cache-stability for no payoff
+
+### Verification (exact counts)
+
+- `tsc --noEmit`: pass; `tsc -p tsconfig.check.json`: pass
+- Full vitest: **966/966 passed, 0 failed** (946 pre-existing + 20 new)
+- `node scripts/build.mjs`: ✓ all 3 stages + version smoke 0.8.0
+- `node scripts/package-smoke.mjs`: OK, imgtokenx-0.8.0.tgz (2,734,130 bytes), exports + bin
+- `node scripts/release-check.mjs`: OK
+- `bash tests/restart.test.sh`: 4/4 passed
+- `wrangler deploy --dry-run`: pass
+
+### Remaining risks
+
+- CSP requires 'unsafe-inline'/'unsafe-eval' (vendored htmx + hx-vals js:); tightening needs an htmx-config refactor — deliberate trade-off, documented in DASHBOARD_CSP comment
+- Atlas externalization means dist/node.js now depends on dist/core/ at runtime — guarded by packed-tarball bin smoke in package-smoke.mjs
+- settle() polling in routing tests assumes the count_tokens probe always fires for POST /v1/messages bodies (empirically true; loud timeout if it regresses)

@@ -25,12 +25,19 @@ if (!pkg.scripts?.['test:restart']) {
   failures.push('test:restart script missing from package.json (audit #34)');
 }
 
+// dist/ must be built — this script previously passed on an EMPTY dist/,
+// blessing a tarball whose exports map points at nothing. Spot-check the
+// package entrypoint plus the bundled CLI.
+for (const artifact of ['dist/core/index.js', 'dist/node.js']) {
+  if (!existsSync(artifact)) failures.push(`${artifact} missing — run \`pnpm run build\` first`);
+}
+
 const PnpmOnlyKeys = ['minimum-release-age', 'minimum-release-age-exclude', 'ignore-pnpmfile'];
 if (existsSync('.npmrc')) {
   const npmrc = readFileSync('.npmrc', 'utf8');
   for (const key of PnpmOnlyKeys) {
     const re = new RegExp(`^${key}\\s*=`, 'm');
-    if (re.test(npmrc)) failures.push(`.npmrc still contains pnpm-only "${key}" — move to .pnpmrc`);
+    if (re.test(npmrc)) failures.push(`.npmrc still contains pnpm-only "${key}" — move to pnpm-workspace.yaml`);
   }
 }
 

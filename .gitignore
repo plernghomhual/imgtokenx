@@ -49,6 +49,7 @@ eval/corpus/
 # Bench artifacts (events.jsonl, PNG dumps, workspaces) — one dir per run
 bench/runs/
 
-# Archived Codex session transcripts (multi-MB, PII-laden) + their converter script
-20260710_agentsmd-instructions-for-usersplernghomhual.md
+# Archived Codex session transcripts (multi-MB, PII-laden) + their converter
+# script. Glob the whole date-stamped family so future dumps never land in git.
+20*_agentsmd-instructions-*.md
 codex-md.py

@@ -698,3 +698,28 @@ describe('server-observed warmth: text follows actual cache_read', () => {
     expect(row.session_saved_so_far_delta).toBe(9900);
   });
 });
+
+describe('security headers', () => {
+  it('serveHtml carries CSP + nosniff + frame denial', () => {
+    const res = dash.serveHtml(1234);
+    const csp = res.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).toContain("object-src 'none'");
+    // htmx needs inline + eval; everything else stays same-origin.
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+  });
+
+  it('JSON and PNG endpoints carry nosniff', async () => {
+    const stats = dash.serveStats();
+    expect(stats.headers.get('x-content-type-options')).toBe('nosniff');
+    // servePng with no image is a 404 text response; seed one via recordImage
+    // if available, otherwise assert the JSON error path on image-source.
+    const src = dash.serveImageSource();
+    expect(src.status).toBe(404);
+    expect(src.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+});

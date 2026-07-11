@@ -1260,7 +1260,7 @@ export class DashboardState {
       compression_enabled: this.compressionEnabled,
     };
     return new Response(JSON.stringify(payload, null, 2), {
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' },
     });
   }
 
@@ -1276,7 +1276,7 @@ export class DashboardState {
       image_ids: this.images.map((im) => im.id),
     };
     return new Response(JSON.stringify(payload), {
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' },
     });
   }
 
@@ -1295,7 +1295,11 @@ export class DashboardState {
       return new Response('no image yet', { status: 404 });
     }
     return new Response(entry.png as unknown as BodyInit, {
-      headers: { 'content-type': 'image/png', 'cache-control': 'no-cache' },
+      headers: {
+        'content-type': 'image/png',
+        'cache-control': 'no-cache',
+        'x-content-type-options': 'nosniff',
+      },
     });
   }
 
@@ -1310,12 +1314,12 @@ export class DashboardState {
     if (!entry || entry.sourceText === undefined) {
       return new Response(JSON.stringify({ error: 'no source text' }), {
         status: 404,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' },
       });
     }
     return new Response(
       JSON.stringify({ id: entry.id, meta: entry.meta, source_text: entry.sourceText }),
-      { headers: { 'content-type': 'application/json' } },
+      { headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' } },
     );
   }
 
@@ -1436,7 +1440,7 @@ export class DashboardState {
       throw err;
     }
     if (this.statsCache?.mtimeMs === stat.mtimeMs && this.statsCache.size === stat.size) {
-      return new Response(this.statsCache.body, { headers: { 'content-type': 'application/json' } });
+      return new Response(this.statsCache.body, { headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' } });
     }
     const result = await aggregateEventsFile(this.paths.eventsFile);
     if (!result) {
@@ -1451,7 +1455,7 @@ export class DashboardState {
       summary: summaryToJson(result.summary),
     });
     this.statsCache = { mtimeMs: stat.mtimeMs, size: stat.size, body };
-    return new Response(body, { headers: { 'content-type': 'application/json' } });
+    return new Response(body, { headers: { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' } });
   }
 
   /** POST /api/compression — flip the global kill switch.
@@ -1463,7 +1467,11 @@ export class DashboardState {
     return jsonResponse({ compression_enabled: this.compressionEnabled });
   }
 
-  /** POST /fragments/models — add/remove one model from the compression scope. */
+  /** POST /fragments/models — add/remove one model from the compression scope.
+   *  No id validation here: the HTTP boundary (parseModelsPayload in node.ts)
+   *  enforces the tight charset, while direct callers may toggle env-sourced
+   *  custom model names outside that regex — the fragment renderer HTML-escapes
+   *  every name, so hostile ids are inert (covered by dashboard-api tests). */
   handleModelsToggle(model: string, on: boolean): void {
     const next = new Set(getAllowedModelBases());
     if (on) next.add(model);
@@ -1479,6 +1487,7 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: {
       'content-type': 'application/json',
+      'x-content-type-options': 'nosniff',
     },
   });
 }
@@ -1551,8 +1560,32 @@ export function dashboardPath(pathname: string): DashboardRoute | null {
   return null;
 }
 
+/** CSP for dashboard HTML. The page vendors htmx inline and uses inline
+ *  <script>/<style> blocks plus onclick/onerror attributes, so script-src and
+ *  style-src need 'unsafe-inline'; the latest-image panel's `hx-vals='js:…'`
+ *  (fragments.ts) is Function()-evaluated by htmx, which needs 'unsafe-eval'.
+ *  The lockdown value is everything else: no external hosts (blocks
+ *  exfiltration even if an escape bug slipped through), no framing, no
+ *  <base> hijack, no plugins. */
+const DASHBOARD_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self'",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join('; ');
+
 function htmlResponse(body: string): Response {
   return new Response(body, {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': DASHBOARD_CSP,
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+    },
   });
 }

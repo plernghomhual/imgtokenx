@@ -752,6 +752,10 @@ const CSS = `
     --ink: #1f2328; --ink-2: #4c5661; --muted: #68737d;
     --flame: #ff5a1f; --flame-strong: #e8420a; --flame-ink: #bd3a08; --flame-tint: #fff1ea;
     --good: #1f9d57; --good-tint: #e7f6ee; --bad: #d8483b; --bad-tint: #fcebe9; --warn: #b7791f; --warn-tint: #fbf0db;
+    /* -ink variants: text ON the matching tint. The base colors land ~3.1-3.7:1
+       on their tints — below WCAG AA 4.5:1 for the 11-12px pill/badge text.
+       These darker shades measure 5.8-5.9:1. */
+    --good-ink: #116b3a; --warn-ink: #7d5410; --bad-ink: #a92e22;
     --img: #ff5a1f; --img-ink: #bd3a08; --img-tint: #fff1ea;
     --txt: #2f7db0; --txt-ink: #1f5f8b; --txt-tint: #e9f3fb;
     --radius: 8px;
@@ -768,6 +772,8 @@ const CSS = `
     --ink: #f2f4f5; --ink-2: #c4cbd1; --muted: #aab3bb;
     --flame: #ff6a33; --flame-strong: #e8420a; --flame-ink: #ff9a63; --flame-tint: #3a2318;
     --good: #3fbd76; --good-tint: #15291f; --bad: #f0645a; --bad-tint: #341b18; --warn: #d99a3a; --warn-tint: #33260f;
+    /* Dark base colors already clear 5.0-6.4:1 on their tints; ink = base. */
+    --good-ink: #3fbd76; --warn-ink: #d99a3a; --bad-ink: #f0645a;
     --img: #ff6a33; --img-ink: #ff9a63; --img-tint: #3a2318;
     --txt: #5aa3d6; --txt-ink: #8cc3ea; --txt-tint: #142631;
     --shadow: 0 1px 3px rgba(0,0,0,.45);
@@ -803,8 +809,8 @@ const CSS = `
   .switch { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
   .switch-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
     padding: 3px 10px; border-radius: 999px; }
-  .switch-state.on { color: var(--good); background: var(--good-tint); }
-  .switch-state.off { color: var(--bad); background: var(--bad-tint); }
+  .switch-state.on { color: var(--good-ink); background: var(--good-tint); }
+  .switch-state.off { color: var(--bad-ink); background: var(--bad-tint); }
   .switch-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .switch-btn { background: var(--surface); color: var(--ink); border: 1px solid var(--border-strong);
     padding: 6px 13px; cursor: pointer; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 600;
@@ -828,7 +834,7 @@ const CSS = `
     align-items: center; gap: 6px; min-height: 26px; padding: 3px 9px; border-radius: 7px;
     background: var(--surface); border: 1px solid var(--border); color: var(--ink-2); font-size: 11px; }
   .policy-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-  .policy-badge.image { color: var(--good); background: var(--good-tint); }
+  .policy-badge.image { color: var(--good-ink); background: var(--good-tint); }
   .policy-badge.text { color: var(--txt-ink); background: var(--txt-tint); }
   .client-routes { margin-top: 11px; }
   .safety-row { margin-top: 7px; }
@@ -1006,9 +1012,9 @@ button.page-btn:hover .page { border-color: var(--flame); transform: translateY(
   .empty-cell { color: var(--muted); text-align: center; padding: 18px; }
   .pill { display: inline-block; min-width: 38px; text-align: center; font-size: 11px; font-weight: 700;
     padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; }
-  .pill-good { background: var(--good-tint); color: var(--good); }
-  .pill-warn { background: var(--warn-tint); color: var(--warn); }
-  .pill-bad { background: var(--bad-tint); color: var(--bad); }
+  .pill-good { background: var(--good-tint); color: var(--good-ink); }
+  .pill-warn { background: var(--warn-tint); color: var(--warn-ink); }
+  .pill-bad { background: var(--bad-tint); color: var(--bad-ink); }
   .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
   .mk-create { font-size: 9.5px; font-weight: 700; color: var(--muted); border: 1px solid var(--muted);
     border-radius: 999px; padding: 0 5px; margin-left: 4px; vertical-align: 1px; cursor: help; white-space: nowrap; }

@@ -90,6 +90,11 @@ const REDACTION_PATTERNS: readonly Pattern[] = [
   // US SSN.
   { kind: 'ssn', pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
 
+  // Strict valid IPv4 (each octet 0–255). Runs BEFORE the looser dotted phone
+  // pattern so digit runs inside/around an address resolve to the more
+  // specific `ip` label (specific→generic, same rule as the sk-* patterns).
+  { kind: 'ip', pattern: /\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+
   // Phone (US/E.123). Conservative — only matches when dashes/spaces/parens
   // are present, so a 10-digit number in math expressions isn't redacted.
   // Leading `\b` intentionally omitted: when an input starts with `(` the
@@ -98,9 +103,6 @@ const REDACTION_PATTERNS: readonly Pattern[] = [
   // leaving a stray `(`. End `\b` kept so we don't over-match into larger
   // digit runs.
   { kind: 'phone', pattern: /\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/g },
-
-  // Strict valid IPv4 (each octet 0–255).
-  { kind: 'ip', pattern: /\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
 
   // PEM PRIVATE KEY blocks — applied last (multiline, base64). The
   // `(?:[A-Za-z0-9+/=]+\s+)+` is greedy-but-bounded line-by-line so it

@@ -2,6 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProxy, transformFailureTelemetry } from '../src/core/index.js';
 import type { ProxyConfig } from '../src/core/index.js';
 
+/** Poll until the fire-and-forget proxy work lands instead of sleeping a
+ *  fixed tick (flaked on slow CI). Times out loudly, never passes vacuously. */
+async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > timeoutMs) throw new Error('proxy event did not settle in time');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 // Audit D1: optional request transforms must FAIL OPEN. When the underlying
 // transformer throws (e.g. a latent bug in a future code path), the proxy must
 // forward the ORIGINAL body untouched — never a 502 — and record bounded,
@@ -86,7 +96,7 @@ describe('D1 fail-open on transform error', () => {
       body: JSON.stringify({ model: 'unsupported', messages: [] }),
     }));
     await res.text();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await settle(() => logged.length >= 1);
     await background;
     restore();
     console.error = error;

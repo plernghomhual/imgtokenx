@@ -65,6 +65,15 @@ describe('install — atomic write + rollback', () => {
     expect(envSiblings).toEqual([]);
   });
 
+  it('writes opencode.json owner-only (0600) — it can hold other tools\' MCP secrets', () => {
+    runInstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    const file = path.join(fx.home, '.config', 'opencode', 'opencode.json');
+    expect(fs.existsSync(file)).toBe(true);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
   it('preserves the previous zshrc when re-running install', () => {
     const zshrc = path.join(fx.home, '.zshrc');
     const before = 'export PATH=/usr/bin\nexport EDITOR=vim\n';

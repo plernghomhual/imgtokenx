@@ -9,6 +9,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createProxy, type ProxyEvent } from '../src/core/proxy.js';
 
+/** Poll until the fire-and-forget proxy work lands instead of sleeping a
+ *  fixed tick (flaked on slow CI). Times out loudly, never passes vacuously. */
+async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!done()) {
+    if (Date.now() - start > timeoutMs) throw new Error('proxy event did not settle in time');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 let ambient: string | undefined;
 beforeAll(() => {
   ambient = process.env.IMGTOKENX_MODELS;
@@ -59,7 +69,8 @@ describe('default-upstream provider-prefix strip', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 30));
+    // main lands before res resolves; the count_tokens probe is fire-and-forget.
+    await settle(() => captured !== undefined && seen.length >= 2);
     restore();
     const main = seen.find((u) => !u.includes('/count_tokens'));
     expect(main).toBe('https://api.anthropic.com/v1/messages');
@@ -81,9 +92,44 @@ describe('default-upstream provider-prefix strip', () => {
       }),
     );
     await res.text();
-    await new Promise((r) => setTimeout(r, 30));
+    await settle(() => seen.length >= 2);
     restore();
     const main = seen.find((u) => !u.includes('/count_tokens'));
     expect(main).toBe('http://ocproxy.test/anthropic/v1/messages');
+  });
+
+  // /openai/-prefixed models paths carry an explicit provider hint and must hit
+  // the OpenAI upstream regardless of auth headers — previously they fell
+  // through isCanonicalOpenAIPath (which only knew bare /v1/models) and
+  // misrouted to api.anthropic.com where they 404.
+  it('routes /openai/v1/models → canonical OpenAI /v1/models', async () => {
+    const { seen, restore } = mockUpstream();
+    const proxy = createProxy({ transform: {}, onRequest: () => {} });
+    const res = await proxy(new Request('http://localhost/openai/v1/models'));
+    await res.text();
+    restore();
+    expect(seen[0]).toBe('https://api.openai.com/v1/models');
+  });
+
+  it('routes /openai/models (root alias) → canonical OpenAI /v1/models', async () => {
+    const { seen, restore } = mockUpstream();
+    const proxy = createProxy({ transform: {}, onRequest: () => {} });
+    const res = await proxy(new Request('http://localhost/openai/models'));
+    await res.text();
+    restore();
+    expect(seen[0]).toBe('https://api.openai.com/v1/models');
+  });
+
+  it('keeps /openai/v1/models verbatim against a custom (ocproxy) upstream', async () => {
+    const { seen, restore } = mockUpstream();
+    const proxy = createProxy({
+      upstream: 'http://ocproxy.test',
+      transform: {},
+      onRequest: () => {},
+    });
+    const res = await proxy(new Request('http://localhost/openai/v1/models'));
+    await res.text();
+    restore();
+    expect(seen[0]).toBe('http://ocproxy.test/openai/v1/models');
   });
 });

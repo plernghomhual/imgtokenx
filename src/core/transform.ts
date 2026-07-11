@@ -2026,9 +2026,11 @@ export async function transformRequest(
   // already exhausted by pre-existing images, we still rendered (cheap relative
   // to the gate's work) but emit nothing. If the slab wants more than the
   // budget allows, we keep the FIRST `allowed` images (cache anchor at the
-  // front of the prefix) and drop the rest — the trailing pages are still
-  // text-equivalent and the model still sees the full content via the
-  // fact-sheet sidecar.
+  // front of the prefix) and drop the rest. Dropped pages are LOSSY: the model
+  // does not see their content — the fact-sheet sidecar is a ≤64-token gist,
+  // not a replacement (recovery sidecars restore verbatim text only when
+  // `emitRecoverable` is on). The truncation is surfaced as
+  // `info.imageBudget.skipped` for tracker/dashboard telemetry.
   const slabAllowed = imageBudget.claim(images.length);
   if (slabAllowed === 0 && images.length > 0) {
     info.reason = 'image_budget_exhausted';

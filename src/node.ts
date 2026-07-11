@@ -62,9 +62,10 @@ import {
 interface RuntimeConfig {
   port: number;
   /** Interface to bind. Defaults to 127.0.0.1 (loopback only) — the dashboard
-   *  is unauthenticated and serves captured request context, so it must not be
-   *  exposed to the LAN by default. Set HOST=0.0.0.0 to opt into all interfaces
-   *  (e.g. reaching the dashboard from another device / the host of a container). */
+   *  serves captured request context and loopback callers skip auth, so it must
+   *  not be exposed to the LAN by default. Set HOST=0.0.0.0 to opt into all
+   *  interfaces (e.g. another device / a container host); off-host callers then
+   *  need IMGTOKENX_ALLOWED_HOSTS + IMGTOKENX_PROXY_TOKEN (see bind-auth.ts). */
   host: string;
   upstream: string;
   openAIUpstream: string;
@@ -174,8 +175,9 @@ Flags:
 Environment:
   PORT                    listen port (default 47821)
   HOST                    interface to bind (default 127.0.0.1, loopback only).
-                          Set 0.0.0.0 to expose the dashboard off-host — note it
-                          is unauthenticated and serves captured request context.
+                          Set 0.0.0.0 to expose the dashboard off-host — off-host
+                          callers then need IMGTOKENX_ALLOWED_HOSTS plus a Bearer
+                          IMGTOKENX_PROXY_TOKEN (it serves captured request context).
   IMGTOKENX_UPSTREAM         upstream API base for every API family
   ANTHROPIC_UPSTREAM      Anthropic API base; overrides IMGTOKENX_UPSTREAM
                            (default https://api.anthropic.com)
@@ -1430,9 +1432,10 @@ export async function main(): Promise<void> {
     console.log(`[imgtokenx] listening on http://${displayHost}:${opts.port}`);
     if (!isLoopbackHost) {
       console.warn(
-        `[imgtokenx] WARNING: bound to ${opts.host} — the unauthenticated dashboard ` +
-          `(captured request context + kill switch) is reachable off-host. ` +
-          `Unset HOST to restrict to loopback.`,
+        `[imgtokenx] WARNING: bound to ${opts.host} — the dashboard (captured ` +
+          `request context + kill switch) is exposed off-host. Off-host callers ` +
+          `are refused unless IMGTOKENX_ALLOWED_HOSTS and IMGTOKENX_PROXY_TOKEN ` +
+          `are both set. Unset HOST to restrict to loopback.`,
       );
     }
     const routes = resolveUpstreams(config);
