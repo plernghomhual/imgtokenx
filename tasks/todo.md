@@ -1035,3 +1035,35 @@ EOF_BATCH10; \
   git log --oneline -3; \
   echo; \
   git status
+
+## Final Review - 2026-07-10 (audit batch 15 — 1 of 40 items: #16 E3)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest focused tests pass:
+- tests/proxy-abort.test.ts 7/7 (5.81s)
+- Surrounding tests 8 files / 134 tests still green (proxy-failopen, upstream-5xx-e2e, healthz, gateway, proxy-usage, sessions, recovery-retention, dashboard-mutations)
+Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v0.8.0"; git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #16 E3 propagate disconnect signals; apply separate probe deadlines. Both `fetch` callsites in src/core/proxy.ts (count_tokens probe ~L1052, main upstream forward ~L1100) had neither `signal` propagation nor a deadline. Disconnected clients left paid work + probes + sockets alive. Three changes:
+   1. `ProxyConfig.probeTimeoutMs` added (default 5_000 ms); `HandlerOptions.signal?: AbortSignal` is the 2nd optional arg of `handle(req, opts)` so the Worker passes `req.signal` and the Node host constructs an AbortController bound to `req`/`res` close events.
+   2. Probe signal composes caller + deadline via `AbortSignal.any([caller, AbortSignal.timeout(probeTimeoutMs)])`; main fetch threads the caller signal directly (streaming responses can run long; only explicit disconnect should cancel).
+   3. New `isAbortError(e, signal?)` predicate distinguishes abort from real upstream failure; the 502 body+event differentiate `imgtokenx request aborted` from `imgtokenx upstream unreachable` so operators don't mistake a disconnected client for an upstream outage.
+   Both probes (baseline + cacheable-prefix) share the same layered `probeSignal` so one abort cancels both.
+
+### Files changed
+- src/core/proxy.ts: `HandlerOptions`, `probeTimeoutMs` on `ProxyConfig`, `withTimeout` + `isAbortError` helpers, signal wiring in `countTokensUpstream` + main fetch, distinct 502 messages.
+- src/worker.ts: `return handle(req, { signal: req.signal })` (1-line).
+- src/node.ts: AbortController wired to `req.once('close'|'error')` + `res.once('close'|'error')`; passed to handle; listeners detached in `.finally`; catch swallows handler error when signal already aborted (client is gone — 500 would be useless).
+- tests/proxy-abort.test.ts (NEW, 7 cases): caller-signal threads to main fetch; caller-signal abort propagates to the AbortSignal.any composite on the probe (behavior test, not ref equality since the composite is a NEW signal); 502 abort body; 502 unreachable body (sanity); default 5 s cap; probeTimeoutMs: 250 override honored; omitting second arg is backward-compatible (forward init.signal undefined; probe still gets the deadline timer).
+
+### Test-mock fix worth flagging
+The original mock for test #3 added an abort listener inside the promise constructor. Per WHATWG, `addEventListener` does not replay past events — so when `ctrl.abort()` fired BEFORE the mock's listener was attached (e.g. during the multi-second transformRequest that runs before the main fetch), the listener never fired and the promise hung forever, hitting vitest's 5 s default timeout. Fixed by adding an eager `if (signal.aborted) return Promise.reject(new DOMException('aborted', 'AbortError'))` branch BEFORE the listener — mirrors what real `globalThis.fetch` does (throws DOMException synchronously on already-aborted signal). Test 3 also bumped to 12 s timeout to allow the transform path to complete + abort to propagate.
+
+### Behavioral changes visible to operators
+- `imgtokenx` Node process still starts the same; requests now respect client disconnects (no more 'leaving paid work running' on a closed tab).
+- /v1/messages count_tokens baseline on the dashboard now shows `baselineProbeStatus: 'failed'` if the probe was aborted client-side (instead of an infinite wait).
+- Operator can tune `probeTimeoutMs` (default 5 s) in the existing `ProxyConfig` constructor (Node: directly; Worker: via `config.probeTimeoutMs` in `fetch` handler). Not yet exposed as a dashboard toggle.
+
+### Not addressed (out of scope / next batches)
+- Streaming-response mid-stream abort handling: the `teeForUsage` scanner still reads upstream bytes even after the client has gone away; the abort doesn't reach the inner reader. Drained via the existing 4 MiB JSON cap, but a dedicated `reader.cancel()` on abort would be cleaner. (potential #E3-bis or #E3-followup)
+- `AbortSignal.timeout` and `AbortSignal.any` are available in Node 17.3+ and modern Workers; project's engines says >=20. Verified at runtime; no fallback needed.

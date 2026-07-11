@@ -169,6 +169,10 @@ export default {
       waitUntil: (p) => _ctx.waitUntil(p),
     };
     const handle = createProxy(config);
-    return handle(req);
+    // Audit E3: thread the platform-provided Request signal so a
+    // disconnected client cancels the upstream forward (and the count_tokens
+    // probe) instead of leaving paid work in flight after the client gave
+    // up.
+    return handle(req, { signal: req.signal });
   },
 };

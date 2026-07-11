@@ -54,6 +54,24 @@ export interface ProxyConfig {
    *  (127.0.0.1 / ::1 / localhost) bypass the token requirement so local
    *  operators can curl without ceremony. */
   healthzToken?: string;
+  /** Default deadline for the /v1/messages/count_tokens probe (audit E3).
+   *  The probe is non-critical and runs in parallel with the main forward —
+   *  cap it so a slow upstream can't queue an unbounded number of in-flight
+   *  probes against disconnected clients. Caller-supplied abort signals
+   *  are layered on top, so a disconnected Node client or cancelled Worker
+   *  request still cancels the probe. Default: 5_000 ms. */
+  probeTimeoutMs?: number;
+}
+
+/** Per-request options threaded through `handle(req, opts)`. Currently just
+ *  carries the disconnect signal so the proxy can abort in-flight upstream
+ *  fetches when the client goes away (audit E3). The Worker passes
+ *  `request.signal` directly; the Node host constructs an AbortController
+ *  bound to `req` / `res` close events. Existing callers (tests + older
+ *  integrations) keep working by omitting the second argument. */
+export interface HandlerOptions {
+  /** Caller-supplied cancel signal. Propagated to BOTH upstream fetches. */
+  signal?: AbortSignal;
 }
 
 export interface ProxyEvent {
@@ -668,21 +686,29 @@ function openAIUpstreamPath(pathname: string, search: string, stripOpenAIV1: boo
 }
 
 /** POST /v1/messages/count_tokens with the given body. Returns the upstream's
- *  `input_tokens` number or null on any failure. count_tokens is documented
- *  as a free endpoint (no input-token billing) — we use it once per request
- *  on the PRE-COMPRESSION body to get the ground-truth baseline. Actual
+ *  `input_tokens` number or null on any failure (including caller abort /
+ *  probe-deadline abort — audit E3). count_tokens is documented as a free
+ *  endpoint (no input-token billing) — we use it once per request on the
+ *  PRE-COMPRESSION body to get the ground-truth baseline. Actual
  *  post-compression tokens already come back free in the /v1/messages usage
- *  block (input_tokens + cache_create + cache_read), so no second probe. */
+ *  block (input_tokens + cache_create + cache_read), so no second probe.
+ *
+ *  `signal` is optional but recommended. Threaded through to the inner
+ *  `fetch` so caller abort OR a deadline timer can cancel the probe; a
+ *  cancelled probe returns null (same downstream path as 4xx/5xx) so the
+ *  rest of the request is never blocked. */
 async function countTokensUpstream(
   countTokensUrl: string,
   body: Uint8Array,
   headers: Headers,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   try {
     const res = await fetch(countTokensUrl, {
       method: 'POST',
       headers,
       body: body as unknown as BodyInit,
+      ...(signal ? { signal } : {}),
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { input_tokens?: unknown };
@@ -690,6 +716,35 @@ async function countTokensUpstream(
   } catch {
     return null;
   }
+}
+
+/** Combine the caller-supplied signal with a deadline into a single signal.
+ *  Returns `callerSignal` unchanged when no deadline is wanted (zero /
+ *  negative ms). Used by the probe path so a slow upstream can't queue
+ *  unpaid probes against disconnected clients (audit E3). */
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal | undefined {
+  if (ms <= 0) return signal;
+  const timer = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timer]) : timer;
+}
+
+/** True when an error from `globalThis.fetch` matches the abort semantics.
+ *  Distinct from a real upstream failure so the 502 + telemetry message
+ *  doesn't lie about an unreachable upstream when the actual cause was a
+ *  client disconnect (audit E3). `DOMException(\"AbortError\")` is the
+ *  standardized abort carrier across Node 18+, Workers, and modern browsers,
+ *  AND is what `globalThis.fetch` itself uses on a signal abort. The
+ *  structural fallback covers test mocks and adapters that surface an abort
+ *  as a plain Error (different fetch wrappers in older Node sub-versions,
+ *  hand-rolled test responses, etc.). */
+function isAbortError(e: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (e instanceof DOMException && e.name === 'AbortError') return true;
+  if (e && typeof e === 'object') {
+    const name = (e as { name?: unknown }).name;
+    if (name === 'AbortError' || name === 'AbortSignal') return true;
+  }
+  return false;
 }
 
 /** Resolve upstream URLs from config. Pure — unit-testable. */
@@ -747,10 +802,18 @@ export function createProxy(config: ProxyConfig = {}) {
     return h;
   };
 
-  return async function handle(req: Request): Promise<Response> {
+  return async function handle(req: Request, options: HandlerOptions = {}): Promise<Response> {
     const t0 = Date.now();
     const url = new URL(req.url);
     const path = url.pathname + url.search;
+    // Audit E3: caller-supplied signal (Worker `request.signal` or Node
+    // req/res-close controller). Combined with the probe deadline below
+    // for the count_tokens path so BOTH fetches stop paid work when a
+    // disconnected client's connection drops. The probe deadline is its
+    // own composition; the main fetch is bound to the caller signal only
+    // (streaming responses can legitimately run for a long time — only an
+    // explicit disconnect should cancel them).
+    const callerSignal = options.signal;
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
       // Audit D21: versioned + token-gated healthz (no-store, JSON envelope).
@@ -987,14 +1050,23 @@ export function createProxy(config: ProxyConfig = {}) {
               routes.anthropic === DEFAULT_UPSTREAM;
             const ctRelPath = stripPrefixProbe ? stripProviderPrefix(url.pathname) : url.pathname;
             const ctUrl = upstreamBase + ctRelPath + '/count_tokens' + url.search;
-            baselinePromise = countTokensUpstream(ctUrl, ctBody, ctHeaders);
+            // Audit E3: probe inherits caller signal AND a deadline so a
+            // slow upstream can't accumulate unpaid probes against
+            // disconnected clients. Default 5 s unless the operator
+            // tightened it via ProxyConfig.probeTimeoutMs.
+            const probeTimeoutMs = config.probeTimeoutMs ?? 5_000;
+            const probeSignal = withTimeout(callerSignal, probeTimeoutMs);
+            baselinePromise = countTokensUpstream(ctUrl, ctBody, ctHeaders, probeSignal);
             // Null = no markers → cacheable=0 by definition, no probe needed.
             const ctCacheableBody = buildCacheablePrefixCountTokensBody(bodyIn);
             if (ctCacheableBody) {
+              // Same layered signal — both probes share the deadline + caller
+              // abort so a disconnected client cancels both in one tick.
               baselineCacheablePromise = countTokensUpstream(
                 ctUrl,
                 ctCacheableBody,
                 new Headers(ctHeaders),
+                probeSignal,
               );
             }
           }
@@ -1063,15 +1135,27 @@ export function createProxy(config: ProxyConfig = {}) {
         method: req.method,
         headers: outHeaders,
         body: bodyOut,
+        // Audit E3: thread caller-supplied signal so a disconnected
+        // client cancels upstream work mid-flight instead of leaving a
+        // paid-for /v1/messages backfill running to completion.
+        ...(callerSignal ? { signal: callerSignal } : {}),
         // duplex is required by spec when sending a stream as body
         ...(bodyOut instanceof ReadableStream ? { duplex: 'half' } : {}),
       } as RequestInit);
     } catch (e) {
-      fire(502, info, `upstream_error: ${(e as Error).message}`);
-      return new Response(JSON.stringify({ error: 'imgtokenx upstream unreachable' }), {
-        status: 502,
-        headers: { 'content-type': 'application/json' },
-      });
+      // Audit E3: distinguish a client-driven abort from a real upstream
+      // failure so the on-disk telemetry (and the 502 body) doesn't lie
+      // about an unreachable upstream when the client just disconnected.
+      const aborted = isAbortError(e, callerSignal);
+      fire(502, info, aborted
+        ? `upstream_aborted: ${(e as Error).message ?? 'client disconnected'}`
+        : `upstream_error: ${(e as Error).message}`);
+      return new Response(
+        JSON.stringify({
+          error: aborted ? 'imgtokenx request aborted' : 'imgtokenx upstream unreachable',
+        }),
+        { status: 502, headers: { 'content-type': 'application/json' } },
+      );
     }
 
     const firstByteMs = Date.now() - t0;

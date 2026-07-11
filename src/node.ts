@@ -1320,6 +1320,20 @@ export async function main(): Promise<void> {
   const handle = createProxy(config);
 
   const server = createServer((req, res) => {
+    // Audit E3: wire an AbortController to BOTH the request stream (client
+    // disconnected before we wrote the response) AND the response stream
+    // (client disconnected mid-response while we're streaming an upstream
+    // reply). Either event MUST cancel the upstream /v1/messages fetch +
+    // the count_tokens probe so disconnected clients can't leave paid work
+    // running on the upstream. A single controller covers both because the
+    // proxy only needs to know "did the client give up?".
+    const abortCtrl = new AbortController();
+    const onReqAbort = (): void => { abortCtrl.abort(); };
+    const onResAbort = (): void => { abortCtrl.abort(); };
+    req.once('close', onReqAbort);
+    req.once('error', onReqAbort);
+    res.once('close', onResAbort);
+    res.once('error', onResAbort);
     Promise.resolve()
       .then(async () => {
         // Audit E4: every Node-side request runs through bindAuth BEFORE
@@ -1369,13 +1383,26 @@ export async function main(): Promise<void> {
           }
         }
         const webReq = toWebRequest(req);
-        const webRes = await handle(webReq);
+        const webRes = await handle(webReq, { signal: abortCtrl.signal });
         await writeWebResponse(webRes, res);
       })
       .catch((err) => {
+        // Audit E3: a client-driven abort is NOT a server error — don't
+        // synthesize a 500 that's already too late to deliver. The Node
+        // server already destroyed the response stream; just exit cleanly.
+        if (abortCtrl.signal.aborted) return;
         console.error('[imgtokenx] handler error:', err);
         if (!res.headersSent) res.statusCode = 500;
         res.end();
+      })
+      .finally(() => {
+        // Audit E3: detach abort listeners so a long-lived Node process
+        // doesn't accumulate one listener per request (the standard
+        // EventEmitter leak mode if we'd used req.on instead of req.once).
+        req.off('close', onReqAbort);
+        req.off('error', onReqAbort);
+        res.off('close', onResAbort);
+        res.off('error', onResAbort);
       });
   });
 
