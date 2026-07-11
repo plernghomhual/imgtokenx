@@ -305,7 +305,7 @@ describe('transformOpenAIResponses (gpt-5.6)', () => {
     const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
     expect(result.info.compressed).toBe(true);
     expect(result.info.imageCount).toBeGreaterThan(0);
-    expect(result.info.firstUserSha8).toMatch(/^[0-9a-f]{8}$/);
+    expect(result.info.firstUserSha8).toMatch(/^[0-9a-f]{16}$/);
     const expectedImagedChars = `## INSTRUCTIONS\n${BIG_INSTRUCTIONS}\n\n${RESPONSES_TOOL_DOC}`.length;
     expect(result.info.origChars).toBe(expectedImagedChars);
     expect(result.info.compressedChars).toBe(expectedImagedChars);
@@ -428,7 +428,7 @@ describe('transformOpenAIResponses (gpt-5.6)', () => {
 
     const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
     expect(result.info.compressed).toBe(true);
-    expect(result.info.firstUserSha8).toMatch(/^[0-9a-f]{8}$/);
+    expect(result.info.firstUserSha8).toMatch(/^[0-9a-f]{16}$/);
 
     const out = JSON.parse(dec.decode(result.body)) as Record<string, unknown>;
     // input should now be an array.

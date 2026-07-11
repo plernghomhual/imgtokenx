@@ -15,6 +15,19 @@ import * as fs from 'node:fs';
 import * as readline from 'node:readline';
 import type { TrackEvent } from './core/tracker.js';
 
+// Latency percentiles need a sample, not the entire history. A reservoir cap
+// keeps the in-flight aggregation heap bounded regardless of how many thousands
+// of events the JSONL holds (audit finding E/H).
+const MAX_LATENCY_SAMPLES = 20000;
+
+function reservoirPush(arr: number[], v: number): void {
+  if (arr.length < MAX_LATENCY_SAMPLES) {
+    arr.push(v);
+  } else {
+    arr[Math.floor(Math.random() * MAX_LATENCY_SAMPLES)] = v;
+  }
+}
+
 // ---- pure aggregator ------------------------------------------------------
 
 export interface Summary {
@@ -89,8 +102,8 @@ export function fold(s: Summary, ev: TrackEvent): Summary {
     if (ev.reason) s.skipReasons.set(ev.reason, (s.skipReasons.get(ev.reason) ?? 0) + 1);
   }
 
-  if (typeof ev.duration_ms === 'number') s.durationMs.push(ev.duration_ms);
-  if (typeof ev.first_byte_ms === 'number') s.firstByteMs.push(ev.first_byte_ms);
+  if (typeof ev.duration_ms === 'number') reservoirPush(s.durationMs, ev.duration_ms);
+  if (typeof ev.first_byte_ms === 'number') reservoirPush(s.firstByteMs, ev.first_byte_ms);
 
   const hasUsage =
     typeof ev.input_tokens === 'number' ||

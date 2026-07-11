@@ -509,6 +509,21 @@ function isProviderPrefixedPath(pathname: string): boolean {
   return PASSTHROUGH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+/** Drop the leading provider-routing prefix (e.g. `/anthropic`, `/openai`,
+ *  `/google-ai-studio`, `/compat`) so a path forwarded to the canonical
+ *  Anthropic/OpenAI endpoint resolves correctly. `/anthropic/v1/messages` →
+ *  `/v1/messages`. Always returns a path starting with `/`. */
+function stripProviderPrefix(pathname: string): string {
+  for (const prefix of PASSTHROUGH_PREFIXES) {
+    if (pathname === prefix) return '/';
+    if (pathname.startsWith(prefix)) {
+      const stripped = pathname.slice(prefix.length);
+      return stripped.startsWith('/') ? stripped : '/' + stripped;
+    }
+  }
+  return pathname;
+}
+
 function isOpenAIChatPath(pathname: string): boolean {
   return pathname === '/v1/chat/completions'
     || pathname === '/chat/completions'
@@ -523,7 +538,7 @@ function isOpenAIResponsesPath(pathname: string): boolean {
     || pathname === '/openai/responses';
 }
 
-function isCanonicalOpenAIPath(pathname: string, headers: Headers, hasOpenAIKey: boolean): boolean {
+function isCanonicalOpenAIPath(pathname: string, headers: Headers): boolean {
   const isModelsPath = pathname === '/v1/models'
     || pathname.startsWith('/v1/models/')
     || pathname === '/models'
@@ -537,8 +552,14 @@ function isCanonicalOpenAIPath(pathname: string, headers: Headers, hasOpenAIKey:
   // here and misroute an Anthropic models listing to the OpenAI upstream
   // (upstream pxpipe #71). Anthropic clients always send anthropic-version, so
   // its presence pins the Anthropic route regardless of auth style.
+  //
+  // The misroute heuristic is keyed ONLY on the *request's own* headers, never
+  // on operator-configured keys. Previously `config.openAIApiKey !== undefined`
+  // widened the heuristic whenever the operator's process happened to have
+  // OPENAI_API_KEY in its env — silently routing every Anthropic `/v1/models`
+  // (lacking anthropic-version) to OpenAI and returning the wrong response.
   const looksOpenAIAuth = !headers.has('anthropic-version')
-    && (hasOpenAIKey || (headers.has('authorization') && !headers.has('x-api-key')));
+    && headers.has('authorization') && !headers.has('x-api-key');
   return pathname === '/v1/chat/completions'
     || pathname === '/chat/completions'
     || pathname === '/v1/responses'
@@ -742,7 +763,6 @@ export function createProxy(config: ProxyConfig = {}) {
     const isOpenAIPath = isCanonicalOpenAIPath(
       url.pathname,
       req.headers,
-      config.openAIApiKey !== undefined,
     );
     const upstreamBase = providerPrefixed ? passthroughUpstream : isOpenAIPath ? openAIUpstream : upstream;
 
@@ -842,10 +862,28 @@ export function createProxy(config: ProxyConfig = {}) {
     // Root aliases are normalized to OpenAI's /v1 upstream. Gateway OpenAI
     // routes then drop /v1. Provider-prefixed passthrough routes keep their
     // full path so ocproxy-style upstreams see `/openai/*`,
-    // `/google-ai-studio/*`, etc. exactly as the client sent them.
+    // `/google-ai-studio/*`, etc. exactly as the client sent them — BUT only
+    // when the upstream isn't the canonical Anthropic/OpenAI endpoint. Behind a
+    // custom "ocproxy-style" upstream (or the AI Gateway) the prefix is
+    // meaningful and must be forwarded verbatim. Against the default
+    // api.anthropic.com / api.openai.com, however, the prefix is just an
+    // OpenCode/provider routing hint and would 404 (e.g.
+    // api.anthropic.com/anthropic/v1/messages). So strip it there, mapping
+    // /anthropic/v1/messages → /v1/messages and /openai/v1/chat/completions →
+    // /v1/chat/completions. This is what makes OpenCode's
+    // ANTHROPIC_BASE_URL=…/anthropic work out of the box.
+    const isAnthropicPrefix = url.pathname.startsWith('/anthropic/') || url.pathname === '/anthropic';
+    // Strip the `/anthropic` prefix only against the *canonical* Anthropic
+    // endpoint. A custom (ocproxy-style) upstream keeps the prefix verbatim —
+    // its routing depends on it (see gateway.test.ts / proxy-usage.test.ts).
+    const stripPrefix =
+      providerPrefixed
+      && isAnthropicPrefix
+      && config.provider !== 'cloudflare-ai-gateway'
+      && routes.anthropic === DEFAULT_UPSTREAM;
     const outPath = isOpenAIPath && !providerPrefixed
       ? openAIUpstreamPath(url.pathname, url.search, routes.stripOpenAIV1)
-      : path;
+      : (stripPrefix ? stripProviderPrefix(url.pathname) + url.search : path);
     const upstreamUrl = upstreamBase + outPath;
     let upstreamRes: Response;
     try {

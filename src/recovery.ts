@@ -13,7 +13,7 @@ export function resolveRecoverableDir(): string | undefined {
 }
 
 export function recoverById(dir: string, id: string): string {
-  if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
+  if (!id || !/^rec_[0-9a-f]{8,16}$/.test(id)) {
     throw new Error('expected a recovery id like rec_1234abcd');
   }
   let entries: string[];

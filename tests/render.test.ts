@@ -1533,7 +1533,7 @@ describe('transform', () => {
     );
     const { info } = await transformRequest(body);
     expect(info.firstUserSha8).toBeDefined();
-    expect(info.firstUserSha8).toMatch(/^[0-9a-f]{8}$/);
+    expect(info.firstUserSha8).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('renders identical input to byte-identical output (determinism = cacheability)', async () => {

@@ -476,7 +476,7 @@ describe('proxy usage extraction', () => {
     expect(firstUser.content[0].type).toBe('input_image');
     expect(captured?.model).toBe('gpt-5.6');
     expect(captured?.info?.compressed).toBe(true);
-    expect(captured?.info?.firstUserSha8).toMatch(/^[0-9a-f]{8}$/);
+    expect(captured?.info?.firstUserSha8).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it('extracts usage tokens from an SSE stream (message_start event)', async () => {

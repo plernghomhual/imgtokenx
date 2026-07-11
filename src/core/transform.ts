@@ -35,6 +35,9 @@ import {
   renderTextToPngsWithCharLimit,
   cellDims,
   denseContentColsForCellWidth,
+  measureLineCols,
+  expandTabsInLine,
+  GUTTER_CELLS,
 } from './render.js';
 import type { RenderStyle } from './render.js';
 import { factSheetTextComplete } from './factsheet.js';
@@ -59,7 +62,7 @@ export interface KeepSharpBlock {
  *  when the caller sets `emitRecoverable`. Lets a stateful harness restore
  *  byte-exact content if the model needs the imaged region verbatim. */
 export interface RecoverableBlock {
-  /** `rec_` + 8 hex SHA-256 over kind + toolUseId + original text. */
+  /** `rec_` + 16 hex (64-bit) SHA-256 over kind + toolUseId + original text. */
   readonly id: string;
   readonly kind: 'static_slab' | 'history' | 'reminder' | 'tool_result' | 'tool_result_part';
   readonly toolUseId?: string;
@@ -209,7 +212,6 @@ function singleColWidthPx(cols: number, cellW: number = CELL_W): number {
 function multiColWidthPx(cols: number, numCols: number, cellW: number = CELL_W): number {
   const n = Math.max(1, numCols | 0);
   if (n === 1) return singleColWidthPx(cols, cellW);
-  const GUTTER_CELLS = 4; // must match render.ts (not exported)
   return 2 * PAD_X + n * cols * cellW + (n - 1) * GUTTER_CELLS * cellW;
 }
 
@@ -838,7 +840,12 @@ function fnv1a(text: string): number {
 
 // Last content hash per (session, tag). Bounded LRU.
 const TAG_OBSERVATIONS_MAX = 4096;
-const tagObservations = new Map<string, number>();
+let tagObservations = new Map<string, number>();
+
+/** Test seam: clear the churn-observation cache so a fresh session starts clean. */
+export function __resetTagObservations(): void {
+  tagObservations = new Map<string, number>();
+}
 
 /** Returns slab tags whose content changed since the last sighting in the same
  *  session — proven per-turn dynamics, whatever the hardcoded lists say. */
@@ -865,13 +872,16 @@ function observeStaticTagChurn(
   return churned;
 }
 
-/** sha256[0..8] hex via Web Crypto (works in Node 18+ and Workers). 32-bit collision-safe. */
+/** sha256[0..16] hex (64-bit) via Web Crypto (works in Node 18+ and Workers).
+  *  64 bits pushes the birthday-collision threshold to ~4 billion distinct
+  *  inputs, so `rec_*` recovery ids (which select by substring match) no
+  *  longer collide under long-running production load. */
 export async function sha8(text: string): Promise<string> {
   const buf = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest('SHA-256', buf);
   const bytes = new Uint8Array(digest);
   let hex = '';
-  for (let i = 0; i < 4; i++) hex += bytes[i]!.toString(16).padStart(2, '0');
+  for (let i = 0; i < 8; i++) hex += bytes[i]!.toString(16).padStart(2, '0');
   return hex;
 }
 
@@ -1178,11 +1188,20 @@ function makeImageBlock(pngB64: string, _ephemeral = false): ImageBlock {
 
 /** Visual rows a single input line will consume after soft-wrap at `cols`. */
 function lineRows(line: string, cols: number): number {
-  return Math.max(1, Math.ceil(line.length / cols));
+  const w = measureLineCols(expandTabsInLine(line));
+  return Math.max(1, Math.ceil(w / Math.max(1, cols)));
 }
 
-/** Visual row count after soft-wrap at `cols`. Only hard newlines start rows;
- *  reflow's ↵ sentinel is an inline glyph and never forces a row break. */
+/** Visual row count after soft-wrap at `cols`. Mirrors `wrapLines` in render.ts:
+  *  per hard-newline line the renderer wraps at cell-width `cols`, where wide
+  *  CJK glyphs cost 2 cells and tabs expand to 4 — so a line's visual rows are
+  *  `ceil(cellWidth / cols)`, NOT `ceil(codeUnits / cols)`. Using `line.length`
+  *  here (the old behavior) under-counted rows ~2× for CJK/wide content, which
+  *  let the break-even gate approve net-loss images and let the per-tool-result
+  *  image cap (`truncateForBudget`) fail to fire. Refflow already tab-expands,
+  *  but we expand again to stay byte-identical to the renderer on every path.
+  *  Only hard newlines start rows; reflow's ↵ sentinel is an inline glyph and
+  *  never forces a row break (counted as 1 cell at the default markerScale). */
 function countVisualRows(text: string, cols: number): number {
   let rows = 0;
   let lineStart = 0;
@@ -1190,8 +1209,9 @@ function countVisualRows(text: string, cols: number): number {
   for (let i = 0; i <= len; i++) {
     const cc = i < len ? text.charCodeAt(i) : -1;
     if (i === len || cc === 10 /* \n */) {
-      const lineLen = i - lineStart;
-      rows += lineLen === 0 ? 1 : Math.ceil(lineLen / Math.max(1, cols));
+      const line = lineStart < i ? text.slice(lineStart, i) : '';
+      const w = measureLineCols(expandTabsInLine(line));
+      rows += w === 0 ? 1 : Math.ceil(w / Math.max(1, cols));
       lineStart = i + 1;
     }
   }

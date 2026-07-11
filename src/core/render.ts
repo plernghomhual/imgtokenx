@@ -926,7 +926,7 @@ export async function renderTextToPngs(
 // wrapped lines. Reduces image count by ~numCols for short-line content.
 // OCR column ordering is the risk — gated behind an opt-in flag pending empirical eval.
 
-const GUTTER_CELLS = 4;
+export const GUTTER_CELLS = 4;
 // Width hard-capped at the API's long-edge bound: anything wider is resampled server-side
 // (measured 2026-07-01: fit-within 1568-edge AND ~1.15 MP; billed on 28px patches).
 const MAX_WIDTH_PX = 1568;

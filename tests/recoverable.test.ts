@@ -82,7 +82,7 @@ describe('emitRecoverable recovery channel', () => {
     expect(Array.isArray(info.recoverable)).toBe(true);
     const entry = info.recoverable!.find((r) => r.kind === 'tool_result');
     expect(entry).toBeTruthy();
-    expect(entry!.id).toMatch(/^rec_[0-9a-f]{8}$/);
+    expect(entry!.id).toMatch(/^rec_[0-9a-f]{16}$/);
     expect(entry!.toolUseId).toBe('toolu_a');
     expect(entry!.text).toBe(BIG); // byte-exact, pre-compaction
     expect(entry!.imageCount).toBeGreaterThan(0);

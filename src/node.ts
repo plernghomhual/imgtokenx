@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createProxy, parseGatewayHeaders, resolveUpstreams, type ProxyConfig } from './core/proxy.js';
 import { doctorExitCode, formatDoctor, parseInstallArgs, runDoctor, runInstall, runUninstall } from './install.js';
@@ -326,7 +326,7 @@ async function readRequestBody(req: IncomingMessage): Promise<string> {
  * can fall through to the upstream proxy (e.g. a GET path that's only
  * defined for POST). Keeps the createServer body small + readable.
  */
-async function dispatchDashboard(
+export async function dispatchDashboard(
   dashboard: DashboardState,
   route: DashboardRoute,
   req: IncomingMessage,
@@ -335,7 +335,13 @@ async function dispatchDashboard(
 ): Promise<Response | undefined> {
   const method = req.method ?? 'GET';
   const fetchSite = req.headers['sec-fetch-site'];
-  if (method === 'POST' && !dashboardMutationAllowed(
+  // Apply the origin/fetch-site guard to EVERY method, not just POST. The
+  // dashboard GET routes (notably /api/image-source) return verbatim user
+  // prompt/system text; an unguarded GET let a cross-site page visited while
+  // the loopback proxy runs exfiltrate that content. Same-origin browser
+  // requests and non-browser (no Origin header) local clients are still
+  // allowed — matches the documented loopback-only threat model.
+  if (!dashboardMutationAllowed(
     req.headers.origin,
     url.origin,
     Array.isArray(fetchSite) ? fetchSite[0] : fetchSite,
@@ -672,7 +678,8 @@ function walkDir(
   } catch {
     return;
   }
-  for (const entry of entries) {
+   for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue; // don't follow symlinks out of the tree
     const full = path.join(dir, entry.name);
     const rel = path.relative(rootDir, full).replace(/\\/g, '/');
     if (entry.isDirectory()) {
@@ -687,8 +694,33 @@ function walkDir(
   }
 }
 
+/** Cap the recovery dir so it can't grow unbounded on a long-running proxy.
+ *  Keeps the newest MAX_RECOVERABLE_FILES `.txt` sources; the rest are the
+ *  oldest and least likely to be referenced by a still-live `rec_*` id. */
+const MAX_RECOVERABLE_FILES = 4096;
+
+function pruneRecoverableDir(dir: string): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  const files = entries
+    .filter((e) => e.isFile() && e.name.endsWith('.txt'))
+    .map((e) => {
+      let mtimeMs = 0;
+      try { mtimeMs = fs.statSync(path.join(dir, e.name)).mtimeMs; } catch { /* gone */ }
+      return { name: e.name, mtimeMs };
+    })
+    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+  for (let i = 0; i < files.length - MAX_RECOVERABLE_FILES; i++) {
+    try { fs.unlinkSync(path.join(dir, files[i]!.name)); } catch { /* gone */ }
+  }
+}
+
 /** Collect files from a list of targets (files or directories). */
-function collectFilesFromTargets(
+export function collectFilesFromTargets(
   targets: string[],
   include: string[],
   exclude: string[],
@@ -896,7 +928,7 @@ unset. Set IMGTOKENX_RECOVERABLE_DIR=off to confirm recovery is disabled.
 `);
     process.exit(0);
   }
-  if (!id || !/^rec_[0-9a-f]{8}$/.test(id)) {
+  if (!id || !/^rec_[0-9a-f]{8,16}$/.test(id)) {
     console.error('[imgtokenx recover] expected a recovery id like rec_1234abcd');
     process.exit(2);
   }
@@ -915,7 +947,7 @@ unset. Set IMGTOKENX_RECOVERABLE_DIR=off to confirm recovery is disabled.
 
 // ---- main ----------------------------------------------------------------
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv[0] === 'export') {
     await runExport(argv.slice(1));
@@ -1102,7 +1134,10 @@ async function main(): Promise<void> {
             break;
           }
         }
-        if (written > 0) console.log(`  ↳ dumped ${written} recoverable source(s) → ${recoverableDir}`);
+        if (written > 0) {
+          pruneRecoverableDir(recoverableDir);
+          console.log(`  ↳ dumped ${written} recoverable source(s) → ${recoverableDir}`);
+        }
       }
       // Terse human-readable console line.
       const extra: string[] = [];
@@ -1240,7 +1275,15 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main().catch((err) => {
-  console.error('[imgtokenx] fatal:', err);
-  process.exit(1);
-});
+// Only auto-start when invoked as the CLI entrypoint (bin/cli.js → dist/node.js),
+// not when imported by tests or other modules. This keeps `node.ts` import-safe
+// so its exported helpers (e.g. dispatchDashboard) can be unit-tested without
+// binding the listening socket.
+const invokedAsEntry =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsEntry) {
+  main().catch((err) => {
+    console.error('[imgtokenx] fatal:', err);
+    process.exit(1);
+  });
+}
