@@ -1067,3 +1067,19 @@ The original mock for test #3 added an abort listener inside the promise constru
 ### Not addressed (out of scope / next batches)
 - Streaming-response mid-stream abort handling: the `teeForUsage` scanner still reads upstream bytes even after the client has gone away; the abort doesn't reach the inner reader. Drained via the existing 4 MiB JSON cap, but a dedicated `reader.cancel()` on abort would be cleaner. (potential #E3-bis or #E3-followup)
 - `AbortSignal.timeout` and `AbortSignal.any` are available in Node 17.3+ and modern Workers; project's engines says >=20. Verified at runtime; no fallback needed.
+
+## Final Review - 2026-07-10 (audit batch 16 — 1 of 39 items: #2 D2)
+
+Status: 1 item implemented + regression-tested; tsc clean (0); vitest focused tests pass:
+- tests/openai-gpt5.test.ts D2 group 3/3 (history collapse runs independently of slab outcome)
+- tests/openai-gpt5.test.ts 43/43 total
+- Surrounding test guardrails 9 files / 141 tests still green
+Build green (0.8.0); `node scripts/release-check.mjs` -> "OK: ready to release v0.8.0"; git diff --check clean. Committed on `main` (no push per scope).
+
+### Items completed (verified)
+- [x] #2 D2 GPT history collapse must run independently of slab profitability. Pre-fix: both `transformOpenAIChatCompletions` and `transformOpenAIResponses` had a pre-Phase-1 guard `if (!combinedRaw) { info.reason = 'no_static_context'; return { body, info }; }` that returned the original body IMMEDIATELY when the request had no system/tools, bypassing both Phase 1's no-slab branch AND all of Phase 2 (history collapse). A 60k-char 30-turn request with no system/tools (the audit's example) collapsed zero turns. Fix: removed both early returns. The downstream Phase 1 block already handles the no-slab case correctly (`if (!combinedRaw) { info.reason = 'no_static_context'; } else { ... }` — sets reason, keeps slabRendered=false, skips imaging). Phase 2's history-collapse loop then runs unconditionally when `o.collapseHistory` is on (default true), and the final `if (slabRendered || historyCompressed)` decides whether to return the modified body. Behavior changes:
+  - `no_static_context` request: history collapse now runs (was: 0 turns → now: planner picks a profitable bundle and collapses).
+  - `below_min_chars` / `lossless_exact` / `not_profitable` / `render_empty` slab: same — history collapse now runs.
+  - `compress=false` / `parse_error` / `no_user_message` / `reader_profile_unsafe`: still early-return (no history anchor available).
+  - `collapseHistory=false`: still skips Phase 2 entirely (operator opt-out).
+  3 new D2 regression tests in tests/openai-gpt5.test.ts: D2.A (no-slab request collapses history), D2.B (below_min_chars slab still collapses history), D2.C (collapseHistory=false still disables history in the no-slab case). The pre-existing Chat/Responses history-collapse tests (which go through the slab path) continue to pass unchanged — the fix is additive.

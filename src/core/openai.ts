@@ -691,131 +691,143 @@ export async function transformOpenAIChatCompletions(
 
   const combinedRaw = [...authorityDocs, toolDocs].filter((s) => s.length > 0).join('\n\n');
   info.origChars = combinedRaw.length;
-  if (!combinedRaw) {
-    info.reason = 'no_static_context';
-    return { body, info };
-  }
 
   const firstUser = firstUserText(req);
   if (firstUser) info.firstUserSha8 = await sha8(firstUser);
 
-  const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
-  if (shouldKeepLosslessExact(info, o, combinedRaw)) {
-    info.reason = 'lossless_exact';
-    return { body, info };
-  }
-  if (combined.length < o.minCompressChars) {
-    info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
-    return { body, info };
-  }
-
-  // Portrait strip only — multi-col would exceed 768px → downscale.
-  const numCols = 1;
-  const reflowNote = o.reflow
-    ? ' The glyph ↵ (U+21B5) marks an original hard line break in content; treat it as a real newline.'
-    : '';
-  const header = CHAT_HEADER.replace('\n====', reflowNote + '\n====');
-  const renderedText = header + combined;
+  // ----- Phase 1: optional static-slab imaging. Any skip below is NON-FATAL —
+  // Phase 2 (history collapse) still runs (audit D2: a 60k-char 30-turn request
+  // without system/tools used to collapse zero turns because the no_static_context
+  // early return fired before history collapse). `slabRendered` lets Phase 2
+  // know whether the slab item now occupies firstUserIdx (so the protected
+  // prefix must shift +1 to skip both the slab and the original first user).
+  // CRITICAL: when combinedRaw is empty, do NOT return here — fall through to
+  // Phase 2 so a stateless long-history request still gets the advertised
+  // history-collapse savings.
+  let slabRendered = false;
   const profile = resolveGptProfile(req.model);
-  const maxCols = o.cols ?? profile.stripCols;
-  const cols = Math.min(
-    shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
-    profile.stripCols,
-  );
+  if (!combinedRaw) {
+    info.reason = 'no_static_context';
+  } else {
+    const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
+    if (shouldKeepLosslessExact(info, o, combinedRaw)) {
+      info.reason = 'lossless_exact';
+    } else if (combined.length < o.minCompressChars) {
+      info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
+    } else {
+      const reflowNote = o.reflow
+        ? ' The glyph ↵ (U+21B5) marks an original hard line break in content; treat it as a real newline.'
+        : '';
+      const header = CHAT_HEADER.replace('\n====', reflowNote + '\n====');
+      const renderedText = header + combined;
+      const maxCols = o.cols ?? profile.stripCols;
+      const cols = Math.min(
+        shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
+        profile.stripCols,
+      );
 
-  // D5: the verbatim fact-sheet sidecar is always added alongside the images, so
-  // price its token cost into the gate BEFORE rendering. If the sidecar tips the
-  // slab back to text, keep the exact native text (no imaging).
-  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
-  const slabFsTokens = slabFactSheet.length / o.charsPerToken;
-  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
-  info.gateEval = {
-    site: 'slab',
-    imageTokens: gate.imageTokens,
-    textTokens: gate.textTokens,
-    sidecarTextTokens: slabFsTokens,
-    burnImageSide: 0,
-    burnTextSide: 0,
-    profitable: gate.profitable,
-  };
-  if (!gate.profitable) {
-    info.reason = `not_profitable (slab=${combined.length} chars)`;
-    info.passthroughReasons = { not_profitable: 1 };
-    info.breakEvenMisses = 1;
-    return { body, info };
+      // D5: the verbatim fact-sheet sidecar is always added alongside the images,
+      // so price its token cost into the gate BEFORE rendering. If the sidecar
+      // tips the slab back to text, keep the exact native text (no imaging).
+      const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+      const slabFsTokens = slabFactSheet.length / o.charsPerToken;
+      const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
+      info.gateEval = {
+        site: 'slab',
+        imageTokens: gate.imageTokens,
+        textTokens: gate.textTokens,
+        sidecarTextTokens: slabFsTokens,
+        burnImageSide: 0,
+        burnTextSide: 0,
+        profitable: gate.profitable,
+      };
+      if (!gate.profitable) {
+        info.reason = `not_profitable (slab=${combined.length} chars)`;
+        info.passthroughReasons = { not_profitable: 1 };
+        info.breakEvenMisses = 1;
+      } else {
+        const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
+        if (images.length === 0) {
+          info.reason = 'render_empty';
+        } else {
+          const { droppedCodepoints } = accumulateRenderedImages(images, info);
+          const topDropped = droppedCodepointsTop(droppedCodepoints);
+          if (topDropped) info.droppedCodepointsTop = topDropped;
+          const imageParts: OpenAIImagePart[] = images.map(openAIImagePart);
+          info.imageCount = images.length;
+          // GPT savings basis: vision tokens the images actually cost vs the text
+          // tokens the same content would have cost unproxied. req.tools is still
+          // the original (reassigned to the stripped set below). See openai-savings.ts.
+          info.imageTokens = gptImageTokens(req.model, images);
+          info.baselineImagedTokens = gptBaselineImagedTokens(systemTexts, req.tools, rewrittenTools);
+          info.compressedChars = combinedRaw.length;
+          info.bucketChars = { static_slab: combinedRaw.length };
+          info.systemSha8 = await sha8(combined);
+          info.firstImagePng = images[0]!.png;
+          info.firstImageWidth = images[0]!.width;
+          info.firstImageHeight = images[0]!.height;
+          info.imagePngs = images.map((img) => img.png);
+          info.imageDims = images.map((img) => ({ width: img.width, height: img.height }));
+
+          // Verbatim fact-sheet: precision-critical tokens (paths, ids, versions,
+          // flags) pulled from the pre-image text so exact strings survive OCR loss.
+          // Deterministic → stays inside the cached prefix. See factsheet.ts.
+          recordFactSheetTelemetry(info, slabFactSheet);
+          const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
+            kind: 'static_slab',
+            text: combinedRaw,
+            imageCount: images.length,
+          });
+          const slabUserMsg: OpenAIChatMessage = {
+            role: 'user',
+            content: [
+              ...imageParts,
+              ...(slabFactSheet ? [{ type: 'text', text: slabFactSheet } as OpenAIContentPart] : []),
+              ...(slabRecovery ? [{ type: 'text', text: recoverableRefText(slabRecovery) } as OpenAIContentPart] : []),
+              { type: 'text', text: '[End of rendered GPT system/tool context.]' },
+            ],
+          };
+          req.messages = [
+            ...req.messages.slice(0, firstUserIdx),
+            slabUserMsg,
+            ...req.messages.slice(firstUserIdx),
+          ];
+          for (const msg of req.messages) {
+            if (msg.role !== 'system' && msg.role !== 'developer') continue;
+            if (!contentText(msg.content)) continue;
+            setTextContent(msg, CHAT_POINTER);
+          }
+          slabRendered = true;
+        }
+      }
+    }
   }
 
-  const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
-  if (images.length === 0) {
-    info.reason = 'render_empty';
-    return { body, info };
-  }
-
-  const { droppedCodepoints } = accumulateRenderedImages(images, info);
-  const topDropped = droppedCodepointsTop(droppedCodepoints);
-  if (topDropped) info.droppedCodepointsTop = topDropped;
-
-  const imageParts: OpenAIImagePart[] = images.map(openAIImagePart);
-  info.imageCount = images.length;
-  // GPT savings basis: vision tokens the images actually cost vs the text tokens
-  // the same content would have cost unproxied. req.tools is still the original
-  // (reassigned to the stripped set below). See src/core/openai-savings.ts.
-  info.imageTokens = gptImageTokens(req.model, images);
-  info.baselineImagedTokens = gptBaselineImagedTokens(systemTexts, req.tools, rewrittenTools);
-  info.compressedChars = combinedRaw.length;
-  info.bucketChars = { static_slab: combinedRaw.length };
-  info.systemSha8 = await sha8(combined);
-  info.firstImagePng = images[0]!.png;
-  info.firstImageWidth = images[0]!.width;
-  info.firstImageHeight = images[0]!.height;
-  info.imagePngs = images.map((img) => img.png);
-  info.imageDims = images.map((img) => ({ width: img.width, height: img.height }));
-
-  // Verbatim fact-sheet: precision-critical tokens (paths, ids, versions, flags)
-  // pulled from the pre-image text so exact strings survive OCR loss. Deterministic
-  // → stays inside the cached prefix. See src/core/factsheet.ts.
-  recordFactSheetTelemetry(info, slabFactSheet);
-  const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
-    kind: 'static_slab',
-    text: combinedRaw,
-    imageCount: images.length,
-  });
-  const slabUserMsg: OpenAIChatMessage = {
-    role: 'user',
-    content: [
-      ...imageParts,
-      ...(slabFactSheet ? [{ type: 'text', text: slabFactSheet } as OpenAIContentPart] : []),
-      ...(slabRecovery ? [{ type: 'text', text: recoverableRefText(slabRecovery) } as OpenAIContentPart] : []),
-      { type: 'text', text: '[End of rendered GPT system/tool context.]' },
-    ],
-  };
-  req.messages = [
-    ...req.messages.slice(0, firstUserIdx),
-    slabUserMsg,
-    ...req.messages.slice(firstUserIdx),
-  ];
-
-  for (const msg of req.messages) {
-    if (msg.role !== 'system' && msg.role !== 'developer') continue;
-    if (!contentText(msg.content)) continue;
-    setTextContent(msg, CHAT_POINTER);
-  }
-
-  // Collapse the OLD conversation prefix into history image(s). The inserted slab
-  // item carries static images and is protected; the original opening user prompt
-  // remains collapsible history instead of looking like the live request.
+  // ----- Phase 2: history collapse (audit D2). Runs independently of slab
+  // outcome — a `no_static_context` / `lossless_exact` / `below_min_chars` /
+  // `not_profitable` / `render_empty` slab does NOT suppress history collapse.
+  // When the slab was rendered, the slab item occupies firstUserIdx so the
+  // protected prefix shifts +1; when skipped, firstUserIdx itself is the first
+  // user message and protection starts there. compress=false / parse_error /
+  // no_user_message / reader_profile_unsafe are upstream early returns and
+  // never reach this block (no history anchor available).
   if (o.collapseHistory) {
     const turns = chatMessagesToTurns(req.messages);
     const profitable = (text: string, cols: number) =>
       !shouldKeepLosslessExact(info, o, text) &&
       evalOpenAIGate(req.model, text, cols, o.charsPerToken).profitable;
-    const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
-      ...o.gptHistory,
-      reflow: o.reflow,
-      cols: o.gptHistory?.cols ?? profile.stripCols,
-      maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
-      style: o.gptHistory?.style ?? profile.style,
-    });
+    const plan = await planGptCollapse(
+      turns,
+      slabRendered ? firstUserIdx + 1 : firstUserIdx,
+      profitable,
+      {
+        ...o.gptHistory,
+        reflow: o.reflow,
+        cols: o.gptHistory?.cols ?? profile.stripCols,
+        maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
+        style: o.gptHistory?.style ?? profile.style,
+      },
+    );
     foldGptHistory(info, req.model, plan);
     const allImages = [...plan.images, ...plan.imagesAfter];
     if (allImages.length > 0) {
@@ -856,9 +868,17 @@ export async function transformOpenAIChatCompletions(
   }
 
   if (rewrittenTools !== undefined) req.tools = rewrittenTools;
-  info.outgoingTextChars = countOutgoingTextChars(req);
-  info.compressed = true;
-  return { body: new TextEncoder().encode(JSON.stringify(req)), info };
+  // Audit D2: compressed=true if EITHER phase produced output. If both skipped
+  // (e.g. no static context AND no profitable history), return the original
+  // body unchanged with compressed=false so the proxy forwards the unaltered
+  // request and the dashboard can still see origChars/measurements.
+  const historyCompressed = (info.collapsedTurns ?? 0) > 0;
+  if (slabRendered || historyCompressed) {
+    info.compressed = true;
+    if (slabRendered) info.outgoingTextChars = countOutgoingTextChars(req);
+    return { body: new TextEncoder().encode(JSON.stringify(req)), info };
+  }
+  return { body, info };
 }
 
 export async function transformOpenAIResponses(
@@ -939,163 +959,175 @@ export async function transformOpenAIResponses(
 
   const combinedRaw = [...authorityDocs, toolDocs].filter((s) => s.length > 0).join('\n\n');
   info.origChars = combinedRaw.length;
-  if (!combinedRaw) {
-    info.reason = 'no_static_context';
-    return { body, info };
-  }
 
   const firstUser = firstResponsesUserText(inputWasString, originalInputString, inputItems);
   if (firstUser) info.firstUserSha8 = await sha8(firstUser);
 
-  const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
-  if (shouldKeepLosslessExact(info, o, combinedRaw)) {
-    info.reason = 'lossless_exact';
-    return { body, info };
-  }
-  if (combined.length < o.minCompressChars) {
-    info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
-    return { body, info };
-  }
-
-  const reflowNote = o.reflow
-    ? ' The glyph ↵ (U+21B5) marks an original hard line break in content; treat it as a real newline.'
-    : '';
-  const header = RESPONSES_HEADER.replace('\n====', reflowNote + '\n====');
-  const renderedText = header + combined;
+  // ----- Phase 1: optional static-slab imaging. Any skip below is NON-FATAL —
+  // Phase 2 (history collapse) still runs (audit D2). `slabRendered` lets
+  // Phase 2 know whether the slab item now occupies firstUserIdx (so the
+  // protected prefix must shift +1 to skip both the slab and the original
+  // first user). For inputWasString, only history collapse skips; the
+  // bare-string wrap is a no-op when the slab is not rendered.
+  // CRITICAL: when combinedRaw is empty, do NOT return here — fall through to
+  // Phase 2 so a stateless long-history Responses request still gets the
+  // advertised history-collapse savings.
+  let slabRendered = false;
   const profile = resolveGptProfile(req.model);
-  const maxCols = o.cols ?? profile.stripCols;
-  const cols = Math.min(
-    shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
-    profile.stripCols,
-  );
-
-  // D5: the verbatim fact-sheet sidecar is always added alongside the images, so
-  // price its token cost into the gate BEFORE rendering. If the sidecar tips the
-  // slab back to text, keep the exact native text (no imaging).
-  const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
-  const slabFsTokens = slabFactSheet.length / o.charsPerToken;
-  const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
-  info.gateEval = {
-    site: 'slab',
-    imageTokens: gate.imageTokens,
-    textTokens: gate.textTokens,
-    sidecarTextTokens: slabFsTokens,
-    burnImageSide: 0,
-    burnTextSide: 0,
-    profitable: gate.profitable,
-  };
-  if (!gate.profitable) {
-    info.reason = `not_profitable (slab=${combined.length} chars)`;
-    info.passthroughReasons = { not_profitable: 1 };
-    info.breakEvenMisses = 1;
-    return { body, info };
-  }
-
-  const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
-  if (images.length === 0) {
-    info.reason = 'render_empty';
-    return { body, info };
-  }
-
-  const { droppedCodepoints } = accumulateRenderedImages(images, info);
-  const topDropped = droppedCodepointsTop(droppedCodepoints);
-  if (topDropped) info.droppedCodepointsTop = topDropped;
-
-  info.imageCount = images.length;
-  // GPT savings basis (see src/core/openai-savings.ts). req.tools is still the
-  // original here — reassigned to the stripped set below.
-  info.imageTokens = gptImageTokens(req.model, images);
-  info.baselineImagedTokens = gptBaselineImagedTokens(systemTexts, req.tools, rewrittenTools);
-  info.compressedChars = combinedRaw.length;
-  info.bucketChars = { static_slab: combinedRaw.length };
-  info.systemSha8 = await sha8(combined);
-  info.firstImagePng = images[0]!.png;
-  info.firstImageWidth = images[0]!.width;
-  info.firstImageHeight = images[0]!.height;
-  info.imagePngs = images.map((img) => img.png);
-  info.imageDims = images.map((img) => ({ width: img.width, height: img.height }));
-
-  const imagePartsResp: ResponsesInputImagePart[] = images.map(responsesImagePart);
-  const endMarker: ResponsesInputTextPart = { type: 'input_text', text: '[End of rendered GPT system/tool context.]' };
-  // Verbatim fact-sheet (see src/core/factsheet.ts): exact tokens that survive OCR loss.
-  recordFactSheetTelemetry(info, slabFactSheet);
-  const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
-    kind: 'static_slab',
-    text: combinedRaw,
-    imageCount: images.length,
-  });
-  const slabFactSheetPart: ResponsesInputTextPart[] = slabFactSheet
-    ? [{ type: 'input_text', text: slabFactSheet }]
-    : [];
-  const slabRecoveryPart: ResponsesInputTextPart[] = slabRecovery
-    ? [{ type: 'input_text', text: recoverableRefText(slabRecovery) }]
-    : [];
-
-  if (inputWasString) {
-    // Wrap bare string input into a user item with images prepended.
-    req.input = [{
-      role: 'user',
-      content: [
-        ...imagePartsResp,
-        ...slabFactSheetPart,
-        ...slabRecoveryPart,
-        endMarker,
-        { type: 'input_text', text: originalInputString! },
-      ],
-    }];
+  if (!combinedRaw) {
+    info.reason = 'no_static_context';
   } else {
-    // Insert a dedicated static-slab item. Do not attach it to the opening real
-    // user prompt: that prompt is old history on long stateless Responses calls,
-    // and protecting it made stale first-turn requests look live.
-    const slabUserItem: ResponsesInputItem = {
-      role: 'user',
-      content: [...imagePartsResp, ...slabFactSheetPart, ...slabRecoveryPart, endMarker],
-    };
-    inputItems = [
-      ...inputItems.slice(0, firstUserIdx),
-      slabUserItem,
-      ...inputItems.slice(firstUserIdx),
-    ];
-    req.input = inputItems;
-  }
+    const combined = maybeReflow(compactSlabWhitespace(combinedRaw), o.reflow);
+    if (shouldKeepLosslessExact(info, o, combinedRaw)) {
+      info.reason = 'lossless_exact';
+    } else if (combined.length < o.minCompressChars) {
+      info.reason = `below_min_chars (${combined.length} < ${o.minCompressChars})`;
+    } else {
+      const reflowNote = o.reflow
+        ? ' The glyph ↵ (U+21B5) marks an original hard line break in content; treat it as a real newline.'
+        : '';
+      const header = RESPONSES_HEADER.replace('\n====', reflowNote + '\n====');
+      const renderedText = header + combined;
+      const maxCols = o.cols ?? profile.stripCols;
+      const cols = Math.min(
+        shrinkColsToContent(renderedText, maxCols, profile.style.markerScale, profile.style.font),
+        profile.stripCols,
+      );
 
-  // Replace instructions with pointer.
-  if (typeof req.instructions === 'string' && req.instructions.length > 0) {
-    req.instructions = RESPONSES_POINTER;
-  }
+      // D5: the verbatim fact-sheet sidecar is always added alongside the images,
+      // so price its token cost into the gate BEFORE rendering. If the sidecar
+      // tips the slab back to text, keep the exact native text (no imaging).
+      const slabFactSheet = factSheetTextComplete(combinedRaw, DENSE_CONTENT_CHARS_PER_IMAGE);
+      const slabFsTokens = slabFactSheet.length / o.charsPerToken;
+      const gate = evalOpenAIGate(req.model, renderedText, cols, o.charsPerToken, slabFsTokens);
+      info.gateEval = {
+        site: 'slab',
+        imageTokens: gate.imageTokens,
+        textTokens: gate.textTokens,
+        sidecarTextTokens: slabFsTokens,
+        burnImageSide: 0,
+        burnTextSide: 0,
+        profitable: gate.profitable,
+      };
+      if (!gate.profitable) {
+        info.reason = `not_profitable (slab=${combined.length} chars)`;
+        info.passthroughReasons = { not_profitable: 1 };
+        info.breakEvenMisses = 1;
+      } else {
+        const images = await renderTextToPngs(renderedText, cols, profile.style, profile.maxHeightPx);
+        if (images.length === 0) {
+          info.reason = 'render_empty';
+        } else {
+          const { droppedCodepoints } = accumulateRenderedImages(images, info);
+          const topDropped = droppedCodepointsTop(droppedCodepoints);
+          if (topDropped) info.droppedCodepointsTop = topDropped;
 
-  // Replace system/developer input items with a pointer. Mirror the collection
-  // gate above for BOTH content shapes: a string becomes the pointer string; an
-  // input_text part array keeps its array shape with a single pointer part, so a
-  // request the caller sent as parts is not silently reshaped into a string.
-  if (!inputWasString) {
-    for (const item of inputItems) {
-      const it = item as ResponsesInputItem;
-      if (it.role !== 'system' && it.role !== 'developer') continue;
-      const content = it.content;
-      if (typeof content === 'string') {
-        if (content.length > 0) it.content = RESPONSES_POINTER;
-      } else if (Array.isArray(content) && responsesContentText(content).length > 0) {
-        it.content = [{ type: 'input_text', text: RESPONSES_POINTER }];
+          info.imageCount = images.length;
+          // GPT savings basis (see src/core/openai-savings.ts). req.tools is still
+          // the original here — reassigned to the stripped set below.
+          info.imageTokens = gptImageTokens(req.model, images);
+          info.baselineImagedTokens = gptBaselineImagedTokens(systemTexts, req.tools, rewrittenTools);
+          info.compressedChars = combinedRaw.length;
+          info.bucketChars = { static_slab: combinedRaw.length };
+          info.systemSha8 = await sha8(combined);
+          info.firstImagePng = images[0]!.png;
+          info.firstImageWidth = images[0]!.width;
+          info.firstImageHeight = images[0]!.height;
+          info.imagePngs = images.map((img) => img.png);
+          info.imageDims = images.map((img) => ({ width: img.width, height: img.height }));
+
+          const imagePartsResp: ResponsesInputImagePart[] = images.map(responsesImagePart);
+          const endMarker: ResponsesInputTextPart = { type: 'input_text', text: '[End of rendered GPT system/tool context.]' };
+          // Verbatim fact-sheet (see src/core/factsheet.ts): exact tokens that survive OCR loss.
+          recordFactSheetTelemetry(info, slabFactSheet);
+          const slabRecovery = await recordRecoverable(info, o.emitRecoverable, {
+            kind: 'static_slab',
+            text: combinedRaw,
+            imageCount: images.length,
+          });
+          const slabFactSheetPart: ResponsesInputTextPart[] = slabFactSheet
+            ? [{ type: 'input_text', text: slabFactSheet }]
+            : [];
+          const slabRecoveryPart: ResponsesInputTextPart[] = slabRecovery
+            ? [{ type: 'input_text', text: recoverableRefText(slabRecovery) }]
+            : [];
+
+          if (inputWasString) {
+            // Wrap bare string input into a user item with images prepended.
+            req.input = [{
+              role: 'user',
+              content: [
+                ...imagePartsResp,
+                ...slabFactSheetPart,
+                ...slabRecoveryPart,
+                endMarker,
+                { type: 'input_text', text: originalInputString! },
+              ],
+            }];
+          } else {
+            // Insert a dedicated static-slab item. Do not attach it to the
+            // opening real user prompt: that prompt is old history on long
+            // stateless Responses calls, and protecting it made stale first-turn
+            // requests look live.
+            const slabUserItem: ResponsesInputItem = {
+              role: 'user',
+              content: [...imagePartsResp, ...slabFactSheetPart, ...slabRecoveryPart, endMarker],
+            };
+            inputItems = [
+              ...inputItems.slice(0, firstUserIdx),
+              slabUserItem,
+              ...inputItems.slice(firstUserIdx),
+            ];
+            req.input = inputItems;
+          }
+
+          // Replace instructions with pointer.
+          if (typeof req.instructions === 'string' && req.instructions.length > 0) {
+            req.instructions = RESPONSES_POINTER;
+          }
+
+          // Replace system/developer input items with a pointer. Mirror the
+          // collection gate above for BOTH content shapes: a string becomes the
+          // pointer string; an input_text part array keeps its array shape with a
+          // single pointer part, so a request the caller sent as parts is not
+          // silently reshaped into a string.
+          if (!inputWasString) {
+            for (const item of inputItems) {
+              const it = item as ResponsesInputItem;
+              if (it.role !== 'system' && it.role !== 'developer') continue;
+              const content = it.content;
+              if (typeof content === 'string') {
+                if (content.length > 0) it.content = RESPONSES_POINTER;
+              } else if (Array.isArray(content) && responsesContentText(content).length > 0) {
+                it.content = [{ type: 'input_text', text: RESPONSES_POINTER }];
+              }
+            }
+          }
+          slabRendered = true;
+        }
       }
     }
   }
 
-  // Collapse the OLD conversation prefix into history image(s). The inserted slab
-  // item is protected; the transcript OpenCode resends every turn is the real cost.
-  // Skip for bare-string input (single message, nothing to collapse).
+  // ----- Phase 2: history collapse (audit D2). Runs independently of slab
+  // outcome. Skip for inputWasString (single message, nothing to collapse).
   if (o.collapseHistory && !inputWasString) {
     const turns = responsesItemsToTurns(inputItems);
     const profitable = (text: string, cols: number) =>
       !shouldKeepLosslessExact(info, o, text) &&
       evalOpenAIGate(req.model, text, cols, o.charsPerToken).profitable;
-    const plan = await planGptCollapse(turns, firstUserIdx + 1, profitable, {
-      ...o.gptHistory,
-      reflow: o.reflow,
-      cols: o.gptHistory?.cols ?? profile.stripCols,
-      maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
-      style: o.gptHistory?.style ?? profile.style,
-    });
+    const plan = await planGptCollapse(
+      turns,
+      slabRendered ? firstUserIdx + 1 : firstUserIdx,
+      profitable,
+      {
+        ...o.gptHistory,
+        reflow: o.reflow,
+        cols: o.gptHistory?.cols ?? profile.stripCols,
+        maxHeightPx: o.gptHistory?.maxHeightPx ?? profile.maxHeightPx,
+        style: o.gptHistory?.style ?? profile.style,
+      },
+    );
     foldGptHistory(info, req.model, plan);
     const allImages = [...plan.images, ...plan.imagesAfter];
     if (allImages.length > 0) {
@@ -1138,10 +1170,16 @@ export async function transformOpenAIResponses(
   }
 
   if (rewrittenTools !== undefined) req.tools = rewrittenTools;
-
-  // Regression denominator, same as the Chat path — Responses was the only
-  // transform that never recorded it.
-  info.outgoingTextChars = countResponsesOutgoingTextChars(req);
-  info.compressed = true;
-  return { body: new TextEncoder().encode(JSON.stringify(req)), info };
+  // Audit D2: compressed=true if EITHER phase produced output. If both skipped
+  // (e.g. no static context AND no profitable history, or inputWasString with
+  // no slab), return the original body unchanged with compressed=false so the
+  // proxy forwards the unaltered request and the dashboard can still see
+  // origChars/measurements.
+  const historyCompressed = (info.collapsedTurns ?? 0) > 0;
+  if (slabRendered || historyCompressed) {
+    info.compressed = true;
+    if (slabRendered) info.outgoingTextChars = countResponsesOutgoingTextChars(req);
+    return { body: new TextEncoder().encode(JSON.stringify(req)), info };
+  }
+  return { body, info };
 }

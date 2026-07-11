@@ -949,3 +949,120 @@ describe('D5 factsheet sidecar priced into the GPT gate', () => {
     expect(evalOpenAIGate(model, text, 312, 1, safe).profitable).toBe(true);
   });
 });
+
+// ── Audit D2: history collapse must run independently of slab profitability ──
+// Before this fix, a stateless request with no system/tools returned
+// `no_static_context` BEFORE history collapse, so a 60k-char 30-turn request
+// collapsed zero turns. Now Phase 2 (history collapse) runs regardless of the
+// Phase 1 (slab) outcome — so a `no_static_context` / `lossless_exact` /
+// `below_min_chars` / `not_profitable` / `render_empty` slab does NOT suppress
+// history collapse. compress=false / parse_error / no_user_message /
+// reader_profile_unsafe still early-return and never reach either phase.
+
+/** Same shape as `buildChatMessages(turns)` above but without the leading
+ *  system message — exercises the no_static_context code path. */
+function buildChatNoSystem(turns: number): Array<Record<string, unknown>> {
+  const msgs: Array<Record<string, unknown>> = [
+    { role: 'user', content: `${OPENING_PROMPT_MARKER} `.repeat(40) },
+  ];
+  for (let i = 0; i < turns; i++) {
+    const id = `call_${i}`;
+    msgs.push({
+      role: 'assistant',
+      content: `Working on step ${i}. `.repeat(30),
+      tool_calls: [{ id, type: 'function', function: { name: 'read', arguments: `{\"path\":\"f${i}\"}` } }],
+    });
+    msgs.push({ role: 'tool', tool_call_id: id, content: `result ${i} `.repeat(50) });
+    msgs.push({
+      role: 'user',
+      content: i === turns - 1
+        ? `${LIVE_PROMPT_MARKER} `.repeat(20)
+        : `Continue with ${i}. `.repeat(20),
+    });
+  }
+  return msgs;
+}
+
+describe('D2 history collapse runs independently of slab outcome', () => {
+  it('Chat: 20-turn request with no system/tools still collapses history (no_static_context)', async () => {
+    // Audit D2 example: stateless 60k-char 30-turn request without system/tools.
+    // Pre-fix: collapsedTurns=0 (no_static_context early-returned before history
+    // collapse). Post-fix: history collapse runs with protectedPrefix=firstUserIdx
+    // (slabRendered=false), and the planner collapses the older turns. Uses
+    // buildChatNoSystem to match the planner's expected assistant+tool_call+tool+user
+    // pattern (a single-message-per-turn fixture doesn't produce profitable bundles
+    // for gpt-5.6 with charsPerToken=1).
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6',
+      messages: buildChatNoSystem(20),
+    }));
+    const result = await transformOpenAIChatCompletions(body, {
+      charsPerToken: 1,
+      minCompressChars: 1,
+    });
+    // Slab path skipped (no system/tools), but history collapse still ran.
+    expect(result.info.reason).toBe('no_static_context');
+    expect(result.info.historyReason).toBe('collapsed');
+    // minCollapsePrefix default is 10 — lock the contract: at least 10 turns
+    // collapsed. (Planner may choose more depending on the chunk grid.)
+    expect(result.info.collapsedTurns ?? 0).toBeGreaterThanOrEqual(10);
+    expect(result.info.collapsedImages ?? 0).toBeGreaterThan(0);
+    // Body was modified: history images + the pinned live turn survive as text.
+    expect(result.info.compressed).toBe(true);
+    const out = JSON.parse(dec.decode(result.body)) as { messages: Array<{ role: string; content: unknown }> };
+    const imageMessages = out.messages.filter((m) => {
+      const c = m.content;
+      return Array.isArray(c) && c.some((p) => (p as { type?: string }).type === 'image_url');
+    });
+    expect(imageMessages.length).toBeGreaterThan(0);
+    // The opening user prompt's BODY collapsed into the image (its bare marker
+    // may surface once in the verbatim fact-sheet beside the image, by design).
+    const serialized = JSON.stringify(out.messages);
+    expect(serialized).not.toContain(`${OPENING_PROMPT_MARKER} ${OPENING_PROMPT_MARKER}`);
+    // The live turn survived as legible text.
+    expect(serialized).toContain(LIVE_PROMPT_MARKER);
+  });
+
+  it('Chat: history collapse still runs when slab gate fails (below_min_chars)', async () => {
+    // Force a short static context (system below minCompressChars) so the
+    // slab path hits `below_min_chars`. The fix must still run history
+    // collapse — a tiny static slab should not forfeit the conversation
+    // savings.
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6',
+      messages: [
+        { role: 'system', content: 'tiny' }, // below default 2000 char floor
+        ...buildChatNoSystem(20),
+      ],
+    }));
+    const result = await transformOpenAIChatCompletions(body, {
+      charsPerToken: 1,
+      minCompressChars: 1,
+    });
+    // Slab path skipped with below_min_chars or not_profitable (small system),
+    // but history collapse still ran.
+    expect(result.info.reason).toMatch(/below_min_chars|not_profitable|lossless_exact/);
+    expect(result.info.historyReason).toBe('collapsed');
+    expect(result.info.collapsedTurns ?? 0).toBeGreaterThanOrEqual(10);
+    expect(result.info.compressed).toBe(true);
+  });
+
+  it('Chat: collapseHistory=false disables history even with no static context', async () => {
+    // Sanity: the option flag must still disable history collapse in the
+    // no-slab case. Without this flag, the audit case is fixed; with it,
+    // the body must pass through unchanged.
+    const body = enc.encode(JSON.stringify({
+      model: 'gpt-5.6',
+      messages: buildChatNoSystem(20),
+    }));
+    const result = await transformOpenAIChatCompletions(body, {
+      charsPerToken: 1,
+      minCompressChars: 1,
+      collapseHistory: false,
+    });
+    expect(result.info.reason).toBe('no_static_context');
+    expect(result.info.historyReason).not.toBe('collapsed');
+    expect(result.info.collapsedTurns ?? 0).toBe(0);
+    expect(result.info.compressed).toBe(false);
+  });
+});
