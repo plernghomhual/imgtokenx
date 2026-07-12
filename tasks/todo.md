@@ -4,14 +4,26 @@
 - [x] B. Split recovery-sidecar and context-artifact retention budgets.
 - [x] D. Pin and verify checked-in dashboard vendor bundle hashes.
 - [x] C. Harden installer locking, platform/shell detection, and backup pruning.
-- [ ] Run the full `npx --yes pnpm run check` gate and audit the final diff.
+- [x] Run the full `npx --yes pnpm run check` gate and audit the final diff.
 
 ## Review
 
-- Files changed: pending.
-- Behavior changed: pending.
-- Verification performed: pending.
-- Remaining risks: pending.
+- Files changed: shared secret comparison + callers/tests; retention module,
+  artifact/Node call sites, README/tests; vendor pins/generator/integrity test;
+  installer, README, and installer tests.
+- Behavior changed: all token checks share the requested primitives; recovery
+  sidecars and context artifacts prune against independent caps; checked-in UI
+  bundles are SHA-256 pinned; installer mutations are serialized, Darwin-only,
+  shell-aware, and prune successful backup histories to five files.
+- Verification performed: focused A 48/48; B failing-before 3/11 then 19/19;
+  D missing-module failure then 1/1 + script/test typecheck; C failing-before
+  5/33 then 33/33 + typecheck:all. Final `npx --yes pnpm run check`: typechecks
+  passed; Vitest 1,042/1,042 (71 files); build passed; restart 4/4; package smoke,
+  Worker dry-run, and release:check passed.
+- Remaining risks: vendor network mismatch handling waits for the next manual
+  version bump (the generator was intentionally not run); PID reuse can
+  conservatively retain a live-looking lock; changing `$SHELL` between install
+  and uninstall can select a different startup file.
 
 ---
 
