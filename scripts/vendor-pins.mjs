@@ -1,0 +1,12 @@
+export const PINS = [
+  {
+    name: 'HTMX_JS',
+    url: 'https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js',
+    sha256: 'e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447',
+  },
+  {
+    name: 'ALPINE_JS',
+    url: 'https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js',
+    sha256: '3ed1eed252488921df65e363d6715deb04d7f92aaedb9e52199fdf73cb1e0ad3',
+  },
+];
