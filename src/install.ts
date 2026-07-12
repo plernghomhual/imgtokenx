@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFileOrNull, writeFileAtomic } from './core/fs-atomic.js';
 
 export const LAUNCHD_LABEL = 'com.imgtokenx.proxy';
@@ -95,6 +96,7 @@ interface OpenCodeOwnershipState {
   baseURL?: unknown;
   installedBaseURL: string;
   configPath?: string;
+  shellRcPath?: string;
 }
 
 function q(s: string): string {
@@ -111,6 +113,19 @@ function shDouble(s: string): string {
 
 function timestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function processStartToken(pid: number): string | undefined {
+  const result = spawnSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+  });
+  if (result.status !== 0) return undefined;
+  const token = String(result.stdout ?? '').trim().replace(/\s+/g, ' ');
+  if (!token) return undefined;
+  const startedAtMs = Date.parse(`${token} UTC`);
+  return Number.isFinite(startedAtMs) ? String(startedAtMs) : token;
 }
 
 export function renderLaunchAgentPlist(plan: Pick<InstallPlan, 'nodePath' | 'cliPath' | 'port' | 'outLog' | 'errLog' | 'repoRoot'>): string {
@@ -430,10 +445,23 @@ function readOpenCodeState(plan: InstallPlan): OpenCodeOwnershipState | undefine
     || typeof state.installedBaseURL !== 'string'
     || (state.configPath !== undefined
       && (typeof state.configPath !== 'string' || !path.isAbsolute(state.configPath)))
+    || (state.shellRcPath !== undefined
+      && (typeof state.shellRcPath !== 'string'
+        || path.dirname(state.shellRcPath) !== plan.home
+        || !['.zshrc', '.bash_profile'].includes(path.basename(state.shellRcPath))))
   ) {
     throw new Error(`invalid OpenCode ownership state: ${plan.openCodeStatePath}`);
   }
   return state as OpenCodeOwnershipState;
+}
+
+function ownedShellRcPaths(plan: InstallPlan, state = readOpenCodeState(plan)): string[] {
+  if (state?.shellRcPath) return [state.shellRcPath];
+  const marker = '# >>> imgtokenx auto-start >>>';
+  const legacy = ['.zshrc', '.bash_profile']
+    .map((name) => path.join(plan.home, name))
+    .filter((file) => readFileOrNull(file)?.toString('utf8').includes(marker));
+  return legacy.length > 0 ? legacy : [plan.zshrcPath];
 }
 
 function removeWithUndo(file: string, undo: UndoStep[], mode: number): void {
@@ -484,6 +512,7 @@ function updateOpencodeConfig(
           installedBaseURL: plan.openCodeBaseUrl,
         };
     nextState.configPath = file;
+    nextState.shellRcPath = plan.zshrcPath;
     fs.mkdirSync(path.dirname(plan.openCodeStatePath), { recursive: true });
     writeWithUndo(
       plan.openCodeStatePath,
@@ -576,44 +605,112 @@ function rollback(undo: UndoStep[], originalError: unknown): never {
 function withInstallLock<T>(home: string, fn: () => T): T {
   const dir = path.join(home, '.imgtokenx');
   const lockPath = path.join(dir, 'install.lock');
+  const reapPath = `${lockPath}.reap`;
+  const ownerId = randomUUID();
+  const candidatePath = `${lockPath}.${ownerId}.candidate`;
   fs.mkdirSync(dir, { recursive: true });
+  const candidate = JSON.stringify({
+    version: 1,
+    pid: process.pid,
+    startedAt: processStartToken(process.pid),
+    ownerId,
+  }) + '\n';
 
-  const acquire = (retryStale: boolean): number => {
+  const acquire = (retryStale: boolean): void => {
     try {
-      return fs.openSync(lockPath, 'wx', 0o600);
+      fs.linkSync(candidatePath, lockPath);
+      return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let pid: number | undefined;
+      let startedAt: string | undefined;
+      let lockStat: fs.Stats | undefined;
+      let lockSnapshot: string | undefined;
       try {
-        const parsed = Number(fs.readFileSync(lockPath, 'utf8').trim());
-        if (Number.isSafeInteger(parsed) && parsed > 0) pid = parsed;
-      } catch { /* treat an incomplete lock as active */ }
+        lockStat = fs.statSync(lockPath);
+        const raw = fs.readFileSync(lockPath, 'utf8').trim();
+        lockSnapshot = raw;
+        if (raw.startsWith('{')) {
+          const owner = JSON.parse(raw) as { pid?: unknown; startedAt?: unknown };
+          if (Number.isSafeInteger(owner.pid) && Number(owner.pid) > 0) pid = Number(owner.pid);
+          if (typeof owner.startedAt === 'string' && owner.startedAt) startedAt = owner.startedAt;
+        } else {
+          const parsed = Number(raw);
+          if (Number.isSafeInteger(parsed) && parsed > 0) pid = parsed;
+        }
+      } catch (readError) {
+        if ((readError as NodeJS.ErrnoException).code === 'ENOENT') return acquire(false);
+        // Treat an incomplete lock as active.
+      }
 
       let stale = false;
       if (pid !== undefined) {
         try {
           process.kill(pid, 0);
+          const liveStart = processStartToken(pid);
+          if (startedAt && liveStart) {
+            stale = startedAt !== liveStart;
+          } else if (!startedAt && liveStart && lockStat) {
+            const liveStartMs = Number(liveStart);
+            stale = Number.isFinite(liveStartMs) && lockStat.mtimeMs + 1_000 < liveStartMs;
+          }
         } catch (killError) {
           stale = (killError as NodeJS.ErrnoException).code === 'ESRCH';
         }
       }
       if (stale && retryStale) {
-        try { fs.unlinkSync(lockPath); } catch { /* retry reports the winner */ }
+        let elected = false;
+        try {
+          try {
+            fs.linkSync(lockPath, reapPath);
+            elected = true;
+          } catch (reapError) {
+            if ((reapError as NodeJS.ErrnoException).code !== 'EEXIST') throw reapError;
+            try {
+              const current = fs.statSync(lockPath);
+              const priorReap = fs.statSync(reapPath);
+              if (current.dev !== priorReap.dev || current.ino !== priorReap.ino) {
+                fs.unlinkSync(reapPath);
+                fs.linkSync(lockPath, reapPath);
+                elected = true;
+              }
+            } catch { /* another reaper won */ }
+          }
+          if (elected) {
+            const current = fs.statSync(lockPath);
+            const claim = fs.statSync(reapPath);
+            const currentSnapshot = fs.readFileSync(lockPath, 'utf8').trim();
+            if (lockStat
+              && current.dev === lockStat.dev
+              && current.ino === lockStat.ino
+              && claim.dev === lockStat.dev
+              && claim.ino === lockStat.ino
+              && currentSnapshot === lockSnapshot) {
+              fs.unlinkSync(lockPath);
+            }
+          }
+        } catch { /* retry reports the winner */ }
+        finally {
+          if (elected) {
+            try { fs.unlinkSync(reapPath); } catch { /* best-effort */ }
+          }
+        }
         return acquire(false);
       }
-      // ponytail: PID-only ownership can false-block after PID reuse; add
-      // process start-time metadata only if that becomes an operational issue.
       throw new Error(`another imgtokenx install/uninstall is running (pid ${pid ?? 'unknown'})`);
     }
   };
 
-  const fd = acquire(true);
   try {
-    fs.writeFileSync(fd, `${process.pid}\n`);
+    fs.writeFileSync(candidatePath, candidate, { flag: 'wx', mode: 0o600 });
+    acquire(true);
     return fn();
   } finally {
-    try { fs.closeSync(fd); } catch { /* best-effort */ }
-    try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+    try {
+      const owner = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as { ownerId?: unknown };
+      if (owner.ownerId === ownerId) fs.unlinkSync(lockPath);
+    } catch { /* best-effort */ }
+    try { fs.unlinkSync(candidatePath); } catch { /* best-effort */ }
   }
 }
 
@@ -634,6 +731,7 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
 function runInstallLocked(plan: InstallPlan, opts: InstallOptions): InstallResult {
   const undo: UndoStep[] = [];
   const actionLog: string[] = [];
+  plan.zshrcPath = ownedShellRcPaths(plan)[0]!;
   try {
     writeWithUndo(plan.launchAgentPath, plan.plist, undo, 0o644);
     writeWithUndo(plan.envPath, plan.envSh, undo, 0o644);
@@ -716,6 +814,9 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
 function runUninstallLocked(plan: InstallPlan, opts: InstallOptions): InstallResult {
   const undo: UndoStep[] = [];
   const actionLog: string[] = [];
+  const installedState = readOpenCodeState(plan);
+  const shellRcPaths = ownedShellRcPaths(plan, installedState);
+  plan.zshrcPath = shellRcPaths[0]!;
   const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
   const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
     actionLog.push([cmd, ...args].map(q).join(' '));
@@ -768,7 +869,10 @@ function runUninstallLocked(plan: InstallPlan, opts: InstallOptions): InstallRes
         },
       });
     }
-    updateZshrc(plan, undo, false);
+    for (const shellRcPath of shellRcPaths) {
+      plan.zshrcPath = shellRcPath;
+      updateZshrc(plan, undo, false);
+    }
     if (!opts.skipMcp) {
       // ignoreFailure (matching install-time removes): `mcp remove` exits
       // non-zero when the server was already unregistered — that must not

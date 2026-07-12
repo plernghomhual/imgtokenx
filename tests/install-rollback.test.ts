@@ -90,6 +90,31 @@ describe('install — atomic write + rollback', () => {
       `another imgtokenx install/uninstall is running (pid ${process.pid})`,
     );
     expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'install.lock'))).toBe(false);
+    expect(fs.readdirSync(path.join(fx.home, '.imgtokenx')).filter((name) => name.startsWith('install.lock.')))
+      .toEqual([]);
+  });
+
+  it('does not remove a replacement lock owned by another invocation', () => {
+    const lock = path.join(fx.home, '.imgtokenx', 'install.lock');
+    let replaced = false;
+    const spawnSync: NonNullable<InstallOptions['spawnSync']> = () => {
+      if (!replaced) {
+        replaced = true;
+        fs.unlinkSync(lock);
+        fs.writeFileSync(lock, JSON.stringify({
+          version: 1,
+          pid: process.pid,
+          startedAt: 'replacement',
+          ownerId: 'replacement-owner',
+        }) + '\n');
+      }
+      return { status: 0, stderr: '', stdout: '' };
+    };
+
+    runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync });
+
+    const owner = JSON.parse(fs.readFileSync(lock, 'utf8')) as { ownerId: string };
+    expect(owner.ownerId).toBe('replacement-owner');
   });
 
   it('reclaims a stale lock once', () => {
@@ -100,6 +125,32 @@ describe('install — atomic write + rollback', () => {
     runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync: processOk });
 
     expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('reclaims a lock when its live PID belongs to a different process start', () => {
+    const lock = path.join(fx.home, '.imgtokenx', 'install.lock');
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, startedAt: 'reused-pid' }) + '\n');
+
+    runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync: processOk });
+
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('preserves a malformed lock but removes its unpublished candidate', () => {
+    const dir = path.join(fx.home, '.imgtokenx');
+    const lock = path.join(dir, 'install.lock');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(lock, '');
+
+    expect(() => runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+    })).toThrow('another imgtokenx install/uninstall is running (pid unknown)');
+
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.startsWith('install.lock.'))).toEqual([]);
   });
 
   it('rejects non-macOS install and uninstall before writing files', () => {
@@ -383,6 +434,65 @@ describe('install — atomic write + rollback', () => {
       const contents = fs.readFileSync(zshrc, 'utf8');
       expect(contents).not.toContain('# >>> imgtokenx auto-start >>>');
     }
+  });
+
+  it('uninstall cleans the rc file recorded at install when SHELL changes', () => {
+    const zshrc = path.join(fx.home, '.zshrc');
+    const bashProfile = path.join(fx.home, '.bash_profile');
+    fs.writeFileSync(zshrc, 'export KEEP_ZSH=1\n');
+    fs.writeFileSync(bashProfile, 'export KEEP_BASH=1\n');
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+      shell: '/bin/zsh',
+    });
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+      shell: '/bin/bash',
+    });
+    expect(fs.readFileSync(bashProfile, 'utf8')).toBe('export KEEP_BASH=1\n');
+    expect((fs.readFileSync(zshrc, 'utf8').match(/# >>> imgtokenx auto-start >>>/g) ?? []))
+      .toHaveLength(1);
+
+    runUninstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+      shell: '/bin/bash',
+    });
+
+    expect(fs.readFileSync(zshrc, 'utf8')).toBe('export KEEP_ZSH=1\n');
+    expect(fs.readFileSync(bashProfile, 'utf8')).toBe('export KEEP_BASH=1\n');
+  });
+
+  it('legacy ownership state finds the installed rc block after SHELL changes', () => {
+    const zshrc = path.join(fx.home, '.zshrc');
+    const bashProfile = path.join(fx.home, '.bash_profile');
+    fs.writeFileSync(zshrc, 'export KEEP_ZSH=1\n');
+    fs.writeFileSync(bashProfile, 'export KEEP_BASH=1\n');
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+      shell: '/bin/zsh',
+    });
+    const statePath = path.join(fx.home, '.imgtokenx', 'opencode-baseurl.json');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as Record<string, unknown>;
+    delete state.shellRcPath;
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n');
+
+    runUninstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      spawnSync: processOk,
+      shell: '/bin/bash',
+    });
+
+    expect(fs.readFileSync(zshrc, 'utf8')).toBe('export KEEP_ZSH=1\n');
+    expect(fs.readFileSync(bashProfile, 'utf8')).toBe('export KEEP_BASH=1\n');
   });
 });
 

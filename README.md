@@ -80,6 +80,7 @@ instead of destroying comments. On macOS, zsh uses `~/.zshrc` and bash uses
 `~/.bash_profile`; unknown
 shells fall back to `~/.zshrc` with a manual-source warning. Non-macOS hosts use
 the manual proxy setup above because `imgtokenx install` requires launchd.
+Uninstall uses the startup file recorded by install even if `$SHELL` changed.
 `imgtokenx doctor` checks OpenCode's resolved
 `debug config --pure` output, so project, inline, and managed overrides cannot
 produce a false pass. `IMGTOKENX_DISABLE=1 <tool>` bypasses the wrapper for one launch. The
