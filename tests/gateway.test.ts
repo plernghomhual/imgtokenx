@@ -18,6 +18,7 @@ describe('resolveUpstreams', () => {
     expect(resolveUpstreams({})).toEqual({
       anthropic: 'https://api.anthropic.com',
       openai: 'https://api.openai.com',
+      opencode: 'https://opencode.ai/zen',
       stripOpenAIV1: false,
     });
   });
@@ -27,6 +28,8 @@ describe('resolveUpstreams', () => {
       .toEqual({
         anthropic: `${FAKE_BASE}/anthropic`,
         openai: `${FAKE_BASE}/openai`,
+        // OpenCode Zen is independent; gateway mode never captures it.
+        opencode: 'https://opencode.ai/zen',
         stripOpenAIV1: true,
       });
   });

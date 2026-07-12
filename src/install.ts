@@ -14,7 +14,10 @@ export interface InstallPlan {
   cliPath: string;
   port: number;
   baseUrl: string;
+  openCodeBaseUrl: string;
+  openCodeConfigPath: string;
   imgtokenxDir: string;
+  openCodeStatePath: string;
   envPath: string;
   zshrcPath: string;
   launchAgentPath: string;
@@ -32,6 +35,9 @@ interface BuildPlanOptions {
   repoRoot?: string;
   nodePath?: string;
   port?: number;
+  /** Explicit OpenCode config path for embedders/tests. Defaults to
+   *  OPENCODE_CONFIG, then the active global JSON/JSONC file. */
+  openCodeConfigPath?: string;
 }
 
 export interface InstallOptions extends BuildPlanOptions {
@@ -73,6 +79,14 @@ interface DoctorDeps {
 interface UndoStep {
   log: string;
   revert: () => void;
+}
+
+interface OpenCodeOwnershipState {
+  version: 1;
+  hadBaseURL: boolean;
+  baseURL?: unknown;
+  installedBaseURL: string;
+  configPath?: string;
 }
 
 function q(s: string): string {
@@ -196,6 +210,23 @@ export function applyZshrcUninstall(current: string): string {
     .replace(/\n{2,}$/, '\n');
 }
 
+export function resolveOpenCodeConfigPath(
+  home: string,
+  explicit = process.env.OPENCODE_CONFIG,
+): string {
+  const configured = explicit?.trim();
+  if (configured) return path.resolve(configured);
+  const dir = path.join(home, '.config', 'opencode');
+  const json = path.join(dir, 'opencode.json');
+  const jsonc = path.join(dir, 'opencode.jsonc');
+  const hasJson = fs.existsSync(json);
+  const hasJsonc = fs.existsSync(jsonc);
+  if (hasJson && hasJsonc) {
+    throw new Error(`both ${json} and ${jsonc} exist; set OPENCODE_CONFIG explicitly`);
+  }
+  return hasJsonc ? jsonc : json;
+}
+
 export function buildInstallPlan(opts: BuildPlanOptions = {}): InstallPlan {
   const home = opts.home ?? os.homedir();
   const repoRoot = opts.repoRoot ?? process.cwd();
@@ -211,7 +242,12 @@ export function buildInstallPlan(opts: BuildPlanOptions = {}): InstallPlan {
     cliPath,
     port,
     baseUrl: `http://127.0.0.1:${port}`,
+    openCodeBaseUrl: `http://127.0.0.1:${port}/opencode`,
+    openCodeConfigPath: opts.openCodeConfigPath
+      ? path.resolve(opts.openCodeConfigPath)
+      : resolveOpenCodeConfigPath(home),
     imgtokenxDir,
+    openCodeStatePath: path.join(imgtokenxDir, 'opencode-baseurl.json'),
     envPath: path.join(imgtokenxDir, 'env.sh'),
     zshrcPath: path.join(home, '.zshrc'),
     launchAgentPath,
@@ -330,27 +366,144 @@ function updateZshrc(plan: InstallPlan, undo: UndoStep[], installing: boolean): 
   });
 }
 
-function updateOpencodeConfig(plan: InstallPlan, undo: UndoStep[], installing: boolean): void {
-  const file = path.join(plan.home, '.config', 'opencode', 'opencode.json');
-  let cfg: Record<string, unknown> = {};
-  if (fs.existsSync(file)) cfg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const mcp = (cfg.mcp && typeof cfg.mcp === 'object' && !Array.isArray(cfg.mcp))
-    ? { ...(cfg.mcp as Record<string, unknown>) }
-    : {};
-  if (installing) mcp[MCP_SERVER_NAME] = plan.opencodeMcp;
-  else delete mcp[MCP_SERVER_NAME];
-  cfg.mcp = mcp;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  backup(file, undo);
-  // opencode.json can hold MCP server env/secrets from other tools — keep it
-  // owner-only rather than the writeFileAtomic 0o644 default.
-  writeFileAtomic(file, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+function configObject(value: unknown, label: string): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`cannot update OpenCode config: ${label} must be an object`);
+  }
+  return { ...(value as Record<string, unknown>) };
+}
+
+function parseOpenCodeConfig(raw: Buffer, file: string): Record<string, unknown> {
+  try {
+    return configObject(JSON.parse(raw.toString('utf8')), 'root');
+  } catch (error) {
+    if (path.extname(file).toLowerCase() === '.jsonc') {
+      throw new Error(
+        `cannot safely rewrite commented/trailing-comma JSONC at ${file}; `
+        + 'set OPENCODE_CONFIG to a JSON file',
+        { cause: error },
+      );
+    }
+    throw new Error(`cannot update OpenCode config: invalid JSON in ${file}`, { cause: error });
+  }
+}
+
+function readOpenCodeState(plan: InstallPlan): OpenCodeOwnershipState | undefined {
+  const raw = readFileOrNull(plan.openCodeStatePath);
+  if (raw === null) return undefined;
+  const state = JSON.parse(raw.toString('utf8')) as Partial<OpenCodeOwnershipState>;
+  if (
+    state.version !== 1
+    || typeof state.hadBaseURL !== 'boolean'
+    || typeof state.installedBaseURL !== 'string'
+    || (state.configPath !== undefined
+      && (typeof state.configPath !== 'string' || !path.isAbsolute(state.configPath)))
+  ) {
+    throw new Error(`invalid OpenCode ownership state: ${plan.openCodeStatePath}`);
+  }
+  return state as OpenCodeOwnershipState;
+}
+
+function removeWithUndo(file: string, undo: UndoStep[], mode: number): void {
+  const prior = readFileOrNull(file);
+  if (prior === null) return;
+  fs.rmSync(file);
   undo.push({
-    log: `${installing ? 'upsert' : 'remove'} ${MCP_SERVER_NAME} in ${file}`,
+    log: `remove ${file}`,
     revert: () => {
-      // Restoration is in the backup step's revert closure.
+      try { writeFileAtomic(file, prior, { mode }); } catch { /* best-effort */ }
     },
   });
+}
+
+function updateOpencodeConfig(
+  plan: InstallPlan,
+  undo: UndoStep[],
+  installing: boolean,
+  manageMcp: boolean,
+): void {
+  const state = readOpenCodeState(plan);
+  if (installing && state?.configPath && state.configPath !== plan.openCodeConfigPath) {
+    throw new Error(
+      `OpenCode proxy ownership belongs to ${state.configPath}; uninstall it before changing config paths`,
+    );
+  }
+  const file = !installing && state?.configPath
+    ? state.configPath
+    : plan.openCodeConfigPath;
+  let cfg: Record<string, unknown> = {};
+  const priorConfig = readFileOrNull(file);
+  if (priorConfig !== null) {
+    cfg = parseOpenCodeConfig(priorConfig, file);
+  }
+
+  const provider = configObject(cfg.provider, 'provider');
+  const opencode = configObject(provider.opencode, 'provider.opencode');
+  const options = configObject(opencode.options, 'provider.opencode.options');
+  const hadBaseURL = Object.prototype.hasOwnProperty.call(options, 'baseURL');
+
+  if (installing) {
+    const nextState: OpenCodeOwnershipState = state
+      ? { ...state, installedBaseURL: plan.openCodeBaseUrl }
+      : {
+          version: 1,
+          hadBaseURL,
+          ...(hadBaseURL ? { baseURL: options.baseURL } : {}),
+          installedBaseURL: plan.openCodeBaseUrl,
+        };
+    nextState.configPath = file;
+    fs.mkdirSync(path.dirname(plan.openCodeStatePath), { recursive: true });
+    writeWithUndo(
+      plan.openCodeStatePath,
+      JSON.stringify(nextState, null, 2) + '\n',
+      undo,
+      0o600,
+    );
+    options.baseURL = plan.openCodeBaseUrl;
+    opencode.options = options;
+    provider.opencode = opencode;
+    cfg.provider = provider;
+  } else if (hadBaseURL) {
+    const installedBaseURL = state?.installedBaseURL ?? plan.openCodeBaseUrl;
+    if (options.baseURL === installedBaseURL) {
+      if (state?.hadBaseURL) options.baseURL = state.baseURL;
+      else delete options.baseURL;
+      if (Object.keys(options).length > 0) opencode.options = options;
+      else delete opencode.options;
+      if (Object.keys(opencode).length > 0) provider.opencode = opencode;
+      else delete provider.opencode;
+      if (Object.keys(provider).length > 0) cfg.provider = provider;
+      else delete cfg.provider;
+    }
+  }
+
+  if (manageMcp) {
+    const mcp = configObject(cfg.mcp, 'mcp');
+    if (installing) mcp[MCP_SERVER_NAME] = plan.opencodeMcp;
+    else delete mcp[MCP_SERVER_NAME];
+    if (Object.keys(mcp).length > 0) cfg.mcp = mcp;
+    else delete cfg.mcp;
+  }
+
+  // Uninstalling an already-absent config should not create an empty one.
+  const shouldWrite = installing || priorConfig !== null;
+  if (shouldWrite) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    backup(file, undo);
+    // opencode.json can hold provider credentials and MCP secrets.
+    writeFileAtomic(file, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+    undo.push({
+      log: `${installing ? 'upsert' : 'restore'} OpenCode proxy in ${file}`,
+      revert: () => {
+        // Existing files are restored by backup(); remove newly-created files.
+        if (priorConfig === null) {
+          try { fs.rmSync(file, { force: true }); } catch { /* best-effort */ }
+        }
+      },
+    });
+  }
+  if (!installing) removeWithUndo(plan.openCodeStatePath, undo, 0o600);
 }
 
 function printDryRun(plan: InstallPlan, installing: boolean, skipMcp: boolean): void {
@@ -358,6 +511,8 @@ function printDryRun(plan: InstallPlan, installing: boolean, skipMcp: boolean): 
   console.log(`[imgtokenx ${title}] dry run; no files or live config changed`);
   console.log(`launchd plist: ${plan.launchAgentPath}`);
   console.log(`shell env:     ${plan.envPath}`);
+  console.log(`OpenCode URL:  ${plan.openCodeBaseUrl}`);
+  console.log(`OpenCode config: ${plan.openCodeConfigPath}`);
   console.log(`zshrc block:\n${plan.zshrcBlock}`);
   if (installing) {
     console.log(`\nlaunchd plist preview:\n${plan.plist}`);
@@ -400,6 +555,7 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
     writeWithUndo(plan.launchAgentPath, plan.plist, undo, 0o644);
     writeWithUndo(plan.envPath, plan.envSh, undo, 0o644);
     updateZshrc(plan, undo, true);
+    updateOpencodeConfig(plan, undo, true, !opts.skipMcp);
     const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
     const runStep = (cmd: string, args: string[], optsR: { ignoreFailure?: boolean } = {}) => {
       actionLog.push([cmd, ...args].map(q).join(' '));
@@ -430,7 +586,6 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
       runStep('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
       runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME], { ignoreFailure: true });
       runStep('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
-      updateOpencodeConfig(plan, undo, true);
     }
   } catch (err) {
     rollback(undo, err);
@@ -474,6 +629,9 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
     }
   };
   try {
+    // Parse and update the user config before live launchd/MCP mutations. Any
+    // later failure restores it through the shared undo stack.
+    updateOpencodeConfig(plan, undo, false, !opts.skipMcp);
     runStep('launchctl', ['bootout', domain, plan.launchAgentPath], { ignoreFailure: true });
     if (fs.existsSync(plan.launchAgentPath)) {
       const prior = readFileOrNull(plan.launchAgentPath);
@@ -509,7 +667,6 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
       // so an operator without claude/codex installed can still uninstall.
       runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]);
       runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME]);
-      updateOpencodeConfig(plan, undo, false);
     }
   } catch (err) {
     rollback(undo, err);
@@ -531,6 +688,31 @@ function spawnCheck(name: string, cmd: string, args: string[], deps: DoctorDeps)
   if (r.status === 0) return { name, status: 'pass', detail: `${cmd} ${args.join(' ')}` };
   const msg = String(r.stderr || r.stdout || '').trim();
   return { name, status: 'fail', detail: msg || `${cmd} ${args.join(' ')} exited ${r.status}` };
+}
+
+function resolvedOpenCodeConfig(deps: DoctorDeps): {
+  config?: Record<string, unknown>;
+  unavailable?: boolean;
+  error?: string;
+} {
+  const sp = deps.spawnSync ?? spawnSync;
+  const result = sp('opencode', ['debug', 'config', '--pure'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 3_000,
+  });
+  if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+    return { unavailable: true };
+  }
+  if (result.status !== 0) {
+    return { error: 'opencode debug config --pure failed' };
+  }
+  try {
+    const parsed = JSON.parse(String(result.stdout ?? '')) as unknown;
+    return { config: configObject(parsed, 'resolved root') };
+  } catch {
+    return { error: 'opencode debug config --pure returned invalid JSON' };
+  }
 }
 
 async function healthCheck(plan: InstallPlan, deps: DoctorDeps): Promise<DoctorCheck> {
@@ -558,15 +740,42 @@ export async function runDoctor(opts: InstallOptions = {}, deps: DoctorDeps = {}
 
   const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
   checks.push(spawnCheck('launchd service', 'launchctl', ['print', `${domain}/${LAUNCHD_LABEL}`], deps));
+  const cfgPath = plan.openCodeConfigPath;
+  let opencodeConfig: Record<string, unknown> | undefined;
+  let configError: string | undefined;
+  let configSource = 'resolved OpenCode config';
+  const resolved = resolvedOpenCodeConfig(deps);
+  if (resolved.config) {
+    opencodeConfig = resolved.config;
+  } else if (resolved.unavailable && fs.existsSync(cfgPath)) {
+    configSource = cfgPath;
+    try {
+      opencodeConfig = parseOpenCodeConfig(fs.readFileSync(cfgPath), cfgPath);
+    } catch (error) {
+      configError = (error as Error).message;
+    }
+  } else if (resolved.error) {
+    configError = resolved.error;
+  }
+  const provider = opencodeConfig?.provider as Record<string, unknown> | undefined;
+  const opencodeProvider = provider?.opencode as Record<string, unknown> | undefined;
+  const opencodeOptions = opencodeProvider?.options as Record<string, unknown> | undefined;
+  const openCodeProxyOk = opencodeOptions?.baseURL === plan.openCodeBaseUrl;
+  checks.push(status(
+    'OpenCode proxy',
+    !configError && openCodeProxyOk,
+    `${plan.openCodeBaseUrl} (${configSource})`,
+    configError ?? `effective provider.opencode.options.baseURL must be ${plan.openCodeBaseUrl}`,
+  ));
   if (!opts.skipMcp) {
     checks.push(spawnCheck('Claude MCP', 'claude', ['mcp', 'get', MCP_SERVER_NAME], deps));
     checks.push(spawnCheck('Codex MCP', 'codex', ['mcp', 'get', MCP_SERVER_NAME], deps));
-    const cfgPath = path.join(plan.home, '.config', 'opencode', 'opencode.json');
     let opencodeOk = false;
-    if (fs.existsSync(cfgPath)) {
+    if (opencodeConfig) {
       try {
-        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as { mcp?: Record<string, unknown> };
-        const entry = cfg.mcp?.[MCP_SERVER_NAME] as { command?: unknown } | undefined;
+        const entry = (
+          opencodeConfig.mcp as Record<string, unknown> | undefined
+        )?.[MCP_SERVER_NAME] as { command?: unknown } | undefined;
         opencodeOk = Array.isArray(entry?.command)
           && entry.command[0] === plan.nodePath
           && entry.command[1] === plan.cliPath
@@ -575,7 +784,12 @@ export async function runDoctor(opts: InstallOptions = {}, deps: DoctorDeps = {}
         opencodeOk = false;
       }
     }
-    checks.push(status('OpenCode MCP', opencodeOk, cfgPath, `missing ${MCP_SERVER_NAME} in ${cfgPath}`));
+    checks.push(status(
+      'OpenCode MCP',
+      !configError && opencodeOk,
+      configSource,
+      configError ?? `missing effective ${MCP_SERVER_NAME} MCP configuration`,
+    ));
   }
   return { plan, checks };
 }

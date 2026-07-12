@@ -12,6 +12,7 @@
  */
 
 import { createProxy, type ProxyConfig } from './core/proxy.js';
+import { DENSE_CONTENT_COLS, maxFittingCols } from './core/render.js';
 import type { TransformOptions } from './core/transform.js';
 import { toTrackEvent, JsonLogTracker, noopTracker, type Tracker } from './core/tracker.js';
 
@@ -77,37 +78,47 @@ async function secretsMatch(a: string, b: string): Promise<boolean> {
 const truthy = (v: string | undefined, fallback: boolean): boolean =>
   v == null ? fallback : v === '1' || v.toLowerCase() === 'true';
 
-// Numeric env with fallback: unset, empty, or non-numeric (NaN/Infinity)
-// values keep the documented default instead of poisoning the transform
-// options with NaN.
-const numeric = (v: string | undefined, fallback: number): number =>
-  v && Number.isFinite(Number(v)) ? Number(v) : fallback;
+/** Trim and parse one decimal integer inside the caller's valid range. */
+function envInteger(v: string | undefined, min: number, max: number): number | undefined {
+  const text = v?.trim();
+  if (!text || !/^\d+$/.test(text)) return undefined;
+  const n = Number(text);
+  return Number.isSafeInteger(n) && n >= min && n <= max ? n : undefined;
+}
+
+const nonNegativeEnv = (v: string | undefined, fallback: number): number =>
+  envInteger(v, 0, Number.MAX_SAFE_INTEGER) ?? fallback;
+
+// At one character cell per column this is the renderer's absolute widest
+// useful column count; real slabs clamp further for their configured width.
+const MAX_WORKER_MULTI_COL = maxFittingCols(1);
 
 /** Env → TransformOptions. Exported for direct testability of the env
  *  parsing (garbage values must fall back to documented defaults, never NaN). */
 export function workerTransformOptions(env: Env): TransformOptions {
+  const cols = envInteger(env.COLS, 1, DENSE_CONTENT_COLS);
   return {
     compress: truthy(env.COMPRESS, true),
     compressTools: truthy(env.COMPRESS_TOOLS, true),
     compressReminders: truthy(env.COMPRESS_REMINDERS, true),
     compressToolResults: truthy(env.COMPRESS_TOOL_RESULTS, true),
-    minCompressChars: numeric(env.MIN_COMPRESS_CHARS, 2000),
+    minCompressChars: nonNegativeEnv(env.MIN_COMPRESS_CHARS, 2000),
     // 500 chars — CPU/latency floor only, not a correctness guard. The
     // No floors — the content-aware `isCompressionProfitable()` gate
     // decides per-block based on actual pixel cost vs text cost. Host
     // can still set a floor via env if they want observability buckets
     // (e.g. MIN_TOOL_RESULT_CHARS=200 to skip absurdly small dumps).
-    minReminderChars: numeric(env.MIN_REMINDER_CHARS, 0),
-    minToolResultChars: numeric(env.MIN_TOOL_RESULT_CHARS, 0),
+    minReminderChars: nonNegativeEnv(env.MIN_REMINDER_CHARS, 0),
+    minToolResultChars: nonNegativeEnv(env.MIN_TOOL_RESULT_CHARS, 0),
     // Omit by default so OpenAI-shaped requests use their model profile.
-    // A non-numeric COLS is ignored (falls back to model profile) rather
-    // than injecting NaN into the render geometry.
-    ...(env.COLS && Number.isFinite(Number(env.COLS)) ? { cols: Number(env.COLS) } : {}),
+    // Invalid/out-of-range COLS is ignored so the model profile supplies the
+    // renderer-safe width instead of receiving zero, negatives, or overflow.
+    ...(cols === undefined ? {} : { cols }),
     // R2 multi-column ON (2 cols) — single-col drops below break-even on
     // real tool-doc slabs. Override via MULTI_COL=1 if OCR misreads layout.
-    // Non-numeric values keep the documented default 2 (Number("abc")|0
-    // would otherwise silently collapse to 1 column).
-    multiCol: Math.max(1, numeric(env.MULTI_COL, 2) | 0),
+    // Invalid values keep the documented default 2; the renderer's own width
+    // limit supplies the maximum useful count.
+    multiCol: envInteger(env.MULTI_COL, 1, MAX_WORKER_MULTI_COL) ?? 2,
     // Exact-risk blocks (IDs/hashes/UUIDs/secrets/paths) stay native text
     // instead of being imaged — default-on. No recovery sidecar here:
     // Workers has no writable filesystem for the rec_* dump, so this is

@@ -298,6 +298,23 @@ interface Totals {
   /** How many events contributed measurement counters. Lets the UI annotate
    *  the panel ("N of M events measured") when the scanner fell back. */
   eventsWithMeasurement: number;
+  artifactCandidates: number;
+  artifactWrites: number;
+  sourceCharsVirtualized: number;
+  virtualizedCharsRemoved: number;
+  duplicateCharsRemoved: number;
+  previewCharsSent: number;
+  deltaArtifacts: number;
+  deltaCharsSent: number;
+  deltaCharsRemoved: number;
+  checkpointsApplied: number;
+  stateCharsRemoved: number;
+  checkpointRejections: number;
+  virtualContextFailOpen: number;
+  contextToolCalls: number;
+  contextToolSuccesses: number;
+  contextResultChars: number;
+  workspaceInspectCalls: number;
   startedAt: number;
 }
 
@@ -457,6 +474,23 @@ export class DashboardState {
     toolUseCharsMeasured: 0,
     redactedBlockCountMeasured: 0,
     eventsWithMeasurement: 0,
+    artifactCandidates: 0,
+    artifactWrites: 0,
+    sourceCharsVirtualized: 0,
+    virtualizedCharsRemoved: 0,
+    duplicateCharsRemoved: 0,
+    previewCharsSent: 0,
+    deltaArtifacts: 0,
+    deltaCharsSent: 0,
+    deltaCharsRemoved: 0,
+    checkpointsApplied: 0,
+    stateCharsRemoved: 0,
+    checkpointRejections: 0,
+    virtualContextFailOpen: 0,
+    contextToolCalls: 0,
+    contextToolSuccesses: 0,
+    contextResultChars: 0,
+    workspaceInspectCalls: 0,
     startedAt: Date.now() / 1000,
   };
   /** Bounded ring of the most recently rendered images (last IMAGE_RING_CAP).
@@ -751,6 +785,23 @@ export class DashboardState {
 
     this.totals.requests += 1;
     if (compressed) this.totals.compressedRequests += 1;
+    this.totals.artifactCandidates += info?.artifactCandidates ?? 0;
+    this.totals.artifactWrites += info?.artifactWrites ?? 0;
+    this.totals.sourceCharsVirtualized += info?.sourceCharsVirtualized ?? 0;
+    this.totals.virtualizedCharsRemoved += info?.virtualizedCharsRemoved ?? 0;
+    this.totals.duplicateCharsRemoved += info?.duplicateCharsRemoved ?? 0;
+    this.totals.previewCharsSent += info?.previewCharsSent ?? 0;
+    this.totals.deltaArtifacts += info?.deltaArtifacts ?? 0;
+    this.totals.deltaCharsSent += info?.deltaCharsSent ?? 0;
+    this.totals.deltaCharsRemoved += info?.deltaCharsRemoved ?? 0;
+    if (info?.checkpointApplied) this.totals.checkpointsApplied += 1;
+    this.totals.stateCharsRemoved += info?.stateCharsRemoved ?? 0;
+    if (info?.checkpointRejected) this.totals.checkpointRejections += 1;
+    if (info?.virtualContextFailOpen) this.totals.virtualContextFailOpen += 1;
+    this.totals.contextToolCalls += info?.contextToolCalls ?? 0;
+    this.totals.contextToolSuccesses += info?.contextToolSuccesses ?? 0;
+    this.totals.contextResultChars += info?.contextResultChars ?? 0;
+    this.totals.workspaceInspectCalls += info?.workspaceInspectCalls ?? 0;
 
     // Measured headline: only compressed rows with a usable probe. An
     // uncompressed row contributes zero saved (baseline === actual), so
@@ -1256,6 +1307,23 @@ export class DashboardState {
       measured_tool_use_chars: this.totals.toolUseCharsMeasured,
       measured_redacted_block_count: this.totals.redactedBlockCountMeasured,
       events_with_measurement: this.totals.eventsWithMeasurement,
+      artifact_candidates: this.totals.artifactCandidates,
+      artifact_writes: this.totals.artifactWrites,
+      source_chars_virtualized: this.totals.sourceCharsVirtualized,
+      virtualized_chars_removed: this.totals.virtualizedCharsRemoved,
+      duplicate_chars_removed: this.totals.duplicateCharsRemoved,
+      preview_chars_sent: this.totals.previewCharsSent,
+      delta_artifacts: this.totals.deltaArtifacts,
+      delta_chars_sent: this.totals.deltaCharsSent,
+      delta_chars_removed: this.totals.deltaCharsRemoved,
+      checkpoints_applied: this.totals.checkpointsApplied,
+      state_chars_removed: this.totals.stateCharsRemoved,
+      checkpoint_rejections: this.totals.checkpointRejections,
+      virtual_context_fail_open: this.totals.virtualContextFailOpen,
+      context_tool_calls: this.totals.contextToolCalls,
+      context_tool_successes: this.totals.contextToolSuccesses,
+      context_result_chars: this.totals.contextResultChars,
+      workspace_inspect_calls: this.totals.workspaceInspectCalls,
       uptime_sec: uptimeSec,
       compression_enabled: this.compressionEnabled,
     };
@@ -1571,7 +1639,7 @@ const DASHBOARD_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self'",
+  "img-src 'self' data:",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

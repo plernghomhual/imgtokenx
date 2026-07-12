@@ -707,6 +707,7 @@ describe('security headers', () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("img-src 'self' data:");
     // htmx needs inline + eval; everything else stays same-origin.
     expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
@@ -721,5 +722,58 @@ describe('security headers', () => {
     const src = dash.serveImageSource();
     expect(src.status).toBe(404);
     expect(src.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+});
+
+describe('virtual-context telemetry', () => {
+  it('reports aggregate artifact and character counters without source content', async () => {
+    dash.update({
+      method: 'POST',
+      path: '/v1/responses',
+      status: 200,
+      durationMs: 10,
+      info: {
+        compressed: true,
+        origChars: 20_000,
+        compressedChars: 0,
+        imageCount: 0,
+        imageBytes: 0,
+        staticChars: 0,
+        dynamicChars: 0,
+        dynamicBlockCount: 0,
+        virtualContextMode: 'lazy',
+        artifactCandidates: 3,
+        artifactWrites: 2,
+        sourceCharsVirtualized: 18_000,
+        virtualizedCharsRemoved: 14_000,
+        duplicateCharsRemoved: 9_000,
+        previewCharsSent: 4_000,
+        deltaArtifacts: 2,
+        deltaCharsSent: 700,
+        deltaCharsRemoved: 8_000,
+        checkpointApplied: true,
+        stateCharsRemoved: 5_000,
+        contextToolCalls: 4,
+        contextToolSuccesses: 3,
+        contextResultChars: 2_500,
+        workspaceInspectCalls: 2,
+      },
+    });
+    const stats = await dash.serveStats().json() as StatsPayload;
+    expect(stats.artifact_candidates).toBe(3);
+    expect(stats.artifact_writes).toBe(2);
+    expect(stats.source_chars_virtualized).toBe(18_000);
+    expect(stats.virtualized_chars_removed).toBe(14_000);
+    expect(stats.duplicate_chars_removed).toBe(9_000);
+    expect(stats.preview_chars_sent).toBe(4_000);
+    expect(stats.delta_artifacts).toBe(2);
+    expect(stats.delta_chars_sent).toBe(700);
+    expect(stats.delta_chars_removed).toBe(8_000);
+    expect(stats.checkpoints_applied).toBe(1);
+    expect(stats.state_chars_removed).toBe(5_000);
+    expect(stats.context_tool_calls).toBe(4);
+    expect(stats.context_tool_successes).toBe(3);
+    expect(stats.context_result_chars).toBe(2_500);
+    expect(stats.workspace_inspect_calls).toBe(2);
   });
 });

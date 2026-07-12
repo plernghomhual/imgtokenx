@@ -1211,3 +1211,26 @@ No push, deployment, daemon restart, or live configuration mutation performed.
 - CSP requires 'unsafe-inline'/'unsafe-eval' (vendored htmx + hx-vals js:); tightening needs an htmx-config refactor — deliberate trade-off, documented in DASHBOARD_CSP comment
 - Atlas externalization means dist/node.js now depends on dist/core/ at runtime — guarded by packed-tarball bin smoke in package-smoke.mjs
 - settle() polling in routing tests assumes the count_tokens probe always fires for POST /v1/messages bodies (empirically true; loud timeout if it regresses)
+
+---
+
+## 2026-07-11 — Provider-neutral token-efficiency expansion
+
+- [x] Correct the lossy Anthropic image-budget fallback and validate Worker numeric ranges.
+- [x] Add first-class OpenCode Zen routing, installer wiring, auth isolation, and dialect tests; exclude Z.ai.
+- [x] Add private content-addressed artifacts with exact deduplication, deterministic previews, retention, and fail-open behavior.
+- [x] Expand the MCP server with bounded search/fetch/diff/checkpoint operations while preserving `imgtokenx_recover`.
+- [x] Add staged `virtualContext` modes (`off`, `dedup`, `lazy`, `state`) before image rendering.
+- [x] Add proof-carrying checkpoints and safe history-prefix replacement with exact fallback.
+- [x] Add a bounded read-only workspace inspection tool; leave native read/edit/bash tools untouched.
+- [x] Add opt-in output-efficiency guidance without truncation, model substitution, or permission bypass.
+- [x] Extend privacy-safe telemetry/dashboard accounting without double-counting savings.
+- [x] Update README/help/security docs and add compatibility, exactness, security, and performance regressions.
+- [ ] Run focused tests, typechecks, full suite, build, restart/package/Worker/release checks, guard reviews, commit, and push.
+
+### Final review
+
+- Files changed: provider-neutral virtual-context/artifact/MCP/inspection core; proxy, Node, OpenCode installer, Worker validation, tracker/dashboard; docs and focused regressions.
+- Behavior changed: OpenCode Zen is first-class and auth-isolated; optional `dedup`/`lazy`/`state` context storage, exact deltas/checkpoints, retrieval tools, output guidance, and telemetry are available; defaults remain conservative (`virtualContext=off`).
+- Verification performed: source + strict test/script typechecks; 69 files / 1,020 tests; build; restart 4/4; package smoke; release check; Worker dry-run; diff, dependency, and secret scans.
+- Remaining risks: live provider billing/quality was not exercised; virtual modes remain opt-in pending real workload evals; commented JSONC is refused explicitly rather than rewritten; Wrangler's dry-run passed but its optional user-log write was sandbox-denied.

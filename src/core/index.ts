@@ -41,6 +41,14 @@ export {
   type ProxyEvent,
 } from './proxy.js';
 export {
+  virtualizeRequestBody,
+  type VirtualArtifactStore,
+  type VirtualContextDialect,
+  type VirtualContextInfo,
+  type VirtualContextMode,
+  type VirtualizeRequestOptions,
+} from './virtual-context.js';
+export {
   computeActualInputEff,
   computeBaselineInputEff,
   CACHE_CREATE_RATE,

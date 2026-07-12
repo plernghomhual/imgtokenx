@@ -186,13 +186,40 @@ exact-looking strings. When `emitRecoverable` is enabled, each rendered block
 also gets a `rec_*` reference and `TransformInfo.recoverable` carries the
 byte-exact source for a local harness or the Node `imgtokenx recover` command.
 
-`losslessExact` is the stricter mode: if recoverable refs are off and a block
-contains extracted exact-risk strings, imgtokenx leaves that block as native text
-instead of rendering it. Telemetry lands in JSONL as `fact_sheet_items`,
+`losslessExact` is the stricter mode: a block containing extracted exact-risk
+strings stays native text instead of being rendered. Recovery sidecars remain an
+independent backstop for other imaged content. Telemetry lands in JSONL as `fact_sheet_items`,
 `fact_sheet_chars`, `recoverable_refs`, `lossless_exact_kept`,
 `lossless_exact_chars`, and `break_even_misses`; `passthrough_reasons` now
 also includes `kept_sharp`, `lossless_exact`, and `reader_profile_unsafe` when
 those branches fire.
+
+### 5d. Provider-neutral virtual context
+
+The Node proxy can apply `virtualContext: 'dedup' | 'lazy' | 'state'` before the
+Anthropic, OpenAI Chat, or Responses image transform. It stores large tool
+results under full SHA-256 handles, then sends either a duplicate reference or a
+deterministic preview. `state` can additionally replace only the history prefix
+before a validated proof checkpoint. The default is `off`.
+
+`TransformInfo` exposes privacy-safe counters only:
+
+- `virtualContextMode`, `artifactCandidates`, `artifactWrites`
+- `sourceCharsVirtualized`, `virtualizedCharsRemoved`
+- `duplicateCharsRemoved`, `previewCharsSent`
+- `deltaArtifacts`, `deltaCharsSent`, `deltaCharsRemoved`
+- `checkpointApplied`, `stateCharsRemoved`, `checkpointRejected`
+- `virtualContextFailOpen`
+- `contextToolCalls`, `contextToolSuccesses`, `contextResultChars`,
+  `workspaceInspectCalls`
+
+Artifact text and filesystem paths are not telemetry. Storage or validation
+failure preserves the original request. When text was virtualized, tool-result
+imaging is disabled for that request so the same content cannot be counted in
+both mechanisms; an applied state checkpoint also disables the older image
+history collapse for that request. `outputEfficiency` is a separate opt-in
+instruction to prefer exact artifact ranges and focused diffs; it does not
+truncate output.
 
 ## 6. Determinism and fingerprints
 

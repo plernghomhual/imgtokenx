@@ -25,6 +25,17 @@ export { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './rec
 import { pruneRecoverableDir } from './recovery-retention.js';
 export { pruneRecoverableDir, readRecoveryCaps } from './recovery-retention.js';
 import {
+  hasContextArtifact,
+  readContextCheckpointText,
+  storeContextArtifact,
+} from './context-artifacts.js';
+import {
+  contextMetricDelta,
+  emptyContextMetricTotals,
+  readContextMetricTotals,
+} from './context-metrics.js';
+import type { VirtualContextMode } from './core/virtual-context.js';
+import {
   parseExportArgv,
   runExportCore,
   type ExportParsed,
@@ -69,6 +80,7 @@ interface RuntimeConfig {
   host: string;
   upstream: string;
   openAIUpstream: string;
+  openCodeUpstream: string;
   openAIApiKey?: string;
   provider?: 'cloudflare-ai-gateway';
   gatewayBaseUrl?: string;
@@ -114,6 +126,7 @@ function parseCli(argv: string[]): RuntimeConfig {
     host: process.env.HOST?.trim() || '127.0.0.1',
     upstream: process.env.ANTHROPIC_UPSTREAM ?? sharedUpstream ?? 'https://api.anthropic.com',
     openAIUpstream: process.env.OPENAI_UPSTREAM ?? sharedUpstream ?? 'https://api.openai.com',
+    openCodeUpstream: nonEmpty(process.env.IMGTOKENX_OPENCODE_UPSTREAM) ?? 'https://opencode.ai/zen',
     openAIApiKey: process.env.OPENAI_API_KEY,
     provider: parseProvider(process.env.IMGTOKENX_PROVIDER),
     gatewayBaseUrl: process.env.IMGTOKENX_GATEWAY_BASE_URL,
@@ -183,6 +196,8 @@ Environment:
                            (default https://api.anthropic.com)
   OPENAI_UPSTREAM         OpenAI API base; overrides IMGTOKENX_UPSTREAM
                            (default https://api.openai.com)
+  IMGTOKENX_OPENCODE_UPSTREAM OpenCode Zen API base
+                           (default https://opencode.ai/zen)
   OPENAI_API_KEY          optional OpenAI key override; otherwise forwarded
   IMGTOKENX_PROVIDER         optional: 'cloudflare-ai-gateway' — route both API
                           families through one gateway base URL
@@ -192,7 +207,7 @@ Environment:
                           default claude-fable-5; off disables
   IMGTOKENX_CONFIG           JSON config path (default ~/.config/imgtokenx/config.json)
                           supports {"models": [...]} or {"models": "off"}
-  IMGTOKENX_DISABLE          1/true/yes/on bypasses imaging for this proxy process
+  IMGTOKENX_DISABLE          1/true/yes/on bypasses all transformations for this process
   IMGTOKENX_LOG              JSONL events path (default ~/.imgtokenx/events.jsonl)
   IMGTOKENX_DUMP_DIR         debug: write every rendered PNG here (what the model
                           sees); off unless set. Compress arm only.
@@ -205,8 +220,16 @@ Environment:
   IMGTOKENX_RECOVERY_MAX_AGE_DAYS  delete .txt files older than N days (default 7)
   IMGTOKENX_RECOVERY_MAX_BYTES    delete oldest until total size ≤ N bytes
                           (default 268435456 = 256 MiB)
-  IMGTOKENX_LOSSLESS_EXACT   when true, keep exact-risk blocks as text unless
-                          IMGTOKENX_RECOVERABLE_DIR is also set.
+  IMGTOKENX_LOSSLESS_EXACT   default-on: keep exact-risk blocks as native text.
+  IMGTOKENX_VIRTUAL_CONTEXT  provider-neutral large-result handling: off
+                          (default), dedup, lazy, or state. Uses the private
+                          recovery directory as a content-addressed store.
+  IMGTOKENX_OUTPUT_EFFICIENCY opt-in guidance to cite artifact ranges and return
+                          focused diffs instead of echoing large retrieved text.
+                          It never truncates model output.
+  IMGTOKENX_WORKSPACE_ROOT    host-selected root for the read-only
+                          imgtokenx_inspect MCP tool. Required to enable it;
+                          filesystem root and the home directory are refused.
   IMGTOKENX_HEALTHZ_TOKEN     (audit D21) shared secret for off-host /healthz.
                           When set, callers must present Authorization: Bearer
                           <token> unless the request reaches a loopback
@@ -234,7 +257,10 @@ Use with Claude Code:
 Use with Codex / OpenAI-compatible GPT clients:
   OPENAI_BASE_URL=http://127.0.0.1:47821/v1
 
-Use with OpenCode provider-prefixed routers:
+Use with OpenCode Zen (the installer manages provider.opencode.options.baseURL):
+  OpenCode base: http://127.0.0.1:47821/opencode
+
+Other explicit provider-prefixed routers:
   Anthropic base: http://127.0.0.1:47821/anthropic
   OpenAI base:    http://127.0.0.1:47821/openai
 `);
@@ -1129,6 +1155,17 @@ export async function main(): Promise<void> {
   if (losslessExactEnv !== undefined && !losslessExact) {
     console.log('[imgtokenx] IMGTOKENX_LOSSLESS_EXACT disabled — exact-risk blocks may be imaged like anything else');
   }
+  const virtualContextRaw = process.env.IMGTOKENX_VIRTUAL_CONTEXT?.trim().toLowerCase() ?? 'off';
+  let virtualContext: VirtualContextMode =
+    virtualContextRaw === 'dedup' || virtualContextRaw === 'lazy' || virtualContextRaw === 'state'
+      ? virtualContextRaw
+      : 'off';
+  if (!['off', 'dedup', 'lazy', 'state'].includes(virtualContextRaw)) {
+    console.warn(`[imgtokenx] invalid IMGTOKENX_VIRTUAL_CONTEXT=${JSON.stringify(virtualContextRaw)} — using off`);
+  }
+  const outputEfficiency = /^(1|true|yes|on)$/i.test(
+    process.env.IMGTOKENX_OUTPUT_EFFICIENCY?.trim() ?? '',
+  );
   // Debug aid: when IMGTOKENX_DUMP_DIR is set, persist every rendered PNG this
   // process emits, so you can eyeball exactly what the model received (OCR /
   // legibility audits, demo inspection). Best-effort — never affects requests.
@@ -1167,20 +1204,19 @@ export async function main(): Promise<void> {
   } else if (/^(0|false|off|no)$/i.test(process.env.IMGTOKENX_RECOVERABLE_DIR?.trim() ?? '')) {
     console.log('[imgtokenx] IMGTOKENX_RECOVERABLE_DIR disabled — recovery sidecars will not be written');
   }
-  // Transform options pass through empty — the proxy uses the DEFAULTS
-  // baked into transform.ts. There are no behavior toggles: system slab,
-  // reminders, tool_results, and history compression all run
-  // unconditionally; the per-block break-even gate decides per-call
-  // whether to actually image each piece. The function-form `transform`
-  // below is ONLY a kill switch (IMGTOKENX_DISABLE / dashboard toggle →
-  // compress:false); on the active path it returns {}, so the gate always
-  // runs on static DEFAULTS — charsPerToken=4, priorWarm*=0 — which leaves
-  // the warm-baseline and anti-flapping burn terms inert. That is
-  // deliberate, NOT an oversight: there is no live-α feedback loop from
-  // the dashboard. Telemetry (2026-06, 897 sessions / 21,347 measured
-  // rows) showed 5 mode flips ever and losses at 0.8% of wins — all
-  // one-time cache-create amortization — so closing the loop would not
-  // change decisions. Re-run that reconciliation before wiring one in.
+  if (virtualContext !== 'off' && !recoverableDir) {
+    console.warn('[imgtokenx] virtual context requires local recovery storage — using off');
+    virtualContext = 'off';
+  }
+  let lastContextMetrics = recoverableDir
+    ? readContextMetricTotals(recoverableDir)
+    : emptyContextMetricTotals();
+  // Image transforms use the static defaults and their per-block break-even
+  // gates. The function-form `transform` below also carries the explicitly
+  // configured provider-neutral virtual-context mode and output guidance.
+  // The runtime/dashboard kill switch disables every savings path together.
+  // There is intentionally no live-alpha feedback loop from the dashboard;
+  // re-run the historical reconciliation before adding one.
   const tracker: Tracker = new FileTracker(opts.eventsFile);
 
   // Sidecar dir for oversized 4xx request-body samples. Lives next to the
@@ -1210,11 +1246,25 @@ export async function main(): Promise<void> {
     gatewayHeaders: opts.gatewayHeaders,
     upstream: opts.upstream,
     openAIUpstream: opts.openAIUpstream,
+    openCodeUpstream: opts.openCodeUpstream,
     openAIApiKey: opts.openAIApiKey,
     // Audit D21: off-host /healthz secret. Empty/unset = off-host gets a 403
     // instead of leaking the build version (loopback bypasses). Read here
     // (not in RuntimeConfig) so the typed surface doesn't carry secrets.
     healthzToken: process.env.IMGTOKENX_HEALTHZ_TOKEN,
+    ...(recoverableDir ? {
+      virtualArtifactStore: {
+        async put(text: string) {
+          return { id: storeContextArtifact(recoverableDir, text).handle };
+        },
+        async readCheckpoint(id: string) {
+          return readContextCheckpointText(recoverableDir, id);
+        },
+        async has(id: string) {
+          return hasContextArtifact(recoverableDir, id);
+        },
+      },
+    } : {}),
     // Per-request transform options:
     //   1. Runtime kill switch — when the dashboard "passthrough" toggle
     //      is off, force compress=false so /v1/messages forwards
@@ -1226,14 +1276,27 @@ export async function main(): Promise<void> {
       // whole process, so the "normal" arm can be scripted on its own port while
       // still logging real usage + count_tokens baselines to its own IMGTOKENX_LOG.
       // (The dashboard kill switch does the same thing at runtime.)
-      if (forcePassthrough || !dashboard.getCompressionEnabled()) return { compress: false };
+      if (forcePassthrough || !dashboard.getCompressionEnabled()) {
+        return { compress: false, virtualContext: 'off', outputEfficiency: false };
+      }
       // Active path: use DEFAULTS in transform.ts for break-even gating.
       return {
         ...(recoverableDir ? { emitRecoverable: true } : {}),
         ...(losslessExact ? { losslessExact: true } : {}),
+        virtualContext,
+        outputEfficiency,
       };
     },
     onRequest: async (e) => {
+      if (recoverableDir && e.info) {
+        const currentMetrics = readContextMetricTotals(recoverableDir);
+        const delta = contextMetricDelta(currentMetrics, lastContextMetrics);
+        e.info.contextToolCalls = delta.contextToolCalls;
+        e.info.contextToolSuccesses = delta.contextToolSuccesses;
+        e.info.contextResultChars = delta.contextResultChars;
+        e.info.workspaceInspectCalls = delta.workspaceInspectCalls;
+        lastContextMetrics = currentMetrics;
+      }
       // Feed the dashboard BEFORE tracker.emit — toTrackEvent strips
       // info.firstImagePng, so capturing has to happen on the raw event.
       dashboard.update(e);
@@ -1441,6 +1504,7 @@ export async function main(): Promise<void> {
     const routes = resolveUpstreams(config);
     console.log(`[imgtokenx] anthropic upstream → ${routes.anthropic}`);
     console.log(`[imgtokenx] openai upstream → ${routes.openai}`);
+    console.log(`[imgtokenx] opencode upstream → ${routes.opencode}`);
     console.log(`[imgtokenx] tracking events → ${opts.eventsFile}`);
     console.log(`[imgtokenx] dashboard → http://127.0.0.1:${opts.port}/`);
   });

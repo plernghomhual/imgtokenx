@@ -54,3 +54,25 @@ For kill-switch bugs, distinguish historical dashboard rows from new traffic, ma
 
 ### Trigger
 Any report that traffic still reaches imgtokenx after the global switch is OFF.
+
+## Lesson: Ground Provider Architecture in the User's Real Path
+
+### Anti-Pattern
+Reasoning from Anthropic caching, Cloudflare model routing, or Z.ai-specific plans when the required path is provider-neutral OpenCode with official Zen compatibility.
+
+### Pattern
+Separate client compatibility from model-provider assumptions. Preserve first-class OpenCode Zen routing and credentials, keep efficiency mechanisms dialect-neutral, and exclude Z.ai or Cloudflare AI-model coupling unless explicitly requested.
+
+### Trigger
+Any routing, installer, caching, or savings design involving OpenCode or multiple model providers.
+
+## Lesson: Honor an Explicit Commit Checkpoint Immediately
+
+### Anti-Pattern
+Continuing planning or implementation discussion after the user explicitly asks to commit and push the verified current work.
+
+### Pattern
+Inspect the diff, run proportionate checkpoint gates, commit, and push before starting the next implementation phase.
+
+### Trigger
+The user says “commit and push,” especially while other work is concurrently modifying the tree.

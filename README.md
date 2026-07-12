@@ -51,9 +51,8 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude  # point Claude Code at it
 # Codex / OpenAI-compatible clients
 OPENAI_BASE_URL=http://127.0.0.1:47821/v1 codex
 
-# OpenCode provider-prefixed routing
-# Anthropic base: http://127.0.0.1:47821/anthropic
-# OpenAI base:    http://127.0.0.1:47821/openai
+# OpenCode Zen (imgtokenx install configures this automatically)
+# provider.opencode.options.baseURL = http://127.0.0.1:47821/opencode
 
 # Lossless-exact + recovery sidecars are ON by default — no setup needed.
 # Recovery sources land in ~/.imgtokenx/recovery unless you override the dir:
@@ -72,8 +71,15 @@ imgtokenx uninstall          # removes the launchd/env/zshrc wiring
 
 The generated wrappers health-check <http://127.0.0.1:47821/healthz>, kickstart
 launchd or start a local fallback process, then run `claude`, `codex`, or
-`opencode` with the right base URL. `IMGTOKENX_DISABLE=1 <tool>` bypasses the
-wrapper for one launch. The dashboard kill switch writes
+`opencode` with the right base URL. Installation transactionally sets only
+`provider.opencode.options.baseURL` in OpenCode's config and preserves the rest,
+including credentials; uninstall restores the prior value unless the user changed
+it later. It honors `OPENCODE_CONFIG`, selects an existing global
+`opencode.jsonc` when no JSON file exists, and refuses to rewrite commented JSONC
+instead of destroying comments. `imgtokenx doctor` checks OpenCode's resolved
+`debug config --pure` output, so project, inline, and managed overrides cannot
+produce a false pass. `IMGTOKENX_DISABLE=1 <tool>` bypasses the wrapper for one launch. The
+dashboard kill switch writes
 `~/.imgtokenx/disabled`; while present, all three wrappers run their original
 CLIs directly. Restart a client that was already running when the switch changed
 because a process cannot discard a base URL it inherited at launch. After this
@@ -115,8 +121,10 @@ keys require `IMGTOKENX_WORKER_SECRET` and callers must send it in
      (override with `IMGTOKENX_RECOVERABLE_DIR=/path/to/dir`), keyed by a
      `rec_*` id shown next to the image. Recover it via
      `imgtokenx recover rec_1234abcd`, or — for a model mid-conversation — the
-     bundled `imgtokenx mcp` MCP server exposes a `imgtokenx_recover` tool it can
-     call directly with that id. Opt out with `IMGTOKENX_RECOVERABLE_DIR=off`.
+     bundled `imgtokenx mcp` MCP server exposes an `imgtokenx_recover` tool it can
+     call directly with that id. The same server also exposes bounded exact-artifact
+     retrieval and read-only workspace inspection for the optional virtual-context
+     modes described below. Opt out with `IMGTOKENX_RECOVERABLE_DIR=off`.
 - **Escape hatch:** subagents on non-allowlisted models pass through as
   text — route byte-exact work there
   (`CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-4-6`, or `model: sonnet` in
@@ -186,7 +194,16 @@ accepts both canonical SDK paths and Codex/OpenCode aliases:
 `/v1/messages`, `/anthropic/v1/messages`, `/anthropic/messages`,
 `/v1/responses`, `/responses`, `/openai/v1/responses`, `/openai/responses`,
 `/v1/chat/completions`, `/chat/completions`,
-`/openai/v1/chat/completions`, and `/openai/chat/completions`. OpenAI model
+`/openai/v1/chat/completions`, `/openai/chat/completions`, and the first-class
+OpenCode Zen routes `/opencode/v1/messages`, `/opencode/v1/responses`, and
+`/opencode/v1/chat/completions`. `/opencode/*` always forwards to Zen (default
+`https://opencode.ai/zen`) with the caller's Zen authorization; Anthropic,
+OpenAI, and gateway credentials are never substituted. Z.ai Coding Plan routing
+is intentionally not part of this integration. These dialects match the current
+[official Zen endpoint table](https://opencode.ai/docs/zen/), and OpenCode
+documents `provider.<id>.options.baseURL` as its proxy/custom-endpoint control
+and [merges multiple config sources by precedence](https://opencode.ai/docs/config/).
+OpenAI model
 list and response-retrieval paths (`/v1/models`, `/models`,
 `/v1/responses/*`, `/responses/*`) pass through to the OpenAI upstream so
 client capability probes do not fall back to Anthropic by accident.
@@ -195,6 +212,36 @@ A full 1568×728 page costs 1,456 visual tokens and holds ≈28,000 chars, so
 text wins only at very sparse densities — Claude Code traffic runs ~1.91
 chars/token (N=391). A per-request estimator decides; sparse prose stays
 text. Events log to `~/.imgtokenx/events.jsonl`.
+
+### Optional context virtual memory
+
+`IMGTOKENX_VIRTUAL_CONTEXT` adds a provider-neutral savings layer before image
+rendering. It is **off by default** while the new modes collect real workload
+evidence:
+
+- `dedup` stores repeated large tool results by full SHA-256, keeps the first
+  exact copy, and replaces later copies with a small exact handle.
+- `lazy` stores every large result and sends a deterministic head/error/tail
+  preview plus its handle. When two results come from the same exact tool
+  name+arguments and the change is small, the later result becomes an exact
+  line delta against the already-exposed base handle. The model can retrieve
+  exact ranges, literal search matches, or a bounded diff through
+  `imgtokenx_context`.
+- `state` adds proof-carrying checkpoints. A validated checkpoint replaces only
+  the older conversational prefix; system/developer authority, the checkpoint
+  tool-call pair, and the live tail remain native and ordered.
+
+Artifacts stay in the private recovery directory (`0700` directory, `0600`
+files), are content-addressed and integrity-checked, and share its age/byte
+retention. Storage or checkpoint validation failure preserves the original
+request. Virtualized previews are not imaged again. `IMGTOKENX_OUTPUT_EFFICIENCY=1`
+separately adds opt-in guidance to cite exact artifact ranges and return focused
+diffs instead of echoing large sources; it never truncates the response.
+`imgtokenx_inspect` is read-only, literal-only, bounded, does not follow symlinks,
+and is disabled until the host sets `IMGTOKENX_WORKSPACE_ROOT`; filesystem root
+and the home directory are refused. The model never supplies a root argument.
+Native client read/edit/shell tools remain unchanged. See
+[Virtual context](docs/VIRTUAL_CONTEXT.md).
 
 ## Library use (no proxy)
 
@@ -246,7 +293,7 @@ double-counted as "savings". Re-derive it yourself from the events log: the
 formula and field names are documented in `src/core/baseline.ts`.
 
 **What does it actually compress?**
-Three kinds of *input* blocks, each behind a profitability gate:
+Three image-compressed *input* buckets, each behind a profitability gate:
 
 1. large `tool_result` bodies (file reads, command output, logs) above
    ~6k chars of token-dense content
@@ -261,6 +308,11 @@ prose, and anything too small to win. The configured scope starts with Fable
 independent reader profile can still force text passthrough. Opus 4.x, Sonnet
 5, and Haiku 4.5 use their calibrated 20x32 profile. GPT 5.6 Sol remains text-only unless explicitly
 overridden because its first raw-image pilot failed exact recall.
+
+The optional provider-neutral virtual-context modes add exact deduplication,
+preview-plus-retrieval, and validated state checkpoints before those image gates.
+They are disabled by default and never apply image-loss savings claims to stored
+bytes that were not actually sent.
 
 **Has it ever failed for real, outside the benchmarks?**
 Yes, once in weeks of daily use: the model recalled a person's name from
@@ -300,6 +352,8 @@ their own collapsed history as image pages while they worked.
 - Lossy (above); verbatim recall from images is unreliable.
 - PNG encoding adds latency to large requests before they leave.
 - ASCII/Latin-1 well tested; CJK works but conservatively.
+- Virtual-context modes keep exact tool output on local disk and therefore need
+  the same privacy/retention treatment as source logs; they are opt-in.
 
 ## Roadmap
 

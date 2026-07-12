@@ -41,6 +41,23 @@ export interface StatsPayload {
   measured_tool_use_chars: number;
   measured_redacted_block_count: number;
   events_with_measurement: number;
+  artifact_candidates: number;
+  artifact_writes: number;
+  source_chars_virtualized: number;
+  virtualized_chars_removed: number;
+  duplicate_chars_removed: number;
+  preview_chars_sent: number;
+  delta_artifacts: number;
+  delta_chars_sent: number;
+  delta_chars_removed: number;
+  checkpoints_applied: number;
+  state_chars_removed: number;
+  checkpoint_rejections: number;
+  virtual_context_fail_open: number;
+  context_tool_calls: number;
+  context_tool_successes: number;
+  context_result_chars: number;
+  workspace_inspect_calls: number;
   uptime_sec_unused?: never; // future-proof
   compression_enabled: boolean;
 }

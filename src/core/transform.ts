@@ -47,6 +47,7 @@ import { collapseHistory, HISTORY_SYNTHETIC_INTRO, HISTORY_SYNTHETIC_OUTRO } fro
 import type { GptHistoryOptions } from './openai-history.js';
 import { CACHE_CREATE_RATE, CACHE_READ_RATE } from './baseline.js';
 import { resolveReaderProfile } from './reader-profiles.js';
+import type { VirtualContextMode } from './virtual-context.js';
 
 /** Per-block descriptor passed to `TransformOptions.keepSharp`. */
 export interface KeepSharpBlock {
@@ -140,6 +141,12 @@ export interface TransformOptions {
   /** Strong exactness mode: when recovery sidecars are unavailable, keep any
    *  block with extracted exact-risk identifiers as text instead of imaging it. */
   losslessExact?: boolean;
+  /** Provider-neutral local context virtualization. The proxy applies this
+   *  before image transforms when a durable artifact store is configured. */
+  virtualContext?: VirtualContextMode;
+  /** Opt-in guidance to cite artifacts and return focused diffs instead of
+   *  reprinting large retrieved sources. Never truncates model output. */
+  outputEfficiency?: boolean;
 }
 
 const DEFAULTS: Required<TransformOptions> = {
@@ -169,6 +176,8 @@ const DEFAULTS: Required<TransformOptions> = {
   keepSharp: () => false,
   emitRecoverable: false,
   losslessExact: false,
+  virtualContext: 'off',
+  outputEfficiency: false,
   // GPT-only knobs; the Anthropic transform ignores them but Required<> needs them.
   collapseHistory: true,
   gptHistory: {},
@@ -653,6 +662,27 @@ export interface TransformInfo {
   factSheetChars?: number;
   /** Count of `rec_*` recovery refs emitted in this request. */
   recoverableRefs?: number;
+  /** Provider-neutral context virtualization telemetry. Raw artifact contents
+   *  are never persisted in the event stream. */
+  virtualContextMode?: VirtualContextMode;
+  artifactCandidates?: number;
+  artifactWrites?: number;
+  sourceCharsVirtualized?: number;
+  virtualizedCharsRemoved?: number;
+  duplicateCharsRemoved?: number;
+  previewCharsSent?: number;
+  deltaArtifacts?: number;
+  deltaCharsSent?: number;
+  deltaCharsRemoved?: number;
+  checkpointApplied?: boolean;
+  stateCharsRemoved?: number;
+  checkpointRejected?: boolean;
+  virtualContextFailOpen?: boolean;
+  /** Privacy-safe MCP activity observed since the previous proxied request. */
+  contextToolCalls?: number;
+  contextToolSuccesses?: number;
+  contextResultChars?: number;
+  workspaceInspectCalls?: number;
   /** Audit D13: the upstream JSON body exceeded the 4 MiB scan cap and was drained/truncated. */
   scanTruncated?: boolean;
   /** Blocks/chars kept as native text by `losslessExact` because recovery was off. */
@@ -2022,20 +2052,18 @@ export async function transformRequest(
     numCols > 1
       ? await renderTextToPngsMultiCol(combinedWithHeader, slabCols, numCols, renderStyle)
       : await renderTextToPngs(combinedWithHeader, slabCols, renderStyle);
-  // Audit #4 D4: claim from the request-wide image budget. If the budget is
-  // already exhausted by pre-existing images, we still rendered (cheap relative
-  // to the gate's work) but emit nothing. If the slab wants more than the
-  // budget allows, we keep the FIRST `allowed` images (cache anchor at the
-  // front of the prefix) and drop the rest. Dropped pages are LOSSY: the model
-  // does not see their content — the fact-sheet sidecar is a ≤64-token gist,
-  // not a replacement (recovery sidecars restore verbatim text only when
-  // `emitRecoverable` is on). The truncation is surfaced as
-  // `info.imageBudget.skipped` for tracker/dashboard telemetry.
-  const slabAllowed = imageBudget.claim(images.length);
-  if (slabAllowed === 0 && images.length > 0) {
+  // Audit #4 D4: slab conversion is all-or-nothing. A partial prefix would
+  // remove the complete native system/tool slab while exposing only its first
+  // rendered pages, silently losing every omitted instruction. If all pages do
+  // not fit, preserve the original request byte-for-byte and record every page
+  // we declined to emit.
+  if (images.length > imageBudget.remaining()) {
+    imageBudget.skip(images.length);
     info.reason = 'image_budget_exhausted';
+    info.imageBudget = imageBudget.toInfo();
+    return { body, info };
   }
-  const slabImages = slabAllowed > 0 ? images.slice(0, slabAllowed) : [];
+  imageBudget.claim(images.length);
   const imageBlocks: ImageBlock[] = [];
   for (let i = 0; i < images.length; i++) {
     const img = images[i]!;
@@ -2046,11 +2074,9 @@ export async function transformRequest(
     for (const [cp, n] of img.droppedCodepoints) {
       droppedCodepoints.set(cp, (droppedCodepoints.get(cp) ?? 0) + n);
     }
-    // Audit #4 D4: skip emission for images beyond the claimed budget slice.
-    if (i >= slabImages.length) continue;
-    const imageBlock = makeImageBlock(b64, i === slabImages.length - 1);
+    const imageBlock = makeImageBlock(b64, i === images.length - 1);
     imageBlocks.push(
-      i === slabImages.length - 1 && systemStaticCacheControl !== undefined
+      i === images.length - 1 && systemStaticCacheControl !== undefined
         ? { ...imageBlock, cache_control: systemStaticCacheControl }
         : imageBlock,
     );

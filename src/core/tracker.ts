@@ -73,6 +73,25 @@ export interface TrackEvent {
   fact_sheet_chars?: number;
   /** `rec_*` refs emitted beside rendered images. */
   recoverable_refs?: number;
+  /** Local context virtualization counters; never contain artifact text. */
+  virtual_context_mode?: 'off' | 'dedup' | 'lazy' | 'state';
+  artifact_candidates?: number;
+  artifact_writes?: number;
+  source_chars_virtualized?: number;
+  virtualized_chars_removed?: number;
+  duplicate_chars_removed?: number;
+  preview_chars_sent?: number;
+  delta_artifacts?: number;
+  delta_chars_sent?: number;
+  delta_chars_removed?: number;
+  checkpoint_applied?: boolean;
+  state_chars_removed?: number;
+  checkpoint_rejected?: boolean;
+  virtual_context_fail_open?: boolean;
+  context_tool_calls?: number;
+  context_tool_successes?: number;
+  context_result_chars?: number;
+  workspace_inspect_calls?: number;
   /** Blocks/chars kept as native text by `losslessExact`. */
   lossless_exact_kept?: number;
   lossless_exact_chars?: number;
@@ -245,6 +264,56 @@ export function toTrackEvent(ev: ProxyEvent): TrackEvent {
     }
     if (info.recoverableRefs !== undefined && info.recoverableRefs > 0) {
       out.recoverable_refs = info.recoverableRefs;
+    }
+    if (info.virtualContextMode !== undefined) {
+      out.virtual_context_mode = info.virtualContextMode;
+    }
+    if (info.artifactCandidates !== undefined && info.artifactCandidates > 0) {
+      out.artifact_candidates = info.artifactCandidates;
+    }
+    if (info.artifactWrites !== undefined && info.artifactWrites > 0) {
+      out.artifact_writes = info.artifactWrites;
+    }
+    if (info.sourceCharsVirtualized !== undefined && info.sourceCharsVirtualized > 0) {
+      out.source_chars_virtualized = info.sourceCharsVirtualized;
+    }
+    if (info.virtualizedCharsRemoved !== undefined && info.virtualizedCharsRemoved > 0) {
+      out.virtualized_chars_removed = info.virtualizedCharsRemoved;
+    }
+    if (info.duplicateCharsRemoved !== undefined && info.duplicateCharsRemoved > 0) {
+      out.duplicate_chars_removed = info.duplicateCharsRemoved;
+    }
+    if (info.previewCharsSent !== undefined && info.previewCharsSent > 0) {
+      out.preview_chars_sent = info.previewCharsSent;
+    }
+    if (info.deltaArtifacts !== undefined && info.deltaArtifacts > 0) {
+      out.delta_artifacts = info.deltaArtifacts;
+    }
+    if (info.deltaCharsSent !== undefined && info.deltaCharsSent > 0) {
+      out.delta_chars_sent = info.deltaCharsSent;
+    }
+    if (info.deltaCharsRemoved !== undefined && info.deltaCharsRemoved > 0) {
+      out.delta_chars_removed = info.deltaCharsRemoved;
+    }
+    if (info.checkpointApplied) out.checkpoint_applied = true;
+    if (info.stateCharsRemoved !== undefined && info.stateCharsRemoved > 0) {
+      out.state_chars_removed = info.stateCharsRemoved;
+    }
+    if (info.checkpointRejected) out.checkpoint_rejected = true;
+    if (info.virtualContextFailOpen) {
+      out.virtual_context_fail_open = true;
+    }
+    if (info.contextToolCalls !== undefined && info.contextToolCalls > 0) {
+      out.context_tool_calls = info.contextToolCalls;
+    }
+    if (info.contextToolSuccesses !== undefined && info.contextToolSuccesses > 0) {
+      out.context_tool_successes = info.contextToolSuccesses;
+    }
+    if (info.contextResultChars !== undefined && info.contextResultChars > 0) {
+      out.context_result_chars = info.contextResultChars;
+    }
+    if (info.workspaceInspectCalls !== undefined && info.workspaceInspectCalls > 0) {
+      out.workspace_inspect_calls = info.workspaceInspectCalls;
     }
     if (info.losslessExactKept !== undefined && info.losslessExactKept > 0) {
       out.lossless_exact_kept = info.losslessExactKept;

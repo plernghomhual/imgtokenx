@@ -8,6 +8,7 @@ import {
   doctorExitCode,
   formatDoctor,
   parseInstallArgs,
+  resolveOpenCodeConfigPath,
   runDoctor,
   renderShellEnv,
 } from '../src/install.js';
@@ -27,6 +28,8 @@ describe('install artifacts', () => {
 
     expect(plan.launchAgentPath).toBe(`/tmp/home/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`);
     expect(plan.envPath).toBe('/tmp/home/.imgtokenx/env.sh');
+    expect(plan.openCodeBaseUrl).toBe('http://127.0.0.1:47899/opencode');
+    expect(plan.openCodeConfigPath).toBe('/tmp/home/.config/opencode/opencode.json');
     expect(plan.plist).toContain(`<string>${LAUNCHD_LABEL}</string>`);
     expect(plan.plist).toContain('<string>/usr/local/bin/node</string>');
     expect(plan.plist).toContain('<string>/repo/imgtokenx/bin/cli.js</string>');
@@ -137,24 +140,79 @@ describe('install artifacts', () => {
       fs.writeFileSync(plan.zshrcPath, applyZshrcInstall('', plan.zshrcBlock));
       fs.writeFileSync(
         path.join(home, '.config', 'opencode', 'opencode.json'),
-        JSON.stringify({ mcp: { [MCP_SERVER_NAME]: plan.opencodeMcp } }),
+        JSON.stringify({
+          provider: { opencode: { options: { baseURL: plan.openCodeBaseUrl } } },
+          mcp: { [MCP_SERVER_NAME]: plan.opencodeMcp },
+        }),
       );
 
       const result = await runDoctor(
         { home, repoRoot: '/repo/imgtokenx', nodePath: '/node' },
         {
           fetch: (async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch,
-          spawnSync: ((cmd: string) => ({
-            status: ['launchctl', 'claude', 'codex'].includes(cmd) ? 0 : 1,
-            stdout: '',
-            stderr: '',
-          })) as any,
+          spawnSync: ((cmd: string) => cmd === 'opencode'
+            ? {
+                status: 0,
+                stdout: JSON.stringify({
+                  provider: { opencode: { options: { baseURL: plan.openCodeBaseUrl } } },
+                  mcp: { [MCP_SERVER_NAME]: plan.opencodeMcp },
+                }),
+                stderr: '',
+              }
+            : {
+                status: ['launchctl', 'claude', 'codex'].includes(cmd) ? 0 : 1,
+                stdout: '',
+                stderr: '',
+              }) as any,
         },
       );
 
       expect(result.checks.map((c) => c.status)).toEqual(result.checks.map(() => 'pass'));
       expect(doctorExitCode(result)).toBe(0);
       expect(formatDoctor(result)).toContain('PASS healthz');
+      expect(formatDoctor(result)).toContain('PASS OpenCode proxy');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves explicit/custom and existing JSONC OpenCode config paths', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-opencode-config-'));
+    try {
+      expect(resolveOpenCodeConfigPath(home, './custom-opencode.json'))
+        .toBe(path.resolve('./custom-opencode.json'));
+      const jsonc = path.join(home, '.config', 'opencode', 'opencode.jsonc');
+      fs.mkdirSync(path.dirname(jsonc), { recursive: true });
+      fs.writeFileSync(jsonc, '{}');
+      expect(resolveOpenCodeConfigPath(home, undefined)).toBe(jsonc);
+      fs.writeFileSync(path.join(path.dirname(jsonc), 'opencode.json'), '{}');
+      expect(() => resolveOpenCodeConfigPath(home, undefined)).toThrow(/both .* exist/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor rejects a higher-precedence OpenCode config that bypasses the proxy', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-doctor-override-'));
+    try {
+      const result = await runDoctor(
+        { home, repoRoot: '/repo/imgtokenx', nodePath: '/node', skipMcp: true },
+        {
+          fetch: (async () => new Response('{}', { status: 200 })) as typeof fetch,
+          spawnSync: ((cmd: string) => cmd === 'opencode'
+            ? {
+                status: 0,
+                stdout: JSON.stringify({
+                  provider: { opencode: { options: { baseURL: 'https://override.example.test' } } },
+                }),
+                stderr: '',
+              }
+            : { status: 0, stdout: '', stderr: '' }) as any,
+        },
+      );
+      const check = result.checks.find((item) => item.name === 'OpenCode proxy');
+      expect(check?.status).toBe('fail');
+      expect(check?.detail).toContain('effective provider.opencode.options.baseURL');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -217,9 +217,11 @@ imgtokenx stays cache-aligned by replacing stable text context with stable image
 ## OpenAI Responses: Codex And OpenCode
 
 imgtokenx supports `/v1/responses` and OpenAI-compatible chat-completions
-traffic. This includes Codex in API/OpenAI-compatible mode and OpenCode when
-their base URL points at the proxy. Codex App sessions authenticated through a
-ChatGPT subscription bypass the terminal wrapper and do not appear here.
+traffic. This includes Codex in API/OpenAI-compatible mode. OpenCode's official
+Zen provider has a separate `/opencode/*` route supporting Messages, Responses,
+and Chat Completions without borrowing Anthropic/OpenAI credentials. Codex App
+sessions authenticated through a ChatGPT subscription bypass the terminal
+wrapper and do not appear here.
 
 The OpenAI-shaped transform can image two buckets: the static slab (system,
 tool documentation, and other stable context) and, when its closed prefix is
@@ -270,3 +272,27 @@ For a low Saved percentage:
 2. Compare `cached_tokens` with `input_tokens`; near 100% leaves little uncached text to beat.
 3. Check `history_reason`; `collapsed` is where larger history savings begin.
 4. Compare like client shapes. A warm Responses session and Claude Code can use the same model while sending materially different requests.
+
+## Provider-Neutral Virtual Context
+
+The optional `dedup`, `lazy`, and `state` modes run before either provider's
+image transform. They reduce transmitted text by replacing exact bulk with a
+local SHA-256 handle, a bounded preview, or a validated state snapshot. A
+virtualized result is left as native text and is not also charged as an image.
+
+This is separate from prompt caching:
+
+- prompt caching discounts a stable prefix that is still sent to the provider;
+- virtual context omits exact cold bulk and makes it available on demand through
+  the local MCP server;
+- image rendering reduces the model-token representation of profitable bulk
+  that remains in the request.
+
+The event stream records virtualized source/removed/preview/state character
+counts, artifact candidate/write counts, checkpoint status, and fail-open
+status. It never stores artifact content or paths. These character counters are
+diagnostics, not fabricated provider tokens. Actual response usage and the
+existing provider-specific baseline remain the billing authority, so caching,
+virtualization, and imaging are not credited twice. OpenCode Zen rows without a
+provider counterfactual report the transformation counters but do not invent a
+dollar saving.

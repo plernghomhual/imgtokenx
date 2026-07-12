@@ -7,6 +7,16 @@ behavioral changes, patch = fixes).
 ## Unreleased
 
 ### Added
+- Added opt-in provider-neutral virtual context (`off`, `dedup`, `lazy`,
+  `state`): private content-addressed artifacts, deterministic previews,
+  same-origin exact deltas, exact range/search/diff retrieval, proof-carrying state checkpoints,
+  bounded read-only workspace inspection, privacy-safe telemetry, and optional
+  non-echo output guidance. The default remains `off` pending workload evals.
+- Added first-class OpenCode Zen routing at `/opencode/*` for Messages, Chat
+  Completions, and Responses. Install/doctor/uninstall now manage only
+  `provider.opencode.options.baseURL` transactionally while preserving user
+  credentials and later edits, honor `OPENCODE_CONFIG`/existing JSONC, and
+  verify the resolved effective config; Z.ai Coding Plan is intentionally excluded.
 - Calibrated reader profiles for `claude-sonnet-5*` and `claude-haiku-4-5*` at
   the 20x32 cell (same as Opus 4.x). 2026-07-10 keyless sweep: both models read
   the reader-capacity fixture 6/6 only at 20x32; every smaller density
@@ -22,6 +32,13 @@ behavioral changes, patch = fixes).
   reader state without enabling imaging implicitly.
 
 ### Security / Correctness
+- Virtualized results stay native text and are never imaged a second time;
+  artifact/checkpoint failures preserve the original request. Artifact storage
+  uses full SHA-256 handles, atomic private files, integrity checks, bounded
+  operations, symlink rejection, and existing age/byte retention.
+- Slab imaging is now all-or-nothing under the shared request image budget, and
+  Worker numeric environment values reject whitespace, fractions, negatives,
+  unsafe integers, and out-of-range geometry.
 - Completed the pre-production hardening pass: provider-prefixed routing and
   credentials are isolated, request bodies and response inspection are bounded,
   disconnects cancel upstream work, Worker lifecycle tasks use `waitUntil`, SSE

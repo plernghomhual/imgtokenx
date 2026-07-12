@@ -358,6 +358,26 @@ export function renderHeaderFragment(s: StatsPayload, port: number): string {
     mathRow('measured_redacted_blocks', s.measured_redacted_block_count, '(opaque encrypted blocks — billed but unmeasurable)') +
     `<span class="src">measured — no estimation</span>`;
 
+  const virtualContextMath =
+    mathRow('artifact_candidates', s.artifact_candidates, '(large/repeated exact tool results)') +
+    mathRow('artifact_writes', s.artifact_writes, '(content-addressed, duplicates stored once)') +
+    mathRow('source_chars_virtualized', s.source_chars_virtualized, '(exact source moved behind handles)') +
+    mathRow('virtualized_chars_removed', s.virtualized_chars_removed, '(net request characters removed)') +
+    mathRow('duplicate_chars_removed', s.duplicate_chars_removed, '(net repeated source removed)') +
+    mathRow('preview_chars_sent', s.preview_chars_sent, '(bounded head/error/tail context)') +
+    mathRow('delta_artifacts', s.delta_artifacts, '(same-origin changes sent as exact deltas)') +
+    mathRow('delta_chars_sent', s.delta_chars_sent, '(exact delta payload characters)') +
+    mathRow('delta_chars_removed', s.delta_chars_removed, '(net source characters omitted by deltas)') +
+    mathRow('checkpoints_applied', s.checkpoints_applied, '(validated proof-carrying state)') +
+    mathRow('state_chars_removed', s.state_chars_removed, '(old narrative replaced by current state)') +
+    mathRow('checkpoint_rejections', s.checkpoint_rejections, '(history preserved)') +
+    mathRow('fail_open_requests', s.virtual_context_fail_open, '(original request preserved)') +
+    mathRow('context_tool_calls', s.context_tool_calls, '(search/fetch/diff/checkpoint operations)') +
+    mathRow('context_tool_successes', s.context_tool_successes, '(successful exact-context operations)') +
+    mathRow('context_result_chars', s.context_result_chars, '(characters returned on successful calls)') +
+    mathRow('workspace_inspect_calls', s.workspace_inspect_calls, '(bounded read-only searches)') +
+    `<span class="src">local counters only — artifact contents never enter telemetry</span>`;
+
   const drawer =
     `<details class="drawer" id="math-drawer">` +
     `<summary>Show the math &amp; honesty receipts</summary>` +
@@ -368,6 +388,7 @@ export function renderHeaderFragment(s: StatsPayload, port: number): string {
     mathBlock('Compressed vs passthrough, per request', splitMath) +
     mathBlock('Share of total spend (diagnostic)', pctMath) +
     mathBlock('Token-equivalent (what the weekly cap counts)', tokeqMath) +
+    mathBlock('Virtual context', virtualContextMath) +
     `</div></details>`;
 
   // NOTE: tests assert the header fragment contains the port number.

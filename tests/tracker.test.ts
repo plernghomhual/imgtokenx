@@ -205,6 +205,51 @@ describe('toTrackEvent', () => {
     });
   });
 
+  it('surfaces privacy-safe virtual-context telemetry', () => {
+    const out = toTrackEvent({
+      method: 'POST',
+      path: '/v1/responses',
+      status: 200,
+      durationMs: 25,
+      info: transformInfo({
+        virtualContextMode: 'lazy',
+        artifactCandidates: 4,
+        artifactWrites: 2,
+        sourceCharsVirtualized: 20_000,
+        virtualizedCharsRemoved: 14_000,
+        duplicateCharsRemoved: 12_000,
+        previewCharsSent: 6_000,
+        deltaArtifacts: 2,
+        deltaCharsSent: 700,
+        deltaCharsRemoved: 8_000,
+        checkpointApplied: true,
+        stateCharsRemoved: 5_000,
+        virtualContextFailOpen: false,
+        contextToolCalls: 4,
+        contextToolSuccesses: 3,
+        contextResultChars: 2_500,
+        workspaceInspectCalls: 2,
+      }),
+    });
+    expect(out.virtual_context_mode).toBe('lazy');
+    expect(out.artifact_candidates).toBe(4);
+    expect(out.artifact_writes).toBe(2);
+    expect(out.source_chars_virtualized).toBe(20_000);
+    expect(out.virtualized_chars_removed).toBe(14_000);
+    expect(out.duplicate_chars_removed).toBe(12_000);
+    expect(out.preview_chars_sent).toBe(6_000);
+    expect(out.delta_artifacts).toBe(2);
+    expect(out.delta_chars_sent).toBe(700);
+    expect(out.delta_chars_removed).toBe(8_000);
+    expect(out.checkpoint_applied).toBe(true);
+    expect(out.state_chars_removed).toBe(5_000);
+    expect(out.virtual_context_fail_open).toBeUndefined();
+    expect(out.context_tool_calls).toBe(4);
+    expect(out.context_tool_successes).toBe(3);
+    expect(out.context_result_chars).toBe(2_500);
+    expect(out.workspace_inspect_calls).toBe(2);
+  });
+
   it('omits bucket_chars when no gates fired and the bucket map is empty', () => {
     // Pass-through requests (compress=false, parse errors) never call
     // bumpBucket. `info.bucketChars` either stays undefined or — if

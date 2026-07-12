@@ -7,6 +7,11 @@ import { transformRequest, type TransformOptions, type TransformInfo } from './t
 import { transformOpenAIChatCompletions, transformOpenAIResponses } from './openai.js';
 import { isAnthropicMessagesPath, isImgtokenxSupportedGptModel, isImgtokenxSupportedModel } from './applicability.js';
 import { resolveReaderProfile } from './reader-profiles.js';
+import {
+  virtualizeRequestBody,
+  type VirtualArtifactStore,
+  type VirtualContextInfo,
+} from './virtual-context.js';
 import { redactErrorBody } from './redact.js';
 import { healthzResponse } from './healthz.js';
 import {
@@ -31,6 +36,11 @@ export interface ProxyConfig {
   openAIUpstream?: string;
   /** Override or supply an OpenAI API key. If unset, we forward Authorization. */
   openAIApiKey?: string;
+  /** OpenCode Zen API base. `/opencode/*` always routes here with caller auth. */
+  openCodeUpstream?: string;
+  /** Durable local store used by `transform.virtualContext`. Omit on edge
+   *  runtimes; virtualization then fails open to the original request. */
+  virtualArtifactStore?: VirtualArtifactStore;
   /** Pass a function to inject dynamic values per-request (e.g. live charsPerToken);
    *  static object for Workers/tests. */
   transform?: TransformOptions | (() => TransformOptions);
@@ -594,6 +604,7 @@ function teeForUsage(res: Response, signal?: AbortSignal): {
 
 const DEFAULT_UPSTREAM = 'https://api.anthropic.com';
 const DEFAULT_OPENAI_UPSTREAM = 'https://api.openai.com';
+const DEFAULT_OPENCODE_UPSTREAM = 'https://opencode.ai/zen';
 
 /** Headers we strip on the way out — they're hop-by-hop or proxy-injected. */
 const STRIP_REQ_HEADERS = new Set([
@@ -648,6 +659,16 @@ function stripProviderPrefix(pathname: string): string {
     }
   }
   return pathname;
+}
+
+function isOpenCodePath(pathname: string): boolean {
+  return pathname === '/opencode' || pathname.startsWith('/opencode/');
+}
+
+function stripOpenCodePrefix(pathname: string): string {
+  if (pathname === '/opencode') return '/';
+  const stripped = pathname.slice('/opencode'.length);
+  return stripped.startsWith('/') ? stripped : `/${stripped}`;
 }
 
 function isOpenAIChatPath(pathname: string): boolean {
@@ -783,8 +804,10 @@ function isAbortError(e: unknown, signal?: AbortSignal): boolean {
 export function resolveUpstreams(config: ProxyConfig): {
   anthropic: string;
   openai: string;
+  opencode: string;
   stripOpenAIV1: boolean;
 } {
+  const opencode = (config.openCodeUpstream ?? DEFAULT_OPENCODE_UPSTREAM).replace(/\/+$/, '');
   if (config.provider === 'cloudflare-ai-gateway') {
     const base = (config.gatewayBaseUrl ?? '').replace(/\/+$/, '');
     if (!base) {
@@ -792,11 +815,17 @@ export function resolveUpstreams(config: ProxyConfig): {
         "provider 'cloudflare-ai-gateway' requires gatewayBaseUrl (IMGTOKENX_GATEWAY_BASE_URL)",
       );
     }
-    return { anthropic: `${base}/anthropic`, openai: `${base}/openai`, stripOpenAIV1: true };
+    return {
+      anthropic: `${base}/anthropic`,
+      openai: `${base}/openai`,
+      opencode,
+      stripOpenAIV1: true,
+    };
   }
   return {
     anthropic: (config.upstream ?? DEFAULT_UPSTREAM).replace(/\/+$/, ''),
     openai: (config.openAIUpstream ?? DEFAULT_OPENAI_UPSTREAM).replace(/\/+$/, ''),
+    opencode,
     stripOpenAIV1: false,
   };
 }
@@ -825,6 +854,7 @@ export function createProxy(config: ProxyConfig = {}) {
   const routes = resolveUpstreams(config);
   const upstream = routes.anthropic;
   const openAIUpstream = routes.openai;
+  const openCodeUpstream = routes.opencode;
   const passthroughUpstream = config.provider === 'cloudflare-ai-gateway'
     ? (config.gatewayBaseUrl ?? '').replace(/\/+$/, '')
     : upstream;
@@ -977,10 +1007,18 @@ export function createProxy(config: ProxyConfig = {}) {
 
     // Transform only known shapes; everything else passes through.
     const providerPrefixed = isProviderPrefixedPath(url.pathname);
-    const isMessages = req.method === 'POST' && isAnthropicMessagesPath(url.pathname);
-    const isOpenAIChat = req.method === 'POST' && isOpenAIChatPath(url.pathname);
-    const isOpenAIResponses = req.method === 'POST' && isOpenAIResponsesPath(url.pathname);
-    const isOpenAIPath = isCanonicalOpenAIPath(
+    const isOpenCodeRequest = isOpenCodePath(url.pathname);
+    const dialectPath = isOpenCodeRequest ? stripOpenCodePrefix(url.pathname) : url.pathname;
+    const isMessages = req.method === 'POST' && (isOpenCodeRequest
+      ? dialectPath === '/v1/messages'
+      : isAnthropicMessagesPath(url.pathname));
+    const isOpenAIChat = req.method === 'POST' && (isOpenCodeRequest
+      ? dialectPath === '/v1/chat/completions'
+      : isOpenAIChatPath(url.pathname));
+    const isOpenAIResponses = req.method === 'POST' && (isOpenCodeRequest
+      ? dialectPath === '/v1/responses'
+      : isOpenAIResponsesPath(url.pathname));
+    const isOpenAIPath = !isOpenCodeRequest && isCanonicalOpenAIPath(
       url.pathname,
       req.headers,
     );
@@ -992,7 +1030,9 @@ export function createProxy(config: ProxyConfig = {}) {
       config.provider !== 'cloudflare-ai-gateway'
       && routes.anthropic === DEFAULT_UPSTREAM
       && routes.openai === DEFAULT_OPENAI_UPSTREAM;
-    const upstreamBase = !providerPrefixed
+    const upstreamBase = isOpenCodeRequest
+      ? openCodeUpstream
+      : !providerPrefixed
       ? (isOpenAIPath ? openAIUpstream : upstream)
       : canonicalDefault
         ? (isOpenAIPath ? openAIUpstream : passthroughUpstream)
@@ -1030,6 +1070,16 @@ export function createProxy(config: ProxyConfig = {}) {
       try {
         const transformOpts =
           typeof config.transform === 'function' ? config.transform() : config.transform;
+        const virtualMode = transformOpts?.virtualContext ?? 'off';
+        const virtualized = await virtualizeRequestBody(bodyIn, {
+          dialect: isMessages
+            ? 'anthropic'
+            : isOpenAIChat ? 'openai-chat' : 'openai-responses',
+          mode: virtualMode,
+          outputEfficiency: transformOpts?.outputEfficiency ?? false,
+          store: config.virtualArtifactStore,
+        });
+        const transformBody = virtualized.body;
         // Fail-closed: unreadable model → no compression, not a risky guess.
         const model = readModelField(bodyIn);
         requestModel = model ?? undefined;
@@ -1040,15 +1090,50 @@ export function createProxy(config: ProxyConfig = {}) {
         const modelOk = inScope && readerSafe;
         // Unsupported model → a true passthrough: no break-even compression
         // (a text-only model may not accept injected image blocks at all).
+        const virtualToolChanged = virtualized.info.virtualizedCharsRemoved > 0;
+        const virtualStateChanged = virtualized.info.checkpointApplied;
+        const protectVirtualText = virtualToolChanged || virtualStateChanged;
         const effectiveOpts = modelOk
-          ? transformOpts
+          ? protectVirtualText
+            ? {
+                ...transformOpts,
+                // Virtualized results already have a compact text representation
+                // plus an exact artifact handle. Imaging that representation would
+                // charge for the same content twice and hide the retrieval handle.
+                compressToolResults: false,
+                // A validated state checkpoint is the intentional history boundary;
+                // keep it, the artifact handles, and the live tail native and
+                // inspectable instead of re-rendering them into OCR-only history.
+                collapseHistory: false,
+              }
+            : transformOpts
           : { ...transformOpts, compress: false };
         const r = isMessages
-          ? await transformRequest(bodyIn, effectiveOpts)
+          ? await transformRequest(transformBody, effectiveOpts)
           : isOpenAIChat
-            ? await transformOpenAIChatCompletions(bodyIn, effectiveOpts)
-            : await transformOpenAIResponses(bodyIn, effectiveOpts);
-        if (!modelOk) {
+            ? await transformOpenAIChatCompletions(transformBody, effectiveOpts)
+            : await transformOpenAIResponses(transformBody, effectiveOpts);
+        const virtualInfo: VirtualContextInfo = virtualized.info;
+        r.info.virtualContextMode = virtualMode;
+        r.info.artifactCandidates = virtualInfo.artifactCandidates;
+        r.info.artifactWrites = virtualInfo.artifactWrites;
+        r.info.sourceCharsVirtualized = virtualInfo.sourceCharsVirtualized;
+        r.info.virtualizedCharsRemoved = virtualInfo.virtualizedCharsRemoved;
+        r.info.duplicateCharsRemoved = virtualInfo.duplicateCharsRemoved;
+        r.info.previewCharsSent = virtualInfo.previewCharsSent;
+        r.info.deltaArtifacts = virtualInfo.deltaArtifacts;
+        r.info.deltaCharsSent = virtualInfo.deltaCharsSent;
+        r.info.deltaCharsRemoved = virtualInfo.deltaCharsRemoved;
+        r.info.checkpointApplied = virtualInfo.checkpointApplied;
+        r.info.stateCharsRemoved = virtualInfo.stateCharsRemoved;
+        if (virtualInfo.checkpointRejected) r.info.checkpointRejected = true;
+        if (virtualInfo.failOpen) r.info.virtualContextFailOpen = true;
+        const virtualChanged = virtualInfo.virtualizedCharsRemoved > 0
+          || virtualInfo.stateCharsRemoved > 0;
+        if (virtualChanged) {
+          r.info.compressed = true;
+          if (!modelOk) r.info.reason = 'virtualized_text';
+        } else if (!modelOk) {
           r.info.reason = inScope ? 'reader_profile_unsafe' : 'unsupported_model';
           if (inScope) r.info.passthroughReasons = { reader_profile_unsafe: 1 };
         }
@@ -1059,7 +1144,7 @@ export function createProxy(config: ProxyConfig = {}) {
           reqBodySha8 = await sha8Bytes(r.body);
         }
 
-        if (isMessages) {
+        if (isMessages && !isOpenCodeRequest) {
           baselineStatusApplies = true;
           // Probes fire on the ORIGINAL body before the main forward so all three overlap.
           // count_tokens is not billed; ~30-80ms latency is hidden by the main forward.
@@ -1136,14 +1221,17 @@ export function createProxy(config: ProxyConfig = {}) {
     }
 
     const outHeaders = filterHeaders(req.headers, STRIP_REQ_HEADERS);
-    if (isOpenAIPath) {
+    if (isOpenCodeRequest) {
+      // Zen credentials belong to the caller. Never replace them with an
+      // Anthropic/OpenAI override or inject gateway headers.
+    } else if (isOpenAIPath) {
       outHeaders.delete('x-api-key');
       if (config.openAIApiKey) outHeaders.set('authorization', `Bearer ${config.openAIApiKey}`);
     } else if (config.apiKey && (!providerPrefixed || url.pathname.startsWith('/anthropic/'))) {
       outHeaders.set('x-api-key', config.apiKey);
     }
 
-    applyGatewayHeaders(outHeaders);
+    if (!isOpenCodeRequest) applyGatewayHeaders(outHeaders);
 
     // Direct OpenAI clients may point at either http://proxy or http://proxy/v1.
     // Root aliases are normalized to OpenAI's /v1 upstream. Gateway OpenAI
@@ -1170,8 +1258,10 @@ export function createProxy(config: ProxyConfig = {}) {
       && (isAnthropicPrefix || isOpenAIPrefix);
     // Provider-prefixed OpenAI routes strip to `/v1/chat/completions` etc.
     // and normalize via openAIUpstreamPath (root aliases, /v1 drop).
-    const relPath = stripPrefix ? stripProviderPrefix(url.pathname) : url.pathname;
-    const outPath = isOpenAIPath
+    const relPath = isOpenCodeRequest
+      ? dialectPath
+      : stripPrefix ? stripProviderPrefix(url.pathname) : url.pathname;
+    const outPath = !isOpenCodeRequest && isOpenAIPath
       ? openAIUpstreamPath(relPath, url.search, routes.stripOpenAIV1)
       : relPath + url.search;
     const upstreamUrl = upstreamBase + outPath;

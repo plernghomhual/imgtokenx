@@ -74,6 +74,176 @@ describe('install — atomic write + rollback', () => {
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
+  it('wires OpenCode Zen while preserving config, then restores the previous baseURL', () => {
+    const file = path.join(fx.home, '.config', 'opencode', 'opencode.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      provider: {
+        opencode: {
+          apiKey: 'keep-provider-credential',
+          options: { baseURL: 'https://previous.example.test', timeout: 9000 },
+        },
+        other: { options: { baseURL: 'https://other.example.test' } },
+      },
+      mcp: { existing: { command: ['keep-me'] } },
+      theme: 'keep-theme',
+    }));
+
+    runInstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    const installed = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    expect(installed.provider.opencode.options.baseURL).toBe('http://127.0.0.1:47899/opencode');
+    expect(installed.provider.opencode.apiKey).toBe('keep-provider-credential');
+    expect(installed.provider.opencode.options.timeout).toBe(9000);
+    expect(installed.provider.other.options.baseURL).toBe('https://other.example.test');
+    expect(installed.mcp.existing.command).toEqual(['keep-me']);
+    expect(installed.theme).toBe('keep-theme');
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+
+    runUninstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    const restored = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    expect(restored.provider.opencode.options.baseURL).toBe('https://previous.example.test');
+    expect(restored.provider.opencode.apiKey).toBe('keep-provider-credential');
+    expect(restored.provider.opencode.options.timeout).toBe(9000);
+    expect(restored.provider.other.options.baseURL).toBe('https://other.example.test');
+    expect(restored.mcp.existing.command).toEqual(['keep-me']);
+    expect(restored.mcp['imgtokenx-recover']).toBeUndefined();
+    expect(restored.theme).toBe('keep-theme');
+  });
+
+  it('uses an explicit OpenCode config and remembers that path for uninstall', () => {
+    const file = path.join(fx.home, 'custom', 'opencode.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      provider: { opencode: { options: { baseURL: 'https://before.example.test' } } },
+    }));
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      openCodeConfigPath: file,
+      spawnSync: processOk,
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).provider.opencode.options.baseURL)
+      .toBe('http://127.0.0.1:47899/opencode');
+
+    // No explicit path on uninstall: the private ownership receipt selects
+    // the file that install actually changed.
+    runUninstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).provider.opencode.options.baseURL)
+      .toBe('https://before.example.test');
+  });
+
+  it('uses an existing strict-JSON opencode.jsonc and refuses lossy JSONC rewrites', () => {
+    const dir = path.join(fx.home, '.config', 'opencode');
+    const file = path.join(dir, 'opencode.jsonc');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ theme: 'keep', provider: {} }));
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).provider.opencode.options.baseURL)
+      .toBe('http://127.0.0.1:47899/opencode');
+    runUninstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+    });
+
+    const commented = '{\n  // keep this comment\n  "theme": "keep",\n}\n';
+    fs.writeFileSync(file, commented);
+    expect(() => runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+    })).toThrow(/cannot safely rewrite commented\/trailing-comma JSONC/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(commented);
+    expect(fs.existsSync(path.join(fx.home, 'Library', 'LaunchAgents', 'com.imgtokenx.proxy.plist')))
+      .toBe(false);
+  });
+
+  it('does not overwrite a baseURL the user changed after install', () => {
+    const file = path.join(fx.home, '.config', 'opencode', 'opencode.json');
+    runInstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    cfg.provider.opencode.options.baseURL = 'https://user-change.example.test';
+    fs.writeFileSync(file, JSON.stringify(cfg));
+
+    runUninstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    const after = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    expect(after.provider.opencode.options.baseURL).toBe('https://user-change.example.test');
+  });
+
+  it('wires and removes only the owned baseURL when MCP setup is skipped', () => {
+    const file = path.join(fx.home, '.config', 'opencode', 'opencode.json');
+    runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+      skipMcp: true,
+    });
+    const installed = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    expect(installed.provider.opencode.options.baseURL).toBe('http://127.0.0.1:47899/opencode');
+    expect(installed.mcp).toBeUndefined();
+
+    runUninstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: processOk,
+      skipMcp: true,
+    });
+    const after = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+    expect(after.provider).toBeUndefined();
+    expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'opencode-baseurl.json'))).toBe(false);
+  });
+
+  it('rolls back OpenCode config and ownership state when a later install step fails', () => {
+    const file = path.join(fx.home, '.config', 'opencode', 'opencode.json');
+    const before = JSON.stringify({
+      provider: { opencode: { options: { baseURL: 'https://previous.example.test' } } },
+      keep: true,
+    });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, before);
+
+    expect(() => runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      nodePath: '/usr/bin/node',
+      port: 47899,
+      spawnSync: () => ({ status: 1, stderr: 'forced failure', stdout: '' }),
+    })).toThrow(/forced failure/);
+
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(JSON.parse(before));
+    expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'opencode-baseurl.json'))).toBe(false);
+  });
+
   it('preserves the previous zshrc when re-running install', () => {
     const zshrc = path.join(fx.home, '.zshrc');
     const before = 'export PATH=/usr/bin\nexport EDITOR=vim\n';
