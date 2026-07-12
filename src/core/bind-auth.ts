@@ -23,11 +23,8 @@
  *      `localhost` workflow keeps working. Off-host callers must present
  *      `Authorization: Bearer <IMGTOKENX_PROXY_TOKEN>` (proxy routes) or
  *      `<IMGTOKENX_DASHBOARD_TOKEN>` (dashboard routes). Plain-string
- *      compare for /healthz (Batch 11) is documented as sufficient for
- *      >=32-char ops tokens; this layer reuses the same primitive so
- *      operator mental model is consistent. Worker-side keeps its
- *      separate `IMGTOKENX_WORKER_SECRET` (per worker.ts) — we don't
- *      rewrite that contract in this batch.
+ *      comparison is shared with /healthz through secret-compare.ts.
+ *      Worker-side keeps its separate `IMGTOKENX_WORKER_SECRET` contract.
  *
  * Defaults: when `IMGTOKENX_ALLOWED_HOSTS` is unset, the proxy + dashboard
  * accept the loopback variants (127.0.0.1:<port>, [::1]:<port>,
@@ -35,6 +32,8 @@
  * threat model. Set `IMGTOKENX_ALLOWED_HOSTS=foo.example.com,bar.example.com`
  * to opt into a public deployment.
  */
+
+import { timingSafeEqualStr } from './secret-compare.js';
 
 export interface BindAuthRequest {
   /** HTTP method (any — the gate applies regardless). */
@@ -176,20 +175,6 @@ export function bindAuthResponse(req: BindAuthRequest, opts: BindAuthOpts): Resp
     });
   }
   return null;
-}
-
-/** Constant-time string compare (pure JS — this module is runtime-agnostic,
- *  so no node:crypto.timingSafeEqual and no async crypto.subtle like
- *  worker.ts's secretsMatch). XOR-folds over the presented value's full
- *  length; only the expected value's length is observable, and that isn't
- *  secret material. */
-function timingSafeEqualStr(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  const bLen = Math.max(b.length, 1);
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i % bLen);
-  }
-  return diff === 0;
 }
 
 function reject(detail: string, status: number, extra: Record<string, string> = {}): Response {

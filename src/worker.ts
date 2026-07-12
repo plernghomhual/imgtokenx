@@ -13,6 +13,7 @@
 
 import { createProxy, type ProxyConfig } from './core/proxy.js';
 import { DENSE_CONTENT_COLS, maxFittingCols } from './core/render.js';
+import { secretsMatch } from './core/secret-compare.js';
 import type { TransformOptions } from './core/transform.js';
 import { toTrackEvent, JsonLogTracker, noopTracker, type Tracker } from './core/tracker.js';
 
@@ -58,21 +59,6 @@ export interface Env {
    *    npx wrangler secret put IMGTOKENX_HEALTHZ_TOKEN */
   IMGTOKENX_HEALTHZ_TOKEN?: string;
   MAX_REQUEST_BODY_BYTES?: string;
-}
-
-/** Compare SHA-256 digests instead of the raw strings so the comparison
- *  can't leak a prefix-match timing signal. */
-async function secretsMatch(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [da, db] = await Promise.all([
-    crypto.subtle.digest('SHA-256', enc.encode(a)),
-    crypto.subtle.digest('SHA-256', enc.encode(b)),
-  ]);
-  const va = new Uint8Array(da);
-  const vb = new Uint8Array(db);
-  let diff = 0;
-  for (let i = 0; i < va.length; i++) diff |= (va[i] ?? 0) ^ (vb[i] ?? 0);
-  return diff === 0;
 }
 
 const truthy = (v: string | undefined, fallback: boolean): boolean =>

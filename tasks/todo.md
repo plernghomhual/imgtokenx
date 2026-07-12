@@ -1,3 +1,20 @@
+# 2026-07-12 — Deferred hardening workstreams (A → B → D → C)
+
+- [x] A. Unify secret comparison and cover both helpers.
+- [ ] B. Split recovery-sidecar and context-artifact retention budgets.
+- [ ] D. Pin and verify checked-in dashboard vendor bundle hashes.
+- [ ] C. Harden installer locking, platform/shell detection, and backup pruning.
+- [ ] Run the full `npx --yes pnpm run check` gate and audit the final diff.
+
+## Review
+
+- Files changed: pending.
+- Behavior changed: pending.
+- Verification performed: pending.
+- Remaining risks: pending.
+
+---
+
 # imgtokenx Codex/OpenCode Compatibility
 
 - [x] Scout existing proxy endpoint and env handling.

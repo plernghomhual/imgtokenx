@@ -30,6 +30,8 @@
  * captures correctly.
  */
 
+import { timingSafeEqualStr } from './secret-compare.js';
+
 /** Build-time constants injected by scripts/build.mjs. Source reads them at
  *  the top of this module so the SAME getter powers Worker and Node without
  *  duplicating the `typeof` guard. */
@@ -127,12 +129,8 @@ export function healthzResponse(req: HealthzRequest): Response {
       );
     }
     const presented = req.headers.get('authorization') ?? '';
-    // Constant-string compare. Tokens are >=32 chars (operators set them long
-    // enough that prefix-timing is not a real concern) and the loopback
-    // bypass covers local operators entirely. SHA-256 timing-safe compare is
-    // reserved for the worker.ts secret (where prefix timing IS a concern):
-    //     secretsMatch(a, b) in src/worker.ts
-    if (presented !== `Bearer ${envToken}`) {
+    // Runtime-agnostic constant-time string compare; see secret-compare.ts.
+    if (!timingSafeEqualStr(presented, `Bearer ${envToken}`)) {
       return jsonError('unauthorized', 401, {
         'www-authenticate': 'Bearer realm="imgtokenx"',
       });
