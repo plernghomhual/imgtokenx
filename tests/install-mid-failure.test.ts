@@ -82,6 +82,7 @@ const launchAgentPath = (home: string): string =>
   path.join(home, 'Library', 'LaunchAgents', 'com.imgtokenx.proxy.plist');
 const envPath = (home: string): string =>
   path.join(home, '.imgtokenx', 'env.sh');
+const macZsh = { platform: 'darwin', shell: '/bin/zsh' } as const;
 
 interface HomeFixture {
   home: string;
@@ -117,6 +118,7 @@ describe('install — rollback removes net-new plist + env.sh when launchctl boo
   it('throws AND rolls back plist + env.sh (net-new files)', async () => {
     const install = await import('../src/install.js');
     expect(() => install.runInstall({
+      ...macZsh,
       home: fx.home,
       repoRoot: fx.repoRoot,
       nodePath: '/usr/bin/node',
@@ -169,6 +171,7 @@ describe('uninstall — claude mcp remove failure is tolerated; uninstall stays 
 
     const install = await import('../src/install.js');
     const result = install.runUninstall({
+      ...macZsh,
       home: fx.home,
       repoRoot: fx.repoRoot,
       port: 47899,
@@ -196,6 +199,7 @@ describe('install — ENOENT (missing CLI) is silently tolerated, audit D20', ()
     // should still be able to run `imgtokenx install`. The mocked claude
     // mcp add returns r.status:null + r.error.code:'ENOENT'.
     const result = install.runInstall({
+      ...macZsh,
       home: fx.home,
       repoRoot: fx.repoRoot,
       nodePath: '/usr/bin/node',
@@ -232,6 +236,7 @@ describe('install — EACCES (non-ENOENT exec error) DOES throw + rollback, audi
     // status:null on spawn errors (EACCES, EPERM, ELIBBAD, ...) that the
     // old `(r.status ?? 0) !== 0` short-circuit silently dropped.
     expect(() => install.runInstall({
+      ...macZsh,
       home: fx.home,
       repoRoot: fx.repoRoot,
       nodePath: '/usr/bin/node',

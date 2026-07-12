@@ -3,7 +3,7 @@
 - [x] A. Unify secret comparison and cover both helpers.
 - [x] B. Split recovery-sidecar and context-artifact retention budgets.
 - [x] D. Pin and verify checked-in dashboard vendor bundle hashes.
-- [ ] C. Harden installer locking, platform/shell detection, and backup pruning.
+- [x] C. Harden installer locking, platform/shell detection, and backup pruning.
 - [ ] Run the full `npx --yes pnpm run check` gate and audit the final diff.
 
 ## Review

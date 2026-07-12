@@ -64,9 +64,9 @@ For local auto-start, install the launchd agent and shell wrappers:
 
 ```bash
 imgtokenx install --dry-run  # preview plist, ~/.imgtokenx/env.sh, MCP registrations
-imgtokenx install            # writes launchd + ~/.zshrc source block
-imgtokenx doctor             # checks launchd/env/zshrc/healthz/MCP wiring
-imgtokenx uninstall          # removes the launchd/env/zshrc wiring
+imgtokenx install            # writes launchd + shell startup source block
+imgtokenx doctor             # checks launchd/env/shell/healthz/MCP wiring
+imgtokenx uninstall          # removes the launchd/env/shell wiring
 ```
 
 The generated wrappers health-check <http://127.0.0.1:47821/healthz>, kickstart
@@ -76,7 +76,11 @@ launchd or start a local fallback process, then run `claude`, `codex`, or
 including credentials; uninstall restores the prior value unless the user changed
 it later. It honors `OPENCODE_CONFIG`, selects an existing global
 `opencode.jsonc` when no JSON file exists, and refuses to rewrite commented JSONC
-instead of destroying comments. `imgtokenx doctor` checks OpenCode's resolved
+instead of destroying comments. On macOS, zsh uses `~/.zshrc` and bash uses
+`~/.bash_profile`; unknown
+shells fall back to `~/.zshrc` with a manual-source warning. Non-macOS hosts use
+the manual proxy setup above because `imgtokenx install` requires launchd.
+`imgtokenx doctor` checks OpenCode's resolved
 `debug config --pure` output, so project, inline, and managed overrides cannot
 produce a false pass. `IMGTOKENX_DISABLE=1 <tool>` bypasses the wrapper for one launch. The
 dashboard kill switch writes

@@ -104,6 +104,25 @@ describe('install artifacts', () => {
     expect(applyZshrcUninstall(once)).toBe(original);
   });
 
+  it('selects the macOS shell rc file and warns for unknown shells', () => {
+    const bash = buildInstallPlan({
+      home: '/tmp/home',
+      repoRoot: '/repo/imgtokenx',
+      platform: 'darwin',
+      shell: '/bin/bash',
+    });
+    expect(bash.zshrcPath).toBe('/tmp/home/.bash_profile');
+
+    const unknown = buildInstallPlan({
+      home: '/tmp/home',
+      repoRoot: '/repo/imgtokenx',
+      platform: 'darwin',
+      shell: '/bin/fish',
+    });
+    expect(unknown.zshrcPath).toBe('/tmp/home/.zshrc');
+    expect(unknown.zshrcBlock).toContain('source env.sh manually');
+  });
+
   it('prepares MCP registrations for Claude, Codex, and OpenCode', () => {
     const plan = buildInstallPlan({
       home: '/tmp/home',

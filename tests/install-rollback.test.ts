@@ -7,9 +7,10 @@ import * as path from 'node:path';
 // at runtime via a dynamic waitForUs so a module-font failure doesn't
 // surface as a different test failure (keep diagnostics in this file).
 import {
-  runInstall,
-  runUninstall,
+  runInstall as runInstallRaw,
+  runUninstall as runUninstallRaw,
   parseInstallArgs,
+  type InstallOptions,
   type InstallResult,
 } from '../src/install.js';
 
@@ -24,6 +25,9 @@ const processOk: NonNullable<import('../src/install.js').InstallOptions['spawnSy
   stderr: '',
   status: 0,
 });
+const macZsh = { platform: 'darwin', shell: '/bin/zsh' } as const;
+const runInstall = (opts: InstallOptions = {}): InstallResult => runInstallRaw({ ...macZsh, ...opts });
+const runUninstall = (opts: InstallOptions = {}): InstallResult => runUninstallRaw({ ...macZsh, ...opts });
 
 function mkHomeFixture(label: string): HomeFixture {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `imgtokenx-${label}-`));
@@ -63,6 +67,64 @@ describe('install — atomic write + rollback', () => {
     const envDir = path.join(fx.home, '.imgtokenx');
     const envSiblings = fs.readdirSync(envDir).filter((n) => n.includes('.tmp.'));
     expect(envSiblings).toEqual([]);
+  });
+
+  it('serializes a concurrent uninstall and releases the lock after success', () => {
+    let nestedError: Error | undefined;
+    let attempted = false;
+    const spawnSync: NonNullable<InstallOptions['spawnSync']> = () => {
+      if (!attempted) {
+        attempted = true;
+        try {
+          runUninstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync: processOk });
+        } catch (error) {
+          nestedError = error as Error;
+        }
+      }
+      return { status: 0, stderr: '', stdout: '' };
+    };
+
+    runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync });
+
+    expect(nestedError?.message).toBe(
+      `another imgtokenx install/uninstall is running (pid ${process.pid})`,
+    );
+    expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'install.lock'))).toBe(false);
+  });
+
+  it('reclaims a stale lock once', () => {
+    const lock = path.join(fx.home, '.imgtokenx', 'install.lock');
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, '99999999\n');
+
+    runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync: processOk });
+
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('rejects non-macOS install and uninstall before writing files', () => {
+    for (const run of [runInstall, runUninstall]) {
+      expect(() => run({
+        home: fx.home,
+        repoRoot: fx.repoRoot,
+        platform: 'linux',
+        spawnSync: processOk,
+      })).toThrow('imgtokenx install supports macOS (launchd) only — see README for manual setup');
+    }
+    expect(fs.readdirSync(fx.home)).toEqual([]);
+  });
+
+  it('keeps only the five newest rc-file backups after success', () => {
+    const rc = path.join(fx.home, '.zshrc');
+    fs.writeFileSync(rc, 'export PATH=/usr/bin\n');
+    const seeded = Array.from({ length: 8 }, (_, i) => `.zshrc.bak.2020-01-${String(i + 1).padStart(2, '0')}`);
+    for (const name of seeded) fs.writeFileSync(path.join(fx.home, name), name);
+
+    runInstall({ home: fx.home, repoRoot: fx.repoRoot, spawnSync: processOk });
+
+    const remaining = fs.readdirSync(fx.home).filter((name) => name.startsWith('.zshrc.bak.'));
+    expect(remaining).toHaveLength(5);
+    expect(remaining).toEqual(expect.arrayContaining(seeded.slice(4)));
   });
 
   it('writes opencode.json owner-only (0600) — it can hold other tools\' MCP secrets', () => {
@@ -242,6 +304,7 @@ describe('install — atomic write + rollback', () => {
 
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(JSON.parse(before));
     expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'opencode-baseurl.json'))).toBe(false);
+    expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'install.lock'))).toBe(false);
   });
 
   it('rollback compensates live side effects: bootout + mcp remove after a late failure', () => {
