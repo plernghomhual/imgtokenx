@@ -1,3 +1,31 @@
+# 2026-07-12 — Residual risk closure
+
+- [x] Make install-lock ownership robust to PID reuse.
+- [x] Persist the installed shell RC path for uninstall.
+- [x] Ignore the local `.pnpm-store/` cache.
+- [x] Exercise pinned vendor fetching without changing checked-in bytes.
+- [x] Run focused and full verification, commit, and push `main`.
+
+## Review
+
+- Files changed: `.gitignore`, `README.md`, `src/install.ts`,
+  `tests/install-rollback.test.ts`, and this task record.
+- Behavior changed: install locks are published atomically with process-start
+  and owner identities, stale cleanup is serialized, and release cannot remove
+  a replacement lock. Install records its selected shell startup file so later
+  installs and uninstall use it even if `$SHELL` changes; legacy ownership is
+  discovered from existing managed blocks. The local pnpm store is ignored.
+- Verification performed: new regressions failed before implementation; focused
+  installer tests passed 38/38. A live `scripts/vendor-ui.mjs` fetch matched both
+  pins and left `src/dashboard/vendor.ts` unchanged. Final
+  `npx --yes pnpm run check`: typechecks passed; Vitest 1,047/1,047 (71 files);
+  build passed; restart 4/4; package smoke, Worker dry-run, and release check
+  passed.
+- Remaining risks: none known from this list. Process identity lookup relies on
+  `/bin/ps` on supported macOS and fails closed if identity cannot be confirmed.
+
+---
+
 # 2026-07-12 — Deferred hardening workstreams (A → B → D → C)
 
 - [x] A. Unify secret comparison and cover both helpers.
