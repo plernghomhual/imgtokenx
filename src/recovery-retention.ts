@@ -31,17 +31,33 @@ export interface RecoveryCaps {
   maxFiles: number;
 }
 
-/** Read caps from env each call (cheap; values fit in registers). Missing or
- *  non-numeric envs fall back to defaults; explicit `0` disables the cap. */
-export function readRecoveryCaps(): RecoveryCaps {
-  const age = readEnvNumber(process.env.IMGTOKENX_RECOVERY_MAX_AGE_DAYS);
-  const bytes = readEnvNumber(process.env.IMGTOKENX_RECOVERY_MAX_BYTES);
+function readCaps(ageValue: string | undefined, bytesValue: string | undefined): RecoveryCaps {
+  const age = readEnvNumber(ageValue);
+  const bytes = readEnvNumber(bytesValue);
   return {
     maxAgeMs: age === undefined ? DEFAULT_RECOVERY_MAX_AGE_DAYS * MS_PER_DAY
       : Math.floor(age * MS_PER_DAY),
     maxBytes: bytes === undefined ? DEFAULT_RECOVERY_MAX_BYTES : bytes,
     maxFiles: MAX_RECOVERABLE_FILES,
   };
+}
+
+/** Read caps from env each call (cheap; values fit in registers). Missing or
+ *  non-numeric envs fall back to defaults; explicit `0` disables the cap. */
+export function readRecoveryCaps(): RecoveryCaps {
+  return readCaps(
+    process.env.IMGTOKENX_RECOVERY_MAX_AGE_DAYS,
+    process.env.IMGTOKENX_RECOVERY_MAX_BYTES,
+  );
+}
+
+/** Artifact files share the defaults and count ceiling, but not the recovery
+ *  sidecar age/byte budget. */
+export function readArtifactCaps(): RecoveryCaps {
+  return readCaps(
+    process.env.IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS,
+    process.env.IMGTOKENX_ARTIFACTS_MAX_BYTES,
+  );
 }
 
 function readEnvNumber(v: string | undefined): number | undefined {
@@ -53,7 +69,11 @@ function readEnvNumber(v: string | undefined): number | undefined {
 /** Prune `.txt` recovery files in `dir` to satisfy all caps. Failure-tolerant
  *  — every unlink is wrapped in try/catch so a single vanished file can't
  *  abort the rest of the sweep. */
-export function pruneRecoverableDir(dir: string, caps = readRecoveryCaps()): void {
+export function pruneRecoverableDir(
+  dir: string,
+  caps = readRecoveryCaps(),
+  filter?: (name: string) => boolean,
+): void {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -63,6 +83,7 @@ export function pruneRecoverableDir(dir: string, caps = readRecoveryCaps()): voi
   const now = Date.now();
   const files = entries
     .filter((e) => e.isFile() && e.name.endsWith('.txt'))
+    .filter((e) => filter?.(e.name) ?? true)
     .map((e) => {
       let mtimeMs = 0;
       let size = 0;
@@ -103,4 +124,12 @@ export function pruneRecoverableDir(dir: string, caps = readRecoveryCaps()): voi
     totalBytes -= survivors[i]!.size;
     i += 1;
   }
+}
+
+export function pruneRecoverySidecars(dir: string): void {
+  pruneRecoverableDir(dir, readRecoveryCaps(), (name) => !name.startsWith('artifact_'));
+}
+
+export function pruneContextArtifacts(dir: string): void {
+  pruneRecoverableDir(dir, readArtifactCaps(), (name) => name.startsWith('artifact_'));
 }

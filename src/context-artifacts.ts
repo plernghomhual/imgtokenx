@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TextDecoder } from 'node:util';
 
-import { pruneRecoverableDir } from './recovery-retention.js';
+import { pruneContextArtifacts } from './recovery-retention.js';
 
 export type ArtifactHandle = string;
 
@@ -151,7 +151,7 @@ function readArtifactBytes(
 }
 
 function pruneAndConfirm(dir: string, file: string): void {
-  pruneRecoverableDir(dir);
+  pruneContextArtifacts(dir);
   try {
     const stat = fs.lstatSync(file);
     if (stat.isSymbolicLink() || !stat.isFile()) artifactError('artifact not retained');

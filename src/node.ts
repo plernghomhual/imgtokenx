@@ -22,7 +22,7 @@ import {
 } from './node-config.js';
 import { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
 export { defaultRecoverableDir, recoverById, resolveRecoverableDir } from './recovery.js';
-import { pruneRecoverableDir } from './recovery-retention.js';
+import { pruneRecoverySidecars } from './recovery-retention.js';
 export { pruneRecoverableDir, readRecoveryCaps } from './recovery-retention.js';
 import {
   hasContextArtifact,
@@ -226,6 +226,8 @@ Environment:
   IMGTOKENX_RECOVERY_MAX_AGE_DAYS  delete .txt files older than N days (default 7)
   IMGTOKENX_RECOVERY_MAX_BYTES    delete oldest until total size ≤ N bytes
                           (default 268435456 = 256 MiB)
+  IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS  artifact_* age cap (default 7 days)
+  IMGTOKENX_ARTIFACTS_MAX_BYTES   artifact_* byte cap (default 268435456)
   IMGTOKENX_LOSSLESS_EXACT   default-on: keep exact-risk blocks as native text.
   IMGTOKENX_VIRTUAL_CONTEXT  provider-neutral large-result handling: off
                           (default), dedup, lazy, or state. Uses the private
@@ -1341,7 +1343,7 @@ export async function main(): Promise<void> {
           }
         }
         if (written > 0) {
-          pruneRecoverableDir(recoverableDir);
+          pruneRecoverySidecars(recoverableDir);
           console.log(`  ↳ dumped ${written} recoverable source(s) → ${recoverableDir}`);
         }
       }

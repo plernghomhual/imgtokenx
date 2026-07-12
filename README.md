@@ -245,9 +245,13 @@ evidence:
   tool-call pair, and the live tail remain native and ordered.
 
 Artifacts stay in the private recovery directory (`0700` directory, `0600`
-files), are content-addressed and integrity-checked, and share its age/byte
-retention. Storage or checkpoint validation failure preserves the original
-request. Virtualized previews are not imaged again. `IMGTOKENX_OUTPUT_EFFICIENCY=1`
+files), and are content-addressed and integrity-checked. Recovery sidecars use
+`IMGTOKENX_RECOVERY_MAX_AGE_DAYS` / `IMGTOKENX_RECOVERY_MAX_BYTES`; artifacts
+have an independent budget via `IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS` /
+`IMGTOKENX_ARTIFACTS_MAX_BYTES`. Both default to 7 days / 256 MiB, and `0`
+disables the corresponding age or byte cap; each population keeps the same
+4096-file ceiling. Storage or checkpoint validation failure preserves the
+original request. Virtualized previews are not imaged again. `IMGTOKENX_OUTPUT_EFFICIENCY=1`
 separately adds opt-in guidance to cite exact artifact ranges and return focused
 diffs instead of echoing large sources; it never truncates the response.
 `imgtokenx_inspect` is read-only, literal-only, bounded, does not follow symlinks,

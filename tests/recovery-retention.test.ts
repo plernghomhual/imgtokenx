@@ -4,7 +4,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
+  pruneContextArtifacts,
   pruneRecoverableDir,
+  pruneRecoverySidecars,
+  readArtifactCaps,
   readRecoveryCaps,
   DEFAULT_RECOVERY_MAX_AGE_DAYS,
   DEFAULT_RECOVERY_MAX_BYTES,
@@ -26,6 +29,8 @@ describe('recovery retention caps', () => {
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-recov-'));
     savedEnv = {
+      IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS: process.env.IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS,
+      IMGTOKENX_ARTIFACTS_MAX_BYTES: process.env.IMGTOKENX_ARTIFACTS_MAX_BYTES,
       IMGTOKENX_RECOVERY_MAX_AGE_DAYS: process.env.IMGTOKENX_RECOVERY_MAX_AGE_DAYS,
       IMGTOKENX_RECOVERY_MAX_BYTES: process.env.IMGTOKENX_RECOVERY_MAX_BYTES,
     };
@@ -110,6 +115,53 @@ describe('recovery retention caps', () => {
     expect(caps.maxAgeMs).toBe(DEFAULT_RECOVERY_MAX_AGE_DAYS * MS_PER_DAY);
     expect(caps.maxBytes).toBe(DEFAULT_RECOVERY_MAX_BYTES);
     expect(caps.maxFiles).toBe(MAX_RECOVERABLE_FILES);
+  });
+
+  it('reads artifact caps independently with the same defaults and disable semantics', () => {
+    process.env.IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS = '0';
+    process.env.IMGTOKENX_ARTIFACTS_MAX_BYTES = '1024';
+    const caps = readArtifactCaps();
+    expect(caps.maxAgeMs).toBe(0);
+    expect(caps.maxBytes).toBe(1024);
+    expect(caps.maxFiles).toBe(MAX_RECOVERABLE_FILES);
+  });
+
+  it('prunes sidecars and artifacts without crossing populations', () => {
+    const now = Date.now();
+    const old = now - 8 * MS_PER_DAY;
+    touch(dir, 'artifact_deadbeef.txt', old, 100);
+    touch(dir, 'rec_fresh.txt', now, 100);
+
+    pruneRecoverySidecars(dir);
+    expect(fs.existsSync(path.join(dir, 'artifact_deadbeef.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'rec_fresh.txt'))).toBe(true);
+
+    pruneContextArtifacts(dir);
+    expect(fs.existsSync(path.join(dir, 'artifact_deadbeef.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'rec_fresh.txt'))).toBe(true);
+  });
+
+  it('counts byte budgets per population instead of combining them', () => {
+    process.env.IMGTOKENX_RECOVERY_MAX_AGE_DAYS = '0';
+    process.env.IMGTOKENX_ARTIFACTS_MAX_AGE_DAYS = '0';
+    process.env.IMGTOKENX_RECOVERY_MAX_BYTES = '1500';
+    process.env.IMGTOKENX_ARTIFACTS_MAX_BYTES = '1500';
+    const now = Date.now();
+    touch(dir, 'rec_old.txt', now - 4000, 1000);
+    touch(dir, 'rec_new.txt', now - 1000, 1000);
+    touch(dir, 'artifact_old.txt', now - 3000, 1000);
+    touch(dir, 'artifact_new.txt', now - 2000, 1000);
+
+    pruneRecoverySidecars(dir);
+    expect(fs.existsSync(path.join(dir, 'rec_old.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'rec_new.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'artifact_old.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'artifact_new.txt'))).toBe(true);
+
+    pruneContextArtifacts(dir);
+    expect(fs.existsSync(path.join(dir, 'artifact_old.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'artifact_new.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'rec_new.txt'))).toBe(true);
   });
 
   it('older files unlinked by age pass do not double-count in the byte pass', () => {
