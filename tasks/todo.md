@@ -1226,11 +1226,11 @@ No push, deployment, daemon restart, or live configuration mutation performed.
 - [x] Add opt-in output-efficiency guidance without truncation, model substitution, or permission bypass.
 - [x] Extend privacy-safe telemetry/dashboard accounting without double-counting savings.
 - [x] Update README/help/security docs and add compatibility, exactness, security, and performance regressions.
-- [ ] Run focused tests, typechecks, full suite, build, restart/package/Worker/release checks, guard reviews, commit, and push.
+- [x] Run focused tests, typechecks, full suite, build, restart/package/Worker/release checks, guard reviews, commit, and push.
 
 ### Final review
 
 - Files changed: provider-neutral virtual-context/artifact/MCP/inspection core; proxy, Node, OpenCode installer, Worker validation, tracker/dashboard; docs and focused regressions.
 - Behavior changed: OpenCode Zen is first-class and auth-isolated; optional `dedup`/`lazy`/`state` context storage, exact deltas/checkpoints, retrieval tools, output guidance, and telemetry are available; defaults remain conservative (`virtualContext=off`).
-- Verification performed: source + strict test/script typechecks; 69 files / 1,020 tests; build; restart 4/4; package smoke; release check; Worker dry-run; diff, dependency, and secret scans.
+- Verification performed: source + strict test/script typechecks; 69 files / 1,020 tests; build; restart 4/4; package smoke; release check; Worker dry-run; diff, dependency, and secret scans; commit `ac48f45` pushed to `origin/main`.
 - Remaining risks: live provider billing/quality was not exercised; virtual modes remain opt-in pending real workload evals; commented JSONC is refused explicitly rather than rewritten; Wrangler's dry-run passed but its optional user-log write was sandbox-denied.
