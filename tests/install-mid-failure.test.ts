@@ -137,7 +137,7 @@ describe('install — rollback removes net-new plist + env.sh when launchctl boo
   });
 });
 
-describe('install — rollback restores pre-existing plist + env.sh when claude mcp remove fails (audit D20)', () => {
+describe('uninstall — claude mcp remove failure is tolerated; uninstall stays idempotent', () => {
   let fx: HomeFixture;
   beforeEach(() => {
     fx = mkHome();
@@ -158,24 +158,26 @@ describe('install — rollback restores pre-existing plist + env.sh when claude 
     fx.cleanup();
   });
 
-  it('throws AND restores plist + env.sh byte-for-byte', async () => {
+  it('does NOT throw; plist + env.sh stay removed (no rollback resurrection)', async () => {
+    // Contract change (post-audit item 5): `mcp remove` exits non-zero when
+    // the server was already unregistered, so uninstall runs it with
+    // ignoreFailure. A failing remove must NOT abort the uninstall and
+    // resurrect the plist/env files via rollback — that was the old D20
+    // behavior this test used to pin.
     const laPath = launchAgentPath(fx.home);
     const ePath = envPath(fx.home);
-    const originalPlist = fx.originalPlist!;
-    const originalEnv = fx.originalEnv!;
 
     const install = await import('../src/install.js');
-    expect(() => install.runUninstall({
+    const result = install.runUninstall({
       home: fx.home,
       repoRoot: fx.repoRoot,
       port: 47899,
-    })).toThrow(/claude/i);
+    });
 
-    // After rollback: launchd plist + env.sh must be RESTORED byte-for-byte.
-    expect(fs.existsSync(laPath)).toBe(true);
-    expect(fs.readFileSync(laPath, 'utf8')).toBe(originalPlist);
-    expect(fs.existsSync(ePath)).toBe(true);
-    expect(fs.readFileSync(ePath, 'utf8')).toBe(originalEnv);
+    expect(fs.existsSync(laPath)).toBe(false);
+    expect(fs.existsSync(ePath)).toBe(false);
+    // The remove was still attempted (actionLog entries are q()-quoted).
+    expect(result.actions.some((a) => a.includes("'mcp' 'remove'"))).toBe(true);
   });
 });
 

@@ -551,10 +551,14 @@ function blitGlyph(
   // ATLAS_OFFSETS is a bit offset (MSB-first packing). Pixel (gx,gy): byte = bitIdx>>>3, bit = 7-(bitIdx&7).
   const srcOff = atlas.offsets[rank]!;
   const yOffset = atlasSet(font).bit.ascent - atlas.ascent;
+  // Clamp to the framebuffer's right edge: a glyph blitted near it (negative
+  // cellWBonus, or a wide glyph in the last cell) must clip, not wrap onto the
+  // next scanline.
+  const maxGx = Math.min(srcW, fbW - x);
   for (let gy = 0; gy < atlas.cellH; gy++) {
     const dstRow = (y + yOffset + gy) * fbW + x;
     const bitRowStart = srcOff + gy * srcW;
-    for (let gx = 0; gx < srcW; gx++) {
+    for (let gx = 0; gx < maxGx; gx++) {
       const bitIdx = bitRowStart + gx;
       const byte = atlas.pixels[bitIdx >>> 3]!;
       const bit = (byte >>> (7 - (bitIdx & 7))) & 1;
@@ -588,10 +592,12 @@ function blitGlyphGray(
   // ATLAS_GRAY_OFFSETS is a byte offset (1 byte/pixel, unlike the bit-packed 1-bit atlas).
   const srcOff = atlas.offsets[rank]!;
   const yOffset = atlasSet(font).gray.ascent - atlas.ascent;
+  // Clip at the right edge instead of wrapping onto the next scanline (see blitGlyph).
+  const maxGx = Math.min(srcW, fbW - x);
   for (let gy = 0; gy < atlas.cellH; gy++) {
     const dstRow = (y + yOffset + gy) * fbW + x;
     const srcRow = srcOff + gy * srcW;
-    for (let gx = 0; gx < srcW; gx++) {
+    for (let gx = 0; gx < maxGx; gx++) {
       const coverage = atlas.pixels[srcRow + gx]!;
       if (coverage > 0) {
         const idx = dstRow + gx;
@@ -936,10 +942,18 @@ const GUTTER_DIVIDER_INK = 64; // pre-invert → 191 post-invert: light gray col
 const GUTTER_DIVIDER_INSET_PX = 2; // keep divider clear of padding rows
 
 /** Pixel width of a multi-col canvas. `cellW` defaults to the production cell;
- *  reader-profile callers pass renderCellWidth(style) — mirror of transform.ts multiColWidthPx. */
-export function multiColWidth(cols: number, numCols: number, cellW: number = CELL_W): number {
+ *  reader-profile callers pass renderCellWidth(style) — mirror of transform.ts multiColWidthPx
+ *  (the mirror omits the overhang term below; it's a token estimate, off by ≤ a few px).
+ *  `atlasW` widens by the glyph overhang when cellW < atlasW (negative cellWBonus) so the
+ *  last glyph of the last column stays inside the framebuffer — same as the single-col path. */
+export function multiColWidth(
+  cols: number,
+  numCols: number,
+  cellW: number = CELL_W,
+  atlasW: number = cellW,
+): number {
   const n = Math.max(1, numCols | 0);
-  return 2 * PAD_X + n * cols * cellW + (n - 1) * GUTTER_CELLS * cellW;
+  return 2 * PAD_X + n * cols * cellW + (n - 1) * GUTTER_CELLS * cellW + Math.max(0, atlasW - cellW);
 }
 
 /** Largest numCols fitting within MAX_WIDTH_PX. Used to clamp over-large CLI flags. */
@@ -965,7 +979,9 @@ async function renderMultiColChunkFromLines(
   const markerScale = Math.max(1, Math.floor(style.markerScale ?? 1));
   const cellW = renderCellWidth(style);
   const cellH = renderCellHeight(style);
-  const width = multiColWidth(cols, numCols, cellW);
+  const selectedAtlas = atlasSet(style.font ?? DEFAULT_RENDER_FONT);
+  const atlasW = useAA ? selectedAtlas.gray.cellW : selectedAtlas.bit.cellW;
+  const width = multiColWidth(cols, numCols, cellW, atlasW);
   // Column 0 is always the tallest in column-major packing.
   const rowsPerCol = Math.max(1, linesPerCol | 0);
   const usedRows = Math.min(lines.length, rowsPerCol);

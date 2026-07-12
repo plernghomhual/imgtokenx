@@ -2,10 +2,11 @@
 # Restart the local imgtokenx proxy.
 #
 # What this does, in order:
-#   1. Discover every running imgtokenx proxy via `pgrep -f "node.*bin/cli.js"`
-#      and list them. If multiple are running (orphans from a prior crashed
-#      session), kill all of them — there's no "right" oldest in a graceful
-#      restart, we want a clean slate.
+#   1. Discover every running imgtokenx proxy belonging to THIS checkout
+#      (pgrep candidates filtered by argv path or process cwd — never kills
+#      proxies from other checkouts). If multiple are running (orphans from a
+#      prior crashed session), kill all of them — there's no "right" oldest
+#      in a graceful restart, we want a clean slate.
 #   2. Send SIGTERM. The proxy's SIGTERM handler flushes the JSONL tracker
 #      and exits. Poll up to 5s for clean exit.
 #   3. Anything still alive after 5s gets SIGKILL with a warning.
@@ -49,7 +50,25 @@ TARGET_PORT="${PORT:-47821}"
 
 # --- 1. Discover running proxies ------------------------------------------
 # `[c]li.js` keeps pgrep from matching itself if anyone pipes us through grep.
-PIDS_RAW=$(pgrep -f 'node.*bin/[c]li\.js' 2>/dev/null || true)
+# The raw pgrep matches ANY imgtokenx checkout; filter to this repo only —
+# absolute path in argv, or a relative `node bin/cli.js` whose cwd is this
+# repo (how this script itself starts the proxy). Without lsof, a relative-
+# path proxy from another checkout can't be attributed, so it's left alone;
+# if it holds our port, step 5 reports it instead of us killing it blind.
+REPO_DIR=$(pwd)
+find_proxy_pids() {
+  local pid cwd
+  for pid in $(pgrep -f 'node.*bin/[c]li\.js' 2>/dev/null || true); do
+    if ps -o command= -p "$pid" 2>/dev/null | grep -qF "$REPO_DIR/bin/cli.js"; then
+      echo "$pid"
+    elif command -v lsof >/dev/null 2>&1; then
+      cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+      if [ "$cwd" = "$REPO_DIR" ]; then echo "$pid"; fi
+    fi
+  done
+}
+
+PIDS_RAW=$(find_proxy_pids)
 if [ -n "$PIDS_RAW" ]; then
   # Convert to space-separated list, sorted numerically for stable output.
   PIDS=$(echo "$PIDS_RAW" | tr '\n' ' ' | xargs -n1 | sort -n | tr '\n' ' ')
@@ -65,13 +84,13 @@ if [ -n "$PIDS_RAW" ]; then
 
   # Poll up to 5s for graceful exit.
   for _ in $(seq 1 50); do
-    STILL=$(pgrep -f 'node.*bin/[c]li\.js' 2>/dev/null || true)
+    STILL=$(find_proxy_pids)
     [ -z "$STILL" ] && break
     sleep 0.1
   done
 
   # --- 3. Escalate to SIGKILL only if still alive ---
-  STILL=$(pgrep -f 'node.*bin/[c]li\.js' 2>/dev/null || true)
+  STILL=$(find_proxy_pids)
   if [ -n "$STILL" ]; then
     echo "[restart] WARNING: PID(s) still alive after 5s, escalating to SIGKILL: $STILL"
     for pid in $STILL; do
@@ -99,11 +118,14 @@ fi
 # skip the check rather than failing — the new proxy will surface the same
 # EADDRINUSE error via Node's listen() callback.
 if command -v lsof >/dev/null 2>&1; then
-  HOLDER=$(lsof -nP -iTCP:"$TARGET_PORT" -sTCP:LISTEN -t 2>/dev/null || true)
+  # lsof -t can return several PIDs (one per line); flatten so `ps` and the
+  # error message handle all of them instead of choking on a multi-line arg.
+  HOLDER=$(lsof -nP -iTCP:"$TARGET_PORT" -sTCP:LISTEN -t 2>/dev/null | xargs || true)
   if [ -n "$HOLDER" ]; then
-    HOLDER_CMD=$(ps -o command= -p "$HOLDER" 2>/dev/null || echo "?")
-    echo "[restart] ERROR: port $TARGET_PORT is still held by PID $HOLDER:" >&2
-    echo "    $HOLDER_CMD" >&2
+    echo "[restart] ERROR: port $TARGET_PORT is still held by PID(s) $HOLDER:" >&2
+    for holder_pid in $HOLDER; do
+      echo "    $(ps -o command= -p "$holder_pid" 2>/dev/null || echo '?')" >&2
+    done
     echo "  Hint: if that's an imgtokenx proxy our SIGTERM should have cleared," >&2
     echo "  it may have been started outside this repo. Free the port and rerun." >&2
     exit 1

@@ -405,11 +405,23 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse | undefined {
  *  stdin, write newline-delimited JSON-RPC responses to stdout. Resolves
  *  when stdin closes (client disconnects). */
 export async function runMcpServer(): Promise<void> {
+  // ponytail: 8 MiB/line ceiling — largest legit request is a recover call with
+  // an artifact id (bytes, not content). Reject instead of buffering unbounded
+  // stdin into JSON.parse. Raise if a future tool legitimately streams content in.
+  const MAX_LINE_BYTES = 8 * 1024 * 1024;
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   await new Promise<void>((resolve) => {
     rl.on('line', (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
+      if (trimmed.length > MAX_LINE_BYTES) {
+        send({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32600, message: `request exceeds ${MAX_LINE_BYTES} byte line limit` },
+        });
+        return;
+      }
       let req: JsonRpcRequest;
       try {
         req = JSON.parse(trimmed) as JsonRpcRequest;

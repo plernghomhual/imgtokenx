@@ -108,25 +108,28 @@ describe('Audit #4 D4 — RequestImageCounter', () => {
 describe('Audit #4 D4 — transformRequest end-to-end', () => {
   it('populates info.imageBudget with existing/used/skipped telemetry', async () => {
     const req = {
-      model: 'claude-sonnet-4-5',
+      // claude-sonnet-4-5 resolves to reader_profile_unsafe (early return, no
+      // budget) — pin a reader-safe model so the budget path actually runs.
+      model: 'claude-opus-4-8',
       system: 'You are a helpful assistant.',
       messages: [textBlock('hi')],
     };
     const body = new TextEncoder().encode(JSON.stringify(req));
     const { info } = await transformRequest(body, { compress: true });
     // Even on a no-slab-pass request, the budget is instantiated; fields present
-    // whenever the request went past the early returns.
-    if (info.imageBudget !== undefined) {
-      expect(info.imageBudget.total).toBe(100);
-      expect(info.imageBudget.existing).toBe(0);
-      expect(info.imageBudget.used).toBeGreaterThanOrEqual(0);
-      expect(info.imageBudget.skipped).toBeGreaterThanOrEqual(0);
-    }
+    // whenever the request went past the early returns. Unconditional so a
+    // regression that stops populating imageBudget fails loudly instead of
+    // silently skipping every assertion.
+    expect(info.imageBudget).toBeDefined();
+    expect(info.imageBudget!.total).toBe(100);
+    expect(info.imageBudget!.existing).toBe(0);
+    expect(info.imageBudget!.used).toBeGreaterThanOrEqual(0);
+    expect(info.imageBudget!.skipped).toBeGreaterThanOrEqual(0);
   });
 
   it('applyAnthropicImageBudget=false leaves info.imageBudget undefined', async () => {
     const req = {
-      model: 'claude-sonnet-4-5',
+      model: 'claude-opus-4-8',
       system: 'You are a helpful assistant.',
       messages: [textBlock('hi')],
     };
@@ -142,17 +145,16 @@ describe('Audit #4 D4 — transformRequest end-to-end', () => {
   it('a request with 96 pre-existing images has remaining=4 in the budget', async () => {
     const existing = Array.from({ length: 96 }, () => imageBlock());
     const req = {
-      model: 'claude-sonnet-4-5',
+      model: 'claude-opus-4-8',
       system: 'You are a helpful assistant.',
       messages: [...existing, textBlock('hi')],
     };
     const body = new TextEncoder().encode(JSON.stringify(req));
     const { info } = await transformRequest(body, { compress: true });
-    if (info.imageBudget !== undefined) {
-      expect(info.imageBudget.existing).toBe(96);
-      // remaining starts at 4; any image this request emits gets claimed.
-      expect(info.imageBudget.total).toBe(100);
-    }
+    expect(info.imageBudget).toBeDefined();
+    expect(info.imageBudget!.existing).toBe(96);
+    // remaining starts at 4; any image this request emits gets claimed.
+    expect(info.imageBudget!.total).toBe(100);
   });
 });
 

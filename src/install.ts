@@ -79,6 +79,10 @@ interface DoctorDeps {
 interface UndoStep {
   log: string;
   revert: () => void;
+  /** True for compensating steps that undo a LIVE side effect (launchctl
+   *  bootstrap, `mcp add`) rather than a file write. Excluded from the
+   *  success-path action log — they describe rollback, not work done. */
+  sideEffect?: boolean;
 }
 
 interface OpenCodeOwnershipState {
@@ -577,15 +581,31 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
         throw new Error(`${cmd} ${args.join(' ')} failed: ${detail}`);
       }
     };
+    // Compensating undo for live side effects: file reverts alone leave a
+    // bootstrapped launchd service / registered MCP servers behind when a
+    // later step fails (audit HIGH-1). Best-effort — rollback() already
+    // tolerates a revert that throws or exits non-zero.
+    const liveUndo = (log: string, cmd: string, args: string[]) => {
+      undo.push({
+        log,
+        sideEffect: true,
+        revert: () => {
+          (opts.spawnSync ?? spawnSync)(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        },
+      });
+    };
     runStep('launchctl', ['bootout', domain, plan.launchAgentPath], { ignoreFailure: true });
     runStep('launchctl', ['bootstrap', domain, plan.launchAgentPath], {});
+    liveUndo(`launchctl bootout ${domain} ${plan.launchAgentPath}`, 'launchctl', ['bootout', domain, plan.launchAgentPath]);
     runStep('launchctl', ['enable', `${domain}/${LAUNCHD_LABEL}`], { ignoreFailure: true });
     runStep('launchctl', ['kickstart', '-k', `${domain}/${LAUNCHD_LABEL}`], { ignoreFailure: true });
     if (!opts.skipMcp) {
       runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], { ignoreFailure: true });
       runStep('claude', ['mcp', 'add', '--scope', 'user', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
+      liveUndo(`claude mcp remove --scope user ${MCP_SERVER_NAME}`, 'claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]);
       runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME], { ignoreFailure: true });
       runStep('codex', ['mcp', 'add', MCP_SERVER_NAME, '--', plan.nodePath, plan.cliPath, 'mcp']);
+      liveUndo(`codex mcp remove ${MCP_SERVER_NAME}`, 'codex', ['mcp', 'remove', MCP_SERVER_NAME]);
     }
   } catch (err) {
     rollback(undo, err);
@@ -593,8 +613,9 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
   // Flatten undo log into the public action list. Each revert's log message
   // matches the corresponding forward action, so callers can parse the same
   // way they did before this batch (string-based grep on `write`, `update`,
-  // `upsert`, etc.).
-  for (const step of undo) actionLog.push(step.log);
+  // `upsert`, etc.). sideEffect steps are rollback-only compensations, not
+  // work performed — skip them.
+  for (const step of undo) if (!step.sideEffect) actionLog.push(step.log);
   return { plan, actions: actionLog };
 }
 
@@ -661,12 +682,12 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
     }
     updateZshrc(plan, undo, false);
     if (!opts.skipMcp) {
-      // Audit D20: MCP removal failures must roll back any state already
-      // mutated in this try block (e.g. launchd plist removed above). The
-      // ENOENT silent path inside runStep still tolerates a missing CLI,
-      // so an operator without claude/codex installed can still uninstall.
-      runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME]);
-      runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME]);
+      // ignoreFailure (matching install-time removes): `mcp remove` exits
+      // non-zero when the server was already unregistered — that must not
+      // abort the uninstall and resurrect the plist/env files via rollback.
+      // Uninstall stays idempotent; ENOENT (CLI missing) is silent as before.
+      runStep('claude', ['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME], { ignoreFailure: true });
+      runStep('codex', ['mcp', 'remove', MCP_SERVER_NAME], { ignoreFailure: true });
     }
   } catch (err) {
     rollback(undo, err);

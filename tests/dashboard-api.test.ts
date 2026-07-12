@@ -119,6 +119,18 @@ describe('dashboardMutationAllowed()', () => {
     expect(dashboardMutationAllowed(undefined, 'http://127.0.0.1:47821', 'cross-site')).toBe(false);
     expect(dashboardMutationAllowed('not a url', 'http://127.0.0.1:47821', undefined)).toBe(false);
   });
+
+  it('CONTRACT: allows requests with no Origin and no Sec-Fetch-Site header', () => {
+    // Deliberate: curl/CLI tools send neither header, and the loopback-only
+    // default bind means such callers are local. Browsers always attach
+    // Origin (or Sec-Fetch-Site) to cross-origin POSTs, so CSRF is still
+    // covered by the two checks above. If this behavior ever tightens
+    // (breaking `curl -X POST /api/compression`), this test must change
+    // WITH the README/ops docs — that's why it's pinned.
+    expect(dashboardMutationAllowed(undefined, 'http://127.0.0.1:47821', undefined)).toBe(true);
+    // no Origin but an explicit same-origin fetch-site is also fine
+    expect(dashboardMutationAllowed(undefined, 'http://127.0.0.1:47821', 'none')).toBe(true);
+  });
 });
 
 // ---- /api/sessions.json --------------------------------------------------

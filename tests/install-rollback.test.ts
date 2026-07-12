@@ -244,6 +244,37 @@ describe('install — atomic write + rollback', () => {
     expect(fs.existsSync(path.join(fx.home, '.imgtokenx', 'opencode-baseurl.json'))).toBe(false);
   });
 
+  it('rollback compensates live side effects: bootout + mcp remove after a late failure', () => {
+    const calls: string[] = [];
+    // Succeed through launchctl bootstrap and `claude mcp add`, then fail on
+    // `codex mcp add` — rollback must undo the live mutations already made.
+    const spawnSync: NonNullable<import('../src/install.js').InstallOptions['spawnSync']> = (cmd, args) => {
+      const line = [cmd, ...args].join(' ');
+      calls.push(line);
+      if (cmd === 'codex' && args[1] === 'add') return { status: 1, stderr: 'forced late failure', stdout: '' };
+      return { status: 0, stderr: '', stdout: '' };
+    };
+    expect(() => runInstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync,
+    })).toThrow(/forced late failure/);
+
+    const failureAt = calls.findIndex((c) => c.startsWith('codex mcp add'));
+    const afterFailure = calls.slice(failureAt + 1);
+    expect(afterFailure.some((c) => c.startsWith('launchctl bootout'))).toBe(true);
+    expect(afterFailure.some((c) => c === 'claude mcp remove --scope user imgtokenx-recover')).toBe(true);
+  });
+
+  it('success-path actions omit the compensating rollback entries', () => {
+    const result = runInstall({
+      home: fx.home, repoRoot: fx.repoRoot, nodePath: '/usr/bin/node', port: 47899, spawnSync: processOk,
+    });
+    // sideEffect undo logs are unquoted; forward runStep actions are q()-quoted
+    // per token. A leaked sideEffect entry would appear verbatim.
+    expect(result.actions).not.toContain('claude mcp remove --scope user imgtokenx-recover');
+    expect(result.actions).not.toContain('codex mcp remove imgtokenx-recover');
+    expect(result.actions.some((a) => a.startsWith('launchctl bootout '))).toBe(false);
+  });
+
   it('preserves the previous zshrc when re-running install', () => {
     const zshrc = path.join(fx.home, '.zshrc');
     const before = 'export PATH=/usr/bin\nexport EDITOR=vim\n';

@@ -63,17 +63,25 @@ function runInSandbox(files: Record<string, string>): SpawnOut {
 }
 
 describe('release:check (audit #36 + audit #34)', () => {
+  const EXPORTS = {
+    '.': { types: './dist/core/index.d.ts', import: './dist/core/index.js' },
+    './node': { types: './dist/node.d.ts', import: './dist/node.js' },
+  };
+
   it('exits 0 with the OK line when all checks pass', () => {
     const r = runInSandbox({
       'package.json': JSON.stringify({
         name: 'imgtokenx',
         version: '0.8.0',
+        exports: EXPORTS,
         scripts: { 'test:restart': 'bash tests/restart.test.sh' },
       }),
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
       '.npmrc': '# npm-compatible only\n',
       'dist/core/index.js': 'export {};\n',
+      'dist/core/index.d.ts': 'export {};\n',
       'dist/node.js': '#!/usr/bin/env node\n',
+      'dist/node.d.ts': 'export {};\n',
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('release:check OK: ready to release v0.8.0');
@@ -84,13 +92,28 @@ describe('release:check (audit #36 + audit #34)', () => {
       'package.json': JSON.stringify({
         name: 'imgtokenx',
         version: '0.8.0',
+        exports: EXPORTS,
         scripts: { 'test:restart': 'bash tests/restart.test.sh' },
       }),
       'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
     });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/dist\/core\/index\.js missing/);
-    expect(r.stderr).toMatch(/dist\/node\.js missing/);
+    expect(r.stderr).toMatch(/\.\/dist\/core\/index\.js missing/);
+    expect(r.stderr).toMatch(/\.\/dist\/node\.js missing/);
+    expect(r.stderr).toMatch(/\.\/dist\/core\/index\.d\.ts missing/);
+  });
+
+  it('exits 1 when the exports map is absent (nothing to verify must not pass)', () => {
+    const r = runInSandbox({
+      'package.json': JSON.stringify({
+        name: 'imgtokenx',
+        version: '0.8.0',
+        scripts: { 'test:restart': 'bash tests/restart.test.sh' },
+      }),
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/"exports" map missing/);
   });
 
   it('exits 1 with a clear error when package.json has no version field', () => {

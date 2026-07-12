@@ -99,11 +99,24 @@ are imaged.
 Operational defaults are deliberately local and bounded: the dashboard binds
 to loopback, request bodies are capped, every Anthropic request stays within
 the provider's 100-image limit, and exact-source/log files use private
-directories and files. If you bind `HOST` off loopback, set a random
-`IMGTOKENX_DASHBOARD_TOKEN` (32+ characters); off-host `/healthz` additionally
-requires `IMGTOKENX_HEALTHZ_TOKEN`. Worker deployments that supply provider API
-keys require `IMGTOKENX_WORKER_SECRET` and callers must send it in
-`x-imgtokenx-secret`. Set `MAX_REQUEST_BODY_BYTES` to lower the request cap.
+directories and files.
+
+**Binding `HOST=0.0.0.0` (or exposing via cloudflared/ngrok) makes the proxy
+reachable from your LAN or the internet.** Off-host requests are refused with
+403 until you opt in with all of:
+
+- `IMGTOKENX_ALLOWED_HOSTS` — comma-separated Host-header whitelist
+  (e.g. `IMGTOKENX_ALLOWED_HOSTS=proxy.example.com`). Unset = loopback hosts
+  only; this also blocks DNS-rebinding browsers.
+- `IMGTOKENX_PROXY_TOKEN` — random 32+ character secret off-host callers must
+  send as `Authorization: Bearer <token>` on proxy routes.
+- `IMGTOKENX_DASHBOARD_TOKEN` — random 32+ character secret for dashboard
+  routes; off-host `/healthz` additionally requires `IMGTOKENX_HEALTHZ_TOKEN`.
+
+Loopback callers bypass the tokens, so the localhost workflow needs no setup.
+Worker deployments that supply provider API keys require
+`IMGTOKENX_WORKER_SECRET` and callers must send it in `x-imgtokenx-secret`.
+Set `MAX_REQUEST_BODY_BYTES` to lower the request cap.
 
 ## The honest part
 

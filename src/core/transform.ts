@@ -138,8 +138,10 @@ export interface TransformOptions {
    *  for every block rendered to images. Off by default (entries inflate `info`;
    *  only a stateful harness can use them). */
   emitRecoverable?: boolean;
-  /** Strong exactness mode: when recovery sidecars are unavailable, keep any
-   *  block with extracted exact-risk identifiers as text instead of imaging it. */
+  /** Strong exactness mode (default on): keep any block with extracted
+   *  exact-risk identifiers (IDs, hashes, secrets, paths, …) as text instead
+   *  of imaging it — unconditionally, regardless of whether recovery sidecars
+   *  are available (pinned by tests/exact-recall-eval.test.ts). */
   losslessExact?: boolean;
   /** Provider-neutral local context virtualization. The proxy applies this
    *  before image transforms when a durable artifact store is configured. */

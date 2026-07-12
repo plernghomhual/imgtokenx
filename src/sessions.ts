@@ -29,7 +29,6 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import * as readline from 'node:readline';
 import type { TrackEvent } from './core/tracker.js';
-import { writeFileAtomic } from './core/fs-atomic.js';
 import {
   computeActualInputEff,
   computeBaselineInputEff,
@@ -130,11 +129,34 @@ export interface AggregateResult {
   sidecarsBySession: Map<string, Set<string>>;
 }
 
+// Rescanning events.jsonl per dashboard request is the hottest sessions path.
+// Same (mtime,size) key as dashboard.ts statsCache; the sidecar dir's mtime
+// covers sidecar add/remove (sidecar files themselves are write-once).
+// Cached maps are returned as-is — callers must treat the result as read-only.
+let aggCache: { key: string; result: AggregateResult } | undefined;
+
+function aggCacheKey(paths: SessionsPaths): string | null {
+  try {
+    const ev = fs.statSync(paths.eventsFile);
+    let side = '0';
+    try {
+      const sd = fs.statSync(paths.sidecarDir);
+      side = `${sd.mtimeMs}`;
+    } catch { /* no sidecar dir yet */ }
+    return `${paths.eventsFile}|${ev.mtimeMs}|${ev.size}|${paths.sidecarDir}|${side}`;
+  } catch {
+    return null; // events file missing/unstatable — don't cache
+  }
+}
+
 /** Build a map of sessionId -> SessionSummary by scanning every event. Also
- *  tracks which sidecars belong to which session so prune can clean them. */
+ *  tracks which sidecars belong to which session. Results are cached against
+ *  the events-file mtime/size — treat the returned maps as read-only. */
 export async function aggregateSessions(
   paths: SessionsPaths,
 ): Promise<AggregateResult> {
+  const cacheKey = aggCacheKey(paths);
+  if (cacheKey !== null && aggCache?.key === cacheKey) return aggCache.result;
   const sessions = new Map<string, SessionSummary>();
   const sidecarsBySession = new Map<string, Set<string>>();
   // Per-session prior prefix sizes for the cache-aware text counterfactual.
@@ -245,7 +267,9 @@ export async function aggregateSessions(
     }
   }
 
-  return { sessions, sidecarsBySession };
+  const result: AggregateResult = { sessions, sidecarsBySession };
+  if (cacheKey !== null) aggCache = { key: cacheKey, result };
+  return result;
 }
 
 // ---- list / filter --------------------------------------------------------
@@ -300,187 +324,6 @@ function sidecarFileSizes(dir: string): Map<string, number> {
     }
   }
   return out;
-}
-
-// ---- prune -----------------------------------------------------------------
-
-export interface PruneOptions {
-  /** Drop sessions whose lastSeen is older than N days. */
-  olderThanDays?: number;
-  /** Keep only the N most-recently-active sessions. */
-  keepLast?: number;
-  /** Drop a single session by ID. */
-  sessionId?: string;
-  /** Drop multiple sessions in one atomic pass — bulk-delete from the
-   *  dashboard's checkbox UI. Unknown IDs are silently ignored (the
-   *  caller may have raced a concurrent prune). Coexists with
-   *  `sessionId` (single) — both contribute to the removal set. */
-  sessionIds?: string[];
-  /** When true, actually delete. When false (the default), report only. */
-  force: boolean;
-}
-
-export interface PruneReport {
-  sessionsRemoved: string[];
-  eventsRemoved: number;
-  eventsKept: number;
-  jsonlBytesFreed: number;
-  sidecarsRemoved: number;
-  sidecarBytesFreed: number;
-  /** True when this was a real run (force=true). False for dry-run. */
-  applied: boolean;
-}
-
-/** Decide which sessions to remove based on the prune options. Pure — no
- *  I/O — so it's easy to unit-test against a synthetic aggregation. */
-export function selectSessionsToRemove(
-  sessions: Map<string, SessionSummary>,
-  opts: PruneOptions,
-  now: Date = new Date(),
-): Set<string> {
-  const toRemove = new Set<string>();
-  const all = [...sessions.values()];
-
-  if (opts.sessionId) {
-    if (sessions.has(opts.sessionId)) toRemove.add(opts.sessionId);
-  }
-
-  if (Array.isArray(opts.sessionIds)) {
-    for (const id of opts.sessionIds) {
-      // Silently skip unknown IDs — the client may have raced a concurrent
-      // prune. The report will reflect what we actually removed.
-      if (typeof id === 'string' && sessions.has(id)) toRemove.add(id);
-    }
-  }
-
-  if (typeof opts.olderThanDays === 'number') {
-    const cutoff = new Date(
-      now.getTime() - opts.olderThanDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    for (const s of all) {
-      if (s.lastSeen < cutoff) toRemove.add(s.id);
-    }
-  }
-
-  if (typeof opts.keepLast === 'number') {
-    // Most-recently-active first; everything after keepLast goes.
-    const sorted = [...all].sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
-    for (const s of sorted.slice(opts.keepLast)) toRemove.add(s.id);
-  }
-
-  return toRemove;
-}
-
-/**
- * Rewrite events.jsonl with rows from `toRemove` sessions stripped out, and
- * delete the matching 4xx-body sidecars. Atomic: writes to a sibling `.tmp`
- * file with fsync, then renames over the original.
- *
- * Concurrency note: if the live proxy appends during prune, those new lines
- * will be lost (the proxy holds an fd to the pre-rename inode and keeps
- * writing to it). For a single-user dev tool that's an acceptable tradeoff;
- * the dashboard's confirm dialog warns the user before the destructive op.
- */
-export async function prune(
-  paths: SessionsPaths,
-  opts: PruneOptions,
-  now: Date = new Date(),
-): Promise<PruneReport> {
-  const { sessions, sidecarsBySession } = await aggregateSessions(paths);
-  const toRemove = selectSessionsToRemove(sessions, opts, now);
-
-  let jsonlBytesFreed = 0;
-  let eventsRemoved = 0;
-  let eventsKept = 0;
-  for (const s of sessions.values()) {
-    if (toRemove.has(s.id)) {
-      jsonlBytesFreed += s.jsonlBytes;
-      eventsRemoved += s.requestCount;
-    } else {
-      eventsKept += s.requestCount;
-    }
-  }
-
-  // Collect sidecar paths up for deletion (and their on-disk sizes).
-  const sidecarsToDelete: { path: string; size: number }[] = [];
-  for (const id of toRemove) {
-    const set = sidecarsBySession.get(id);
-    if (!set) continue;
-    for (const p of set) {
-      try {
-        const st = fs.statSync(p);
-        sidecarsToDelete.push({ path: p, size: st.size });
-      } catch {
-        /* already gone — fine */
-      }
-    }
-  }
-  const sidecarBytesFreed = sidecarsToDelete.reduce((n, s) => n + s.size, 0);
-
-  const report: PruneReport = {
-    sessionsRemoved: [...toRemove],
-    eventsRemoved,
-    eventsKept,
-    jsonlBytesFreed,
-    sidecarsRemoved: sidecarsToDelete.length,
-    sidecarBytesFreed,
-    applied: false,
-  };
-
-  if (!opts.force) return report;
-  if (toRemove.size === 0) {
-    report.applied = true;
-    return report;
-  }
-
-  // Atomic rewrite: stream the original through a filter into events.jsonl.tmp,
-  // fsync, then rename. Any partial state on crash leaves the original intact.
-  await rewriteEventsFile(paths.eventsFile, toRemove);
-
-  for (const { path: p } of sidecarsToDelete) {
-    try {
-      fs.unlinkSync(p);
-    } catch {
-      /* ignore — leftover sidecars are harmless */
-    }
-  }
-
-  report.applied = true;
-  return report;
-}
-
-async function rewriteEventsFile(
-  eventsFile: string,
-  toRemove: Set<string>,
-): Promise<void> {
-  if (!fs.existsSync(eventsFile)) return;
-  // Buffer the filtered content in memory. events.jsonl on a single-user dev
-  // box is bounded by the recovery-retention caps (Batch 9 — 256 MiB default
-  // AGE+BYTE) plus rotation in FileTracker (100 MiB), so an in-memory
-  // rewrite is fine for the documented envelope. Streams would buy us only
-  // O(1) peak memory at the cost of a more complex atomic-rename handshake,
-  // not worth it. writeFileAtomic handles the rename atomicity.
-  const out: string[] = [];
-  const stream = fs.createReadStream(eventsFile, { encoding: 'utf8' });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    let ev: TrackEvent;
-    try {
-      ev = JSON.parse(line) as TrackEvent;
-    } catch {
-      // Preserve malformed lines so we don't silently eat data we can't parse.
-      out.push(line);
-      continue;
-    }
-    if (toRemove.has(sessionIdOf(ev))) continue;
-    out.push(line);
-  }
-  const body = out.length === 0 ? '' : out.join('\n') + '\n';
-  // fs-atomic writes to a same-dir tmp + fsync + rename, so a crash mid-rename
-  // leaves the original events.jsonl intact. Single source of truth matching
-  // src/install.ts's atomic write pattern.
-  writeFileAtomic(eventsFile, body, { mode: 0o600 });
 }
 
 // ---- disk usage ------------------------------------------------------------

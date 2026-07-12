@@ -60,6 +60,12 @@ describe('parseGatewayHeaders', () => {
     expect(parseGatewayHeaders(undefined)).toEqual({});
     expect(parseGatewayHeaders('')).toEqual({});
   });
+
+  it('malformed JSON throws an actionable error naming the env var', () => {
+    expect(() => parseGatewayHeaders('{"cf-aig-authorization": ')).toThrow(
+      /IMGTOKENX_GATEWAY_HEADERS.*k=v;k2=v2/s,
+    );
+  });
 });
 
 function stubFetch(capture: { url?: string; headers?: Headers }) {

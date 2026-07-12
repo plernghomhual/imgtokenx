@@ -104,3 +104,61 @@ describe('D1 fail-open on transform error', () => {
     expect(JSON.stringify(logged)).not.toContain('secret provider payload');
   });
 });
+
+describe('model gating reads top-level model only (full JSON parse)', () => {
+  it('a decoy "model":"..." inside message content does not enable compression', async () => {
+    const proxy = createProxy({ upstream: 'https://api.anthropic.com', apiKey: 'k' });
+    const restore = mockUpstream();
+
+    // No top-level model → fail-closed passthrough. The old 8KB regex scan
+    // would have matched the decoy below and treated the request as supported.
+    const body = {
+      system: 'x'.repeat(2000),
+      messages: [{ role: 'user', content: 'example request: {"model":"claude-fable-5","max_tokens":1}' }],
+    };
+    const res = await proxy(
+      new Request('https://p/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify(body)),
+      }),
+    );
+    restore();
+
+    expect(res.status).toBe(200);
+    const sent = (await res.json()) as typeof body;
+    expect(sent.system).toBe('x'.repeat(2000));
+    expect(sent.messages[0]!.content).toContain('"model":"claude-fable-5"');
+  });
+});
+
+describe('upstream fetch failure telemetry is redacted', () => {
+  it('ProxyEvent.error passes through redactErrorBody like errorBody does', async () => {
+    const fakeKey = `sk-ant-api03-${'A'.repeat(85)}`;
+    const real = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.reject(new Error(`connect failed with auth ${fakeKey}`))) as typeof fetch;
+
+    const events: { error?: string }[] = [];
+    const proxy = createProxy({
+      upstream: 'https://api.anthropic.com',
+      apiKey: 'k',
+      onRequest: (e) => { events.push(e as { error?: string }); },
+    });
+    const res = await proxy(
+      new Request('https://p/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: enc.encode(JSON.stringify({ model: 'claude-fable-5', messages: [] })),
+      }),
+    );
+    globalThis.fetch = real;
+
+    expect(res.status).toBe(502);
+    await settle(() => events.length >= 1);
+    const err = events[0]!.error ?? '';
+    expect(err).toContain('upstream_error:');
+    expect(err).toContain('[REDACTED:anthropic_key]');
+    expect(err).not.toContain(fakeKey);
+  });
+});

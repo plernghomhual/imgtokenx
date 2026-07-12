@@ -120,13 +120,17 @@ export interface ProxyEvent {
 /** Max chars of 4xx error body captured on ProxyEvent — enough for Anthropic's full error JSON. */
 const ERROR_BODY_MAX = 2048;
 
-/** Read the top-level `model` field from a /v1/messages body without parsing the full JSON.
- *  Returns null when not found — callers treat null as outside supported scope (fail-closed). */
+/** Read the top-level `model` field from a request body. Full JSON.parse, not a
+ *  regex scan — a `"model":"..."` substring inside message content (e.g. a pasted
+ *  API example) must not misdirect eligibility gating. Returns null when the body
+ *  is unparseable or `model` is not a plausible string — callers treat null as
+ *  outside supported scope (fail-closed). */
 function readModelField(body: Uint8Array): string | null {
   try {
-    const head = new TextDecoder().decode(body.subarray(0, 8192));
-    const m = /"model"\s*:\s*"([^"]{1,80})"/.exec(head);
-    return m ? m[1]! : null;
+    const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const model = (parsed as { model?: unknown }).model;
+    return typeof model === 'string' && model.length >= 1 && model.length <= 80 ? model : null;
   } catch {
     return null;
   }
@@ -835,7 +839,15 @@ export function parseGatewayHeaders(spec: string | undefined): Record<string, st
   if (!spec) return {};
   const trimmed = spec.trim();
   if (trimmed.startsWith('{')) {
-    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(
+        `IMGTOKENX_GATEWAY_HEADERS looks like JSON but failed to parse (${(e as Error).message}). ` +
+          `Use a JSON object like {"x-key":"v"} or the k=v;k2=v2 form.`,
+      );
+    }
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(obj)) out[k] = String(v);
     return out;
@@ -1283,9 +1295,10 @@ export function createProxy(config: ProxyConfig = {}) {
       // failure so the on-disk telemetry (and the 502 body) doesn't lie
       // about an unreachable upstream when the client just disconnected.
       const aborted = isAbortError(e, callerSignal);
-      fire(502, info, aborted
-        ? `upstream_aborted: ${(e as Error).message ?? 'client disconnected'}`
-        : `upstream_error: ${(e as Error).message}`);
+      // Same redaction as errorBody (line ~469): fetch error messages can echo
+      // URLs/headers from the failed request — never persist them raw.
+      const detail = redactErrorBody((e as Error).message ?? 'client disconnected');
+      fire(502, info, aborted ? `upstream_aborted: ${detail}` : `upstream_error: ${detail}`);
       return new Response(
         JSON.stringify({
           error: aborted ? 'imgtokenx request aborted' : 'imgtokenx upstream unreachable',

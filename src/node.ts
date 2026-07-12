@@ -81,6 +81,12 @@ interface RuntimeConfig {
   upstream: string;
   openAIUpstream: string;
   openCodeUpstream: string;
+  /** Deliberate divergence from worker.ts: no Anthropic `apiKey` field here.
+   *  The local proxy always passes the client's own x-api-key/authorization
+   *  through untouched (Claude Code already holds credentials); only the
+   *  Worker deployment injects a server-side ANTHROPIC_API_KEY, gated behind
+   *  IMGTOKENX_WORKER_SECRET. openAIApiKey exists because the OpenAI-compat
+   *  path may target a gateway that needs its own key. */
   openAIApiKey?: string;
   provider?: 'cloudflare-ai-gateway';
   gatewayBaseUrl?: string;

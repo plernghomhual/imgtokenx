@@ -281,6 +281,22 @@ describe('renderer', () => {
     expect(maxFittingCols(30, 20)).toBeLessThan(maxFittingCols(30));
   });
 
+  it('multi-col with negative cellWBonus widens by the glyph overhang (no scanline wrap)', async () => {
+    // cellW 4 < atlasW 5: every glyph is 5px wide with a 4px advance. Without
+    // the overhang term + blit right-edge clamp, the last glyph of the last
+    // column wrote past the canvas width and wrapped onto the next scanline.
+    const style = { cellWBonus: -1 }; // 5x8 -> 4x8
+    const cols = 30;
+    const text = ('a'.repeat(cols) + '\n').repeat(40); // full-width lines ink the last cell
+    const imgs = await renderTextToPngsMultiCol(text, cols, 2, style);
+    expect(imgs.length).toBeGreaterThan(0);
+    expect(imgs[0]!.width).toBe(multiColWidth(cols, 2, 4, 5));
+    expect(imgs[0]!.width).toBe(multiColWidth(cols, 2, 4) + 1); // exactly the 1px overhang
+    // Deterministic and well-formed output on the overhang path.
+    const again = await renderTextToPngsMultiCol(text, cols, 2, style);
+    expect(again[0]!.png).toEqual(imgs[0]!.png);
+  });
+
   it('multi-col preserves CJK wide-glyph wrap math (no dropped chars on Chinese input)', async () => {
     // Wide glyphs are 2 cells in both layouts; multi-col must not regress
     // the wrap math or atlas lookup.

@@ -20,3 +20,12 @@ minimumReleaseAgeExclude:
 # Don't apply .pnpmfile.cjs overrides. We don't ship one today; belt-and-braces
 # lockout so a future pnpmfile can't quietly rewrite dependency semantics.
 ignorePnpmfile: true
+
+# Security floors for transitive deps (CVE-patched minimums). Lives here, not
+# in package.json `pnpm.overrides` — pnpm >10.21 ignores that field ("no longer
+# read by pnpm" warning) while this yaml is read by both old and new pnpm.
+overrides:
+  "ws@>=8.0.0 <8.20.1": ^8.20.1
+  "vite@>=8.0.0 <8.0.16": ^8.0.16
+  "undici@>=7.0.0 <7.28.0": ^7.28.0
+  "esbuild@>=0.27.3 <0.28.1": ^0.28.1

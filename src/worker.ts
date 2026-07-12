@@ -168,6 +168,9 @@ export default {
     const sharedUpstream = env.IMGTOKENX_UPSTREAM;
     const config: ProxyConfig = {
       upstream: env.ANTHROPIC_UPSTREAM ?? sharedUpstream ?? 'https://api.anthropic.com',
+      // Server-side key injection is Worker-only (guarded above by
+      // IMGTOKENX_WORKER_SECRET). The Node host deliberately has no apiKey —
+      // it passes the client's own credentials through (see node.ts).
       apiKey: env.ANTHROPIC_API_KEY,
       openAIUpstream: env.OPENAI_UPSTREAM ?? sharedUpstream ?? 'https://api.openai.com',
       openAIApiKey: env.OPENAI_API_KEY,

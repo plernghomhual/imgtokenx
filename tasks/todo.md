@@ -1234,3 +1234,50 @@ No push, deployment, daemon restart, or live configuration mutation performed.
 - Behavior changed: OpenCode Zen is first-class and auth-isolated; optional `dedup`/`lazy`/`state` context storage, exact deltas/checkpoints, retrieval tools, output guidance, and telemetry are available; defaults remain conservative (`virtualContext=off`).
 - Verification performed: source + strict test/script typechecks; 69 files / 1,020 tests; build; restart 4/4; package smoke; release check; Worker dry-run; diff, dependency, and secret scans; commit `ac48f45` pushed to `origin/main`.
 - Remaining risks: live provider billing/quality was not exercised; virtual modes remain opt-in pending real workload evals; commented JSONC is refused explicitly rather than rewritten; Wrangler's dry-run passed but its optional user-log write was sandbox-denied.
+
+---
+
+## 2026-07-12 — Post-audit remediation (approved batch)
+
+- [x] 1. engines.node >=18.17 (package.json)
+- [x] 2. Move pnpm.overrides → pnpm-workspace.yaml overrides:; regen lockfile; verify overrides persist
+- [x] 3. restart.sh: scope pgrep to repo path (HIGH-2) + lsof multi-PID fix
+- [x] 4. install.ts: launchctl/mcp compensating undo steps (HIGH-1 minimal)
+- [x] 5. install.ts: ignoreFailure on uninstall mcp removes (idempotency)
+- [x] 6. proxy.ts: redact ProxyEvent.error (MED-3) + parity test
+- [x] 7. proxy.ts: readModelField JSON.parse fail-closed (MED-4) + decoy test
+- [x] 8. proxy.ts: parseGatewayHeaders actionable error
+- [x] 9. render.ts: multiColWidth overhang + blitter x-bounds guards (MED-5) + test
+- [x] 10. sessions.ts: delete dead prune()/selectSessionsToRemove()
+- [x] 11. sessions.ts: mtime/size cache for aggregateSessions
+- [x] 12. fragments.ts: escape key/note in mathRow
+- [x] 13. mcp.ts: stdio line-length cap
+- [x] 14. release-check.mjs: verify all 7 export subpaths
+- [x] 15. image-budget.test.ts: unconditional assertions
+- [x] 16. docs-integrity test: bind-auth env vars documented
+- [x] 17. README: document IMGTOKENX_PROXY_TOKEN/IMGTOKENX_ALLOWED_HOSTS + HOST=0.0.0.0 warning
+- [x] 18. transform.ts:141 stale losslessExact comment
+- [x] 19. apiKey divergence doc comment (node.ts/worker.ts)
+- [x] 20. dashboard no-Origin contract test
+- [x] 21. Full gate suite
+
+Deferred to plan mode: installer hardening (lock, shell/OS detect, .bak prune, full transactional rework), retention budget split, secret-compare unification, vendor hash verification.
+
+### Final review — 2026-07-12 remediation batch
+
+**Files changed (24):** package.json, pnpm-workspace.yaml, pnpm-lock.yaml (regenerated, no content drift), README.md, scripts/restart.sh, scripts/release-check.mjs, src/install.ts, src/core/proxy.ts, src/core/render.ts, src/core/transform.ts, src/sessions.ts, src/dashboard/fragments.ts, src/mcp.ts, src/node.ts, src/worker.ts + 9 test files.
+
+**Behavior changed:**
+- restart.sh only kills proxies belonging to THIS repo (argv path or process cwd match) — HIGH-2.
+- install rollback now compensates live side effects (launchctl bootout, claude/codex mcp remove) — HIGH-1 minimal; uninstall mcp removes are idempotent (ignoreFailure) instead of aborting+resurrecting files.
+- ProxyEvent.error redacted (secrets → [REDACTED:kind]); model gating full-JSON-parses top-level model only; IMGTOKENX_GATEWAY_HEADERS malformed JSON → actionable error.
+- render multi-col width accounts for glyph overhang (negative cellWBonus no longer scanline-wraps); blitters clamp x-bounds.
+- sessions.ts: dead prune() code deleted (-181 lines); aggregateSessions mtime/size cache.
+- fragments.ts mathRow escapes key; mcp.ts stdio 8 MiB line cap; release-check verifies every exports subpath.
+- README documents off-host exposure contract (IMGTOKENX_ALLOWED_HOSTS/PROXY_TOKEN/DASHBOARD_TOKEN/HEALTHZ_TOKEN + HOST=0.0.0.0 warning), pinned by new docs-integrity test.
+- Vacuous image-budget tests fixed (claude-sonnet-4-5 → reader_profile_unsafe early return meant assertions never ran; now claude-opus-4-8, unconditional).
+- Doc fixes: losslessExact comment (unconditional, not sidecar-dependent), apiKey divergence node.ts vs worker.ts, dashboard no-Origin contract test.
+
+**Verification:** full gate exit 0 — typecheck:all OK; vitest 1029/1029 (69 files); build OK; test:restart 4/4; package smoke OK; worker wrangler dry-run OK; release:check OK (v0.8.0). Per-item targeted runs during work: release-check 9/9, image-budget 16/16, docs-integrity 4/4, dashboard-api 34/34, install-mid-failure+rollback 19/19, render 147/147, proxy/gateway/redact 97/97, sessions batch 57/57.
+
+**Remaining risks / deferred (plan-mode phase):** installer hardening rework (lock, shell/OS detect, .bak prune), retention budget split, secret-compare unification, vendor bundle hash verification. One deliberate contract change: uninstall no longer rolls back when `claude mcp remove` fails (idempotency over strict D20 rollback); test updated to pin new behavior.

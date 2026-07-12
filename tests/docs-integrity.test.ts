@@ -109,6 +109,23 @@ describe('docs integrity', () => {
     expect(dead, `dead relative links:\n${dead.join('\n')}`).toEqual([]);
   });
 
+  it('README documents every bind-auth env var (off-host exposure contract)', () => {
+    // src/core/bind-auth.ts gates off-host callers on these env vars. An
+    // operator who binds HOST=0.0.0.0 discovers them from the README — if a
+    // rename or doc rewrite drops one, this fails before the doc drift ships.
+    const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+    for (const envVar of [
+      'IMGTOKENX_ALLOWED_HOSTS',
+      'IMGTOKENX_PROXY_TOKEN',
+      'IMGTOKENX_DASHBOARD_TOKEN',
+      'IMGTOKENX_HEALTHZ_TOKEN',
+      'IMGTOKENX_WORKER_SECRET',
+    ]) {
+      expect(readme, `README.md must document ${envVar}`).toContain(envVar);
+    }
+    expect(readme).toContain('HOST=0.0.0.0');
+  });
+
   it('every #fragment resolves to a heading in the target markdown file', () => {
     const dead: string[] = [];
     for (const rel of files) {

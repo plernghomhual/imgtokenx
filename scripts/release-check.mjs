@@ -26,10 +26,21 @@ if (!pkg.scripts?.['test:restart']) {
 }
 
 // dist/ must be built — this script previously passed on an EMPTY dist/,
-// blessing a tarball whose exports map points at nothing. Spot-check the
-// package entrypoint plus the bundled CLI.
-for (const artifact of ['dist/core/index.js', 'dist/node.js']) {
-  if (!existsSync(artifact)) failures.push(`${artifact} missing — run \`pnpm run build\` first`);
+// blessing a tarball whose exports map points at nothing. Walk the exports
+// map itself so every promised subpath (import + types) exists on disk;
+// a new export added to package.json is covered automatically.
+if (!pkg.exports || typeof pkg.exports !== 'object' || Object.keys(pkg.exports).length === 0) {
+  failures.push('package.json "exports" map missing — dist artifacts cannot be verified');
+}
+for (const [subpath, entry] of Object.entries(pkg.exports ?? {})) {
+  for (const kind of ['import', 'types']) {
+    const rel = entry?.[kind];
+    if (typeof rel !== 'string') {
+      failures.push(`exports["${subpath}"] missing "${kind}" target`);
+    } else if (!existsSync(rel)) {
+      failures.push(`exports["${subpath}"].${kind} → ${rel} missing — run \`pnpm run build\` first`);
+    }
+  }
 }
 
 const PnpmOnlyKeys = ['minimum-release-age', 'minimum-release-age-exclude', 'ignore-pnpmfile'];

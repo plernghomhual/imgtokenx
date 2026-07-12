@@ -230,9 +230,11 @@ export function renderSessionSummaryFragment(s: StatsPayload): string {
 
 // ---- stat strip + "Show the math" drawer ----------------------------------
 
-function mathRow(key: string, val: number | string | undefined, note = ''): string {
+/** `noteHtml` is TRUSTED markup (callers embed <span class="op"> operators) —
+ *  never pass user- or event-derived strings through it. key/val are escaped. */
+function mathRow(key: string, val: number | string | undefined, noteHtml = ''): string {
   const v = typeof val === 'number' ? numFmt(val) : String(val ?? '-');
-  return `<div><span class="k">${key}:</span> <span class="v">${escapeHtml(v)}</span> <span class="k">${note}</span></div>`;
+  return `<div><span class="k">${escapeHtml(key)}:</span> <span class="v">${escapeHtml(v)}</span> <span class="k">${noteHtml}</span></div>`;
 }
 
 function mathBlock(title: string, body: string): string {
