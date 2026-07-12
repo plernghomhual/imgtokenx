@@ -618,8 +618,8 @@ function withInstallLock<T>(home: string, fn: () => T): T {
 }
 
 export function runInstall(opts: InstallOptions = {}): InstallResult {
-  const plan = buildInstallPlan(opts);
   if (opts.dryRun) {
+    const plan = buildInstallPlan(opts);
     const actions: string[] = [];
     printDryRun(plan, true, Boolean(opts.skipMcp));
     return { plan, actions };
@@ -627,6 +627,7 @@ export function runInstall(opts: InstallOptions = {}): InstallResult {
   if ((opts.platform ?? process.platform) !== 'darwin') {
     throw new Error('imgtokenx install supports macOS (launchd) only — see README for manual setup');
   }
+  const plan = buildInstallPlan(opts);
   return withInstallLock(plan.home, () => runInstallLocked(plan, opts));
 }
 
@@ -699,8 +700,8 @@ function runInstallLocked(plan: InstallPlan, opts: InstallOptions): InstallResul
 }
 
 export function runUninstall(opts: InstallOptions = {}): InstallResult {
-  const plan = buildInstallPlan(opts);
   if (opts.dryRun) {
+    const plan = buildInstallPlan(opts);
     const actions: string[] = [];
     printDryRun(plan, false, Boolean(opts.skipMcp));
     return { plan, actions };
@@ -708,6 +709,7 @@ export function runUninstall(opts: InstallOptions = {}): InstallResult {
   if ((opts.platform ?? process.platform) !== 'darwin') {
     throw new Error('imgtokenx install supports macOS (launchd) only — see README for manual setup');
   }
+  const plan = buildInstallPlan(opts);
   return withInstallLock(plan.home, () => runUninstallLocked(plan, opts));
 }
 

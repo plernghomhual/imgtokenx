@@ -112,6 +112,19 @@ describe('install — atomic write + rollback', () => {
       })).toThrow('imgtokenx install supports macOS (launchd) only — see README for manual setup');
     }
     expect(fs.readdirSync(fx.home)).toEqual([]);
+
+    const configDir = path.join(fx.home, '.config', 'opencode');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'opencode.json'), '{}');
+    fs.writeFileSync(path.join(configDir, 'opencode.jsonc'), '{}');
+    expect(() => runInstall({
+      home: fx.home,
+      repoRoot: fx.repoRoot,
+      platform: 'linux',
+      spawnSync: processOk,
+    })).toThrow('imgtokenx install supports macOS (launchd) only — see README for manual setup');
+    expect(fs.existsSync(path.join(fx.home, '.imgtokenx'))).toBe(false);
+    expect(fs.existsSync(path.join(fx.home, 'Library'))).toBe(false);
   });
 
   it('keeps only the five newest rc-file backups after success', () => {
