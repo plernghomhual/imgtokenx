@@ -211,6 +211,42 @@ describe('install artifacts', () => {
     }
   });
 
+  it('doctor reads large OpenCode configs through the temp-file fd (Bun >64KiB pipe truncation)', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-doctor-bigcfg-'));
+    try {
+      const plan = buildInstallPlan({ home, repoRoot: '/repo/imgtokenx', nodePath: '/node' });
+      // Real-world shape: resolved config far past the 64KiB pipe buffer.
+      const bigConfig = JSON.stringify({
+        provider: { opencode: { options: { baseURL: plan.openCodeBaseUrl } } },
+        mcp: { [MCP_SERVER_NAME]: plan.opencodeMcp },
+        padding: 'x'.repeat(2 * 65536),
+      });
+      const result = await runDoctor(
+        { home, repoRoot: '/repo/imgtokenx', nodePath: '/node', skipMcp: true },
+        {
+          fetch: (async () => new Response('{}', { status: 200 })) as typeof fetch,
+          spawnSync: ((cmd: string, _args: string[], opts: { stdio?: unknown[] }) => {
+            if (cmd === 'opencode') {
+              // Mimic the real binary: write to whatever stdout target the
+              // caller wired up. A pipe would truncate this payload; the fd
+              // path must receive it whole. stdout stays null like a real
+              // fd-redirected spawnSync result.
+              const fd = opts.stdio?.[1];
+              if (typeof fd !== 'number') throw new Error('expected fd stdout redirect');
+              fs.writeSync(fd, bigConfig);
+              return { status: 0, stdout: null, stderr: '' };
+            }
+            return { status: 0, stdout: '', stderr: '' };
+          }) as any,
+        },
+      );
+      const check = result.checks.find((item) => item.name === 'OpenCode proxy');
+      expect(check?.status).toBe('pass');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('doctor rejects a higher-precedence OpenCode config that bypasses the proxy', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'imgtokenx-doctor-override-'));
     try {

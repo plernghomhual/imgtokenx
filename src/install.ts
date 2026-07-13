@@ -910,22 +910,39 @@ function resolvedOpenCodeConfig(deps: DoctorDeps): {
   error?: string;
 } {
   const sp = deps.spawnSync ?? spawnSync;
-  const result = sp('opencode', ['debug', 'config', '--pure'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 3_000,
-  });
-  if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
-    return { unavailable: true };
-  }
-  if (result.status !== 0) {
-    return { error: 'opencode debug config --pure failed' };
+  // The Bun-based `opencode` binary can exit before flushing large piped
+  // stdout, truncating resolved configs >64KiB mid-JSON. Capture stdout via
+  // a temp-file fd instead of a pipe; injected test doubles that ignore the
+  // fd and return a `stdout` string still work (piped stdout wins when
+  // non-empty).
+  const tmp = path.join(os.tmpdir(), `imgtokenx-doctor-opencode-${process.pid}-${randomUUID()}.json`);
+  const fd = fs.openSync(tmp, 'w');
+  let result: ReturnType<typeof spawnSync>;
+  try {
+    result = sp('opencode', ['debug', 'config', '--pure'], {
+      encoding: 'utf8',
+      stdio: ['ignore', fd, 'pipe'],
+      timeout: 3_000,
+    });
+  } finally {
+    fs.closeSync(fd);
   }
   try {
-    const parsed = JSON.parse(String(result.stdout ?? '')) as unknown;
-    return { config: configObject(parsed, 'resolved root') };
-  } catch {
-    return { error: 'opencode debug config --pure returned invalid JSON' };
+    if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { unavailable: true };
+    }
+    if (result.status !== 0) {
+      return { error: 'opencode debug config --pure failed' };
+    }
+    try {
+      const raw = String(result.stdout ?? '') || fs.readFileSync(tmp, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      return { config: configObject(parsed, 'resolved root') };
+    } catch {
+      return { error: 'opencode debug config --pure returned invalid JSON' };
+    }
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best-effort cleanup */ }
   }
 }
 
