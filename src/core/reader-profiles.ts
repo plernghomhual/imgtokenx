@@ -60,10 +60,10 @@ function isBaseOrAlias(m: string, base: string): boolean {
  * - claude-fable-5 / generic gpt-5.6: calibrated pipeline models. Proven safe at
  *   the bare 5×8 production cell (no bonus) — see docs/RENDER_SIZING.md /
  *   FINDINGS.md's Fable 5 measurements.
- * - claude-opus-4- (any Opus 4.x): FINDINGS.md 2026-06-16 sweep (carried forward via
- *   the 2026-07-05 capacity-argument update): "Opus 4.8: 10% exact at the 5×8
- *   production cell, 95% at 10×16, 100% at 20×32; n=20 ids/size". 20×32 = 5+15 ×
- *   8+24, hence cellWBonus:15, cellHBonus:24.
+ * - claude-opus-4- (any Opus 4.x): FINDINGS.md 2026-06-16 sweep originally set 20×32
+ *   (5+15 × 8+24). Recalibrated 2026-07-13 (keyless sweep, same method/fixture as
+ *   sonnet-5 below): 12×20 (cellWBonus:7, cellHBonus:12) PASSED 4/4 clean runs, 6/6
+ *   each, zero confabulation — supersedes the 2026-06-16 finding at this density.
  * - claude-haiku-4-5: 2026-07-10 keyless calibration (the eval/reader-capacity fixture
  *   rendered to PNGs by the production renderer, read by subscription-side subagents on
  *   each model; one agent per density so answers can't leak across variants). Scored
@@ -96,7 +96,7 @@ const BUILTIN_RULES: ProfileRule[] = [
   // Prefix already dash-terminated, so `claude-opus-40` etc. cannot false-match.
   {
     test: (m) => m.startsWith('claude-opus-4-'),
-    profile: { safeToImage: true, cellWBonus: 15, cellHBonus: 24 },
+    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-5'),

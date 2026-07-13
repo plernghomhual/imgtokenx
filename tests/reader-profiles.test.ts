@@ -14,9 +14,9 @@ describe('resolveReaderProfile (built-in table)', () => {
     expect(resolveReaderProfile('gpt-5.6-sol-codex[1m]')).toEqual(DEFAULT_READER_PROFILE);
   });
 
-  it('claude-opus-4-* gets the measured 20x32 cell bonus (cellWBonus:15, cellHBonus:24)', () => {
-    expect(resolveReaderProfile('claude-opus-4-8')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
-    expect(resolveReaderProfile('claude-opus-4-7')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
+  it('claude-opus-4-* gets the recalibrated 12x20 cell (2026-07-13 keyless sweep)', () => {
+    expect(resolveReaderProfile('claude-opus-4-8')).toEqual({ safeToImage: true, cellWBonus: 7, cellHBonus: 12 });
+    expect(resolveReaderProfile('claude-opus-4-7')).toEqual({ safeToImage: true, cellWBonus: 7, cellHBonus: 12 });
   });
 
   it('claude-haiku-4-5 gets the calibrated 20x32 cell (2026-07-10 keyless sweep)', () => {
@@ -37,7 +37,7 @@ describe('resolveReaderProfile (built-in table)', () => {
 
   it('strips bracketed variant tags before matching, same as applicability.ts', () => {
     expect(resolveReaderProfile('claude-fable-5[1m]')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
-    expect(resolveReaderProfile('claude-opus-4-8[1m]')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
+    expect(resolveReaderProfile('claude-opus-4-8[1m]')).toEqual({ safeToImage: true, cellWBonus: 7, cellHBonus: 12 });
   });
 
   it('a bare prefix does not false-match an unrelated model (e.g. claude-fable-50)', () => {
@@ -113,7 +113,7 @@ describe('transformRequest reader-profile gate (integration)', () => {
     expect(hasImage).toBe(false);
   });
 
-  it('keeps calibrated Opus 20x32 pages within Anthropic\'s 1568px no-resize edge', async () => {
+  it('keeps calibrated Opus 12x20 pages within Anthropic\'s 1568px no-resize edge', async () => {
     const system = 'x'.repeat(150_000);
     const reqFor = (model: string) => new TextEncoder().encode(JSON.stringify({
       model,
@@ -130,7 +130,7 @@ describe('transformRequest reader-profile gate (integration)', () => {
     expect(fable.info.imageDims![0]!.width).toBe(1568);
     expect(opus.info.imageDims![0]!.width).toBe(1568);
     expect(opus.info.imageDims!.every(({ width, height }) => width <= 1568 && height <= 728)).toBe(true);
-    // Larger cells reduce each page to 78x22 characters, so the same source needs more pages.
+    // Larger cells reduce each page's character grid, so the same source needs more pages.
     expect(opus.info.imageCount).toBeGreaterThan(fable.info.imageCount);
   });
 });
