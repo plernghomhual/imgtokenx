@@ -1297,7 +1297,13 @@ export function createProxy(config: ProxyConfig = {}) {
       const aborted = isAbortError(e, callerSignal);
       // Same redaction as errorBody (line ~469): fetch error messages can echo
       // URLs/headers from the failed request — never persist them raw.
-      const detail = redactErrorBody((e as Error).message ?? 'client disconnected');
+      // undici wraps every network/body failure in a generic "fetch failed"
+      // TypeError — the diagnosable error lives in `cause`. Include it or the
+      // telemetry can't distinguish DNS failure from a malformed body.
+      const cause = (e as Error & { cause?: unknown }).cause;
+      const detail = redactErrorBody(
+        ((e as Error).message ?? 'client disconnected') + (cause ? ` (cause: ${String(cause)})` : ''),
+      );
       fire(502, info, aborted ? `upstream_aborted: ${detail}` : `upstream_error: ${detail}`);
       return new Response(
         JSON.stringify({
