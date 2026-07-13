@@ -223,6 +223,19 @@ describe('serveFragment', () => {
     dash.handleCompressionToggle({ enabled: true });
   });
 
+  it('mutating buttons JSON-encode via the json-vals htmx extension (endpoints are strict-JSON)', async () => {
+    // Regression: audit D19 made /fragments/models and /fragments/toggle
+    // reject non-JSON bodies, but htmx posts urlencoded by default — every
+    // dashboard chip/toggle click 400ed until the buttons opted into the
+    // inline json-vals extension.
+    const toggle = await (await dash.serveFragment('toggle', url, 1234)).text();
+    expect(toggle).toContain('hx-ext="json-vals"');
+    const models = await (await dash.serveFragment('models', url, 1234)).text();
+    expect(models).toContain('hx-ext="json-vals"');
+    const { renderPage } = await import('../src/dashboard/fragments.js');
+    expect(renderPage(1234)).toContain("htmx.defineExtension('json-vals'");
+  });
+
   it('sends every toggle to the durable global-state writer', async () => {
     const persisted: boolean[] = [];
     const persistentDash = new DashboardState(

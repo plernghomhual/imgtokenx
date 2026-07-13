@@ -68,7 +68,7 @@ export function renderToggleFragment(enabled: boolean): string {
     banner +
     `<div class="switch">` +
     `<span class="switch-state ${enabled ? 'on' : 'off'}"><span class="switch-dot"></span>${enabled ? 'imgtokenx on' : 'imgtokenx off'}</span>` +
-    `<button class="switch-btn" type="button" hx-post="/fragments/toggle" hx-target="#frag-toggle" hx-vals='{"enabled": ${!enabled}}'${confirm}>` +
+    `<button class="switch-btn" type="button" hx-post="/fragments/toggle" hx-ext="json-vals" hx-target="#frag-toggle" hx-vals='{"enabled": ${!enabled}}'${confirm}>` +
     (enabled ? 'Turn imgtokenx off' : 'Turn imgtokenx on') +
     `</button>` +
     `<span class="hint">global kill switch · saved across restarts</span>` +
@@ -145,7 +145,7 @@ export function renderModelsFragment(
     return (
       `<button class="chip ${mode.safe ? 'image-ready' : 'text-only'}${lit ? ' on' : ''}" type="button" ` +
       `aria-pressed="${lit}" aria-label="Toggle ${escapeHtml(label)} runtime scope" ` +
-      `hx-post="/fragments/models" hx-target="#frag-models" ` +
+      `hx-post="/fragments/models" hx-ext="json-vals" hx-target="#frag-models" ` +
       `hx-vals="${vals}"><span>${escapeHtml(label)}${lit ? ' ✓' : ''}</span><span class="chip-mode">${mode.label}</span></button>`
     );
   };
@@ -1125,6 +1125,19 @@ const GLUE_JS = `
     window.dispatchEvent(new CustomEvent('pp-toast', {
       detail: { text: 'proxy unreachable: ' + ev.detail.requestConfig.path }
     }));
+  });
+  // The mutation endpoints accept strict JSON only (parseModelsPayload /
+  // parseTogglePayload), but htmx posts urlencoded by default. Both mutating
+  // buttons carry their complete, correctly-typed payload in hx-vals, so this
+  // extension sends that attribute verbatim as the request body.
+  htmx.defineExtension('json-vals', {
+    onEvent: function (name, ev) {
+      if (name === 'htmx:configRequest') ev.detail.headers['Content-Type'] = 'application/json';
+    },
+    encodeParameters: function (xhr, params, elt) {
+      xhr.overrideMimeType('text/json');
+      return elt.getAttribute('hx-vals');
+    }
   });
 `;
 
