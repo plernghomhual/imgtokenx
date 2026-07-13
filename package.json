@@ -56,9 +56,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:restart": "bash tests/restart.test.sh",
+    "test:http": "node scripts/http-smoke.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "test:worker": "wrangler deploy --dry-run --outdir /tmp/imgtokenx-wrangler-dry-run",
-    "check": "pnpm run typecheck:all && pnpm test && pnpm run build && pnpm run test:restart && pnpm run test:package && pnpm run test:worker && pnpm run release:check",
+    "check": "pnpm run typecheck:all && pnpm test && pnpm run build && pnpm run test:restart && pnpm run test:http && pnpm run test:package && pnpm run test:worker && pnpm run release:check",
     "prepublishOnly": "pnpm run check",
     "vendor:ui": "node scripts/vendor-ui.mjs",
     "release:check": "node scripts/release-check.mjs"

@@ -1417,12 +1417,18 @@ export async function main(): Promise<void> {
     // running on the upstream. A single controller covers both because the
     // proxy only needs to know "did the client give up?".
     const abortCtrl = new AbortController();
-    const onReqAbort = (): void => { abortCtrl.abort(); };
-    const onResAbort = (): void => { abortCtrl.abort(); };
-    req.once('close', onReqAbort);
-    req.once('error', onReqAbort);
-    res.once('close', onResAbort);
-    res.once('error', onResAbort);
+    // Node ≥15 emits 'close' on IncomingMessage when the MESSAGE completes
+    // (right after the body is consumed), not when the client disconnects.
+    // An unconditional req-'close' abort therefore cancelled every upstream
+    // fetch as soon as the request body finished uploading — 502 "request
+    // aborted" on all proxied traffic. A genuinely abandoned client always
+    // closes the response stream before it finished, so gate on that.
+    const onDisconnect = (): void => {
+      if (!res.writableFinished) abortCtrl.abort();
+    };
+    req.once('error', onDisconnect);
+    res.once('close', onDisconnect);
+    res.once('error', onDisconnect);
     Promise.resolve()
       .then(async () => {
         // Audit E4: every Node-side request runs through bindAuth BEFORE
@@ -1488,10 +1494,9 @@ export async function main(): Promise<void> {
         // Audit E3: detach abort listeners so a long-lived Node process
         // doesn't accumulate one listener per request (the standard
         // EventEmitter leak mode if we'd used req.on instead of req.once).
-        req.off('close', onReqAbort);
-        req.off('error', onReqAbort);
-        res.off('close', onResAbort);
-        res.off('error', onResAbort);
+        req.off('error', onDisconnect);
+        res.off('close', onDisconnect);
+        res.off('error', onDisconnect);
       });
   });
 
