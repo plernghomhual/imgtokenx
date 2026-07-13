@@ -19,15 +19,20 @@ describe('resolveReaderProfile (built-in table)', () => {
     expect(resolveReaderProfile('claude-opus-4-7')).toEqual({ safeToImage: true, cellWBonus: 15, cellHBonus: 24 });
   });
 
-  it('claude-sonnet-5 / claude-haiku-4-5 get the calibrated 20x32 cell (2026-07-10 keyless sweep)', () => {
+  it('claude-haiku-4-5 gets the calibrated 20x32 cell (2026-07-10 keyless sweep)', () => {
     const at20x32 = { safeToImage: true, cellWBonus: 15, cellHBonus: 24 };
-    expect(resolveReaderProfile('claude-sonnet-5')).toEqual(at20x32);
-    expect(resolveReaderProfile('claude-sonnet-5-20260315')).toEqual(at20x32);
     expect(resolveReaderProfile('claude-haiku-4-5')).toEqual(at20x32);
     expect(resolveReaderProfile('claude-haiku-4-5-20251001')).toEqual(at20x32);
     // Suffix-alias match must not catch unrelated future ids.
-    expect(resolveReaderProfile('claude-sonnet-50')).toEqual(DEFAULT_READER_PROFILE);
     expect(resolveReaderProfile('claude-haiku-4-50')).toEqual(DEFAULT_READER_PROFILE);
+  });
+
+  it('claude-sonnet-5 gets the recalibrated 12x20 cell (2026-07-13 keyless sweep)', () => {
+    const at12x20 = { safeToImage: true, cellWBonus: 7, cellHBonus: 12 };
+    expect(resolveReaderProfile('claude-sonnet-5')).toEqual(at12x20);
+    expect(resolveReaderProfile('claude-sonnet-5-20260315')).toEqual(at12x20);
+    // Suffix-alias match must not catch unrelated future ids.
+    expect(resolveReaderProfile('claude-sonnet-50')).toEqual(DEFAULT_READER_PROFILE);
   });
 
   it('strips bracketed variant tags before matching, same as applicability.ts', () => {

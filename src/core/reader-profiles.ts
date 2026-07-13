@@ -64,15 +64,19 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   the 2026-07-05 capacity-argument update): "Opus 4.8: 10% exact at the 5×8
  *   production cell, 95% at 10×16, 100% at 20×32; n=20 ids/size". 20×32 = 5+15 ×
  *   8+24, hence cellWBonus:15, cellHBonus:24.
- * - claude-sonnet-5 / claude-haiku-4-5: 2026-07-10 keyless calibration (the
- *   eval/reader-capacity fixture rendered to PNGs by the production renderer, read by
- *   subscription-side subagents on each model; one agent per density so answers can't
- *   leak across variants). Both models scored 6/6 exact+guard ONLY at 20×32; every
- *   smaller density (5×8, 7×10, 9×12) produced at least one CONFABULATED exact value
- *   (invented ports "7821"/"9821" for 47821, invented field name, wrong hex digit) —
- *   the failure mode this table exists to block. Caveat: agents consumed the PNGs via
- *   the harness Read tool, which may resample; pages were kept ≤1568×728 to stay under
- *   the API resample ceiling, matching what the proxy emits.
+ * - claude-haiku-4-5: 2026-07-10 keyless calibration (the eval/reader-capacity fixture
+ *   rendered to PNGs by the production renderer, read by subscription-side subagents on
+ *   each model; one agent per density so answers can't leak across variants). Scored
+ *   6/6 exact+guard ONLY at 20×32; every smaller density (5×8, 7×10, 9×12) produced at
+ *   least one CONFABULATED exact value (invented port, invented field name, wrong hex
+ *   digit) — the failure mode this table exists to block. Caveat: agents consumed the
+ *   PNGs via the harness Read tool, which may resample; pages were kept ≤1568×728 to
+ *   stay under the API resample ceiling, matching what the proxy emits.
+ * - claude-sonnet-5: 2026-07-13 keyless recalibration, same method, intermediate
+ *   densities. 10×16 (cellWBonus:5, cellHBonus:8) FAILED — 1 of 2 runs confabulated
+ *   the hex digit. 12×20 (cellWBonus:7, cellHBonus:12) PASSED 3/3 clean runs, 6/6 each.
+ *   Note 12×20 is a smaller cell — and therefore a smaller/more-profitable image —
+ *   than the earlier 20×32 finding below; the earlier sweep never tried this density.
  * - gpt-5.6-sol: text-only until its raw-image profile clears the exact-recall bar.
  * - everything else: DEFAULT_READER_PROFILE (never imaged; no measurement exists).
  */
@@ -96,7 +100,7 @@ const BUILTIN_RULES: ProfileRule[] = [
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-5'),
-    profile: { safeToImage: true, cellWBonus: 15, cellHBonus: 24 },
+    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-haiku-4-5'),
