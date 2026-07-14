@@ -13,16 +13,21 @@ async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-// These proxy contracts intentionally exercise the opt-in generic GPT path.
+// These proxy contracts exercise an exact GPT variant with a test-only reader override.
 // Preserve the developer shell while making the suite independent of it.
 let ambientImgtokenxModels: string | undefined;
+let ambientReaderProfiles: string | undefined;
 beforeAll(() => {
   ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
-  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+  ambientReaderProfiles = process.env.IMGTOKENX_READER_PROFILES;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-terra';
+  process.env.IMGTOKENX_READER_PROFILES = '{"gpt-5.6-terra":{"safeToImage":true}}';
 });
 afterAll(() => {
   if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
   else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+  if (ambientReaderProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+  else process.env.IMGTOKENX_READER_PROFILES = ambientReaderProfiles;
 });
 
 /** Tiny in-process mock upstream — accepts any request and returns whatever
@@ -247,7 +252,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       messages: [{ role: 'user', content: 'hi' }],
     });
 
@@ -262,7 +267,7 @@ describe('proxy usage extraction', () => {
     await settle(() => captured !== undefined);
     restore();
 
-    expect(captured?.model).toBe('gpt-5.6');
+    expect(captured?.model).toBe('gpt-5.6-terra');
     // Forward went to OpenAI, prefix stripped.
     const fwd = upstreamRequests.find((r) => r.url.endsWith('/v1/chat/completions'));
     expect(fwd).toBeDefined();
@@ -301,7 +306,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       messages: [
         { role: 'system', content: 'System instruction. '.repeat(900) },
         { role: 'user', content: 'hi' },
@@ -362,7 +367,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       messages: [
         { role: 'system', content: 'System instruction. '.repeat(900) },
         { role: 'user', content: 'hi' },
@@ -409,7 +414,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       messages: [
         { role: 'system', content: 'System instruction. '.repeat(900) },
         { role: 'user', content: 'hi' },
@@ -459,7 +464,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       instructions: 'System instruction. '.repeat(900),
       input: [{ role: 'user', content: 'hi' }],
     });
@@ -481,7 +486,7 @@ describe('proxy usage extraction', () => {
     const sent = JSON.parse(await upstreamRequests[0]!.text()) as any;
     const firstUser = sent.input.find((m: any) => m.role === 'user');
     expect(firstUser.content[0].type).toBe('input_image');
-    expect(captured?.model).toBe('gpt-5.6');
+    expect(captured?.model).toBe('gpt-5.6-terra');
     expect(captured?.info?.compressed).toBe(true);
   });
 
@@ -582,7 +587,7 @@ describe('proxy usage extraction', () => {
     });
 
     const reqBody = JSON.stringify({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-terra',
       instructions: 'System instruction. '.repeat(900),
       input: [{ role: 'user', content: 'hi' }],
     });
@@ -604,7 +609,7 @@ describe('proxy usage extraction', () => {
     const sent = JSON.parse(await upstreamRequests[0]!.text()) as any;
     const firstUser = sent.input.find((m: any) => m.role === 'user');
     expect(firstUser.content[0].type).toBe('input_image');
-    expect(captured?.model).toBe('gpt-5.6');
+    expect(captured?.model).toBe('gpt-5.6-terra');
     expect(captured?.info?.compressed).toBe(true);
     expect(captured?.info?.firstUserSha8).toMatch(/^[0-9a-f]{16}$/);
   });
@@ -1975,7 +1980,7 @@ describe('E2 request-body limit', () => {
     await proxy(new Request('http://localhost/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': 'anthropic-key' },
-      body: JSON.stringify({ model: 'gpt-5.6', messages: [] }),
+      body: JSON.stringify({ model: 'gpt-5.6-terra', messages: [] }),
     }));
     restore();
     expect(headers?.get('authorization')).toBe('Bearer openai-key');
@@ -1996,7 +2001,7 @@ describe('E2 request-body limit', () => {
     const proxy = createProxy({ openAIApiKey: 'test', onRequest: (e) => { captured = e; } });
     const res = await proxy(new Request('http://localhost/v1/chat/completions', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-5.6', messages: [] }),
+      body: JSON.stringify({ model: 'gpt-5.6-terra', messages: [] }),
     }));
     await res.text();
     await new Promise((r) => setTimeout(r, 50));

@@ -48,12 +48,12 @@ function configFile(env: ConfigEnv): string {
 }
 
 function normalizeModelsConfig(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    const models = value.map((v) => String(v).trim()).filter(Boolean);
-    return models.length > 0 ? models.join(',') : 'off';
-  }
-  if (typeof value === 'string') return value.trim() || 'off';
-  return undefined;
+  const values = Array.isArray(value)
+    ? value.map(String)
+    : typeof value === 'string' ? value.split(',') : null;
+  if (values === null) return undefined;
+  const models = values.map((v) => v.trim()).filter((v) => v && v !== 'gpt-5.6');
+  return models.length > 0 ? models.join(',') : 'off';
 }
 
 function readConfig(file: string): Record<string, unknown> {
@@ -90,7 +90,8 @@ export function persistModelsConfig(
 ): string {
   const file = configFile(env);
   const cfg = readConfig(file);
-  cfg.models = models.length > 0 ? [...models] : 'off';
+  const normalized = models.map((model) => model.trim()).filter((model) => model && model !== 'gpt-5.6');
+  cfg.models = normalized.length > 0 ? normalized : 'off';
 
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

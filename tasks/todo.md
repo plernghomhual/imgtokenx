@@ -1,3 +1,67 @@
+# 2026-07-13 — Split GPT 5.6 variants
+
+- [x] Replace the generic dashboard entry with Sol, Terra, and Luna siblings.
+- [x] Remove generic scope/profile inheritance so variants are isolated.
+- [x] Add local per-variant scope, passthrough, and explicit image-path tests.
+- [x] Run an independent three-subagent proxy-read sweep across all dimensions.
+- [x] Enable Terra and Luna at the smallest perfect proxy profile.
+- [x] Recalibrate Sol with fresh fixtures and enable its perfect 6×11 proxy profile.
+- [ ] Sweep every existing reader dimension live for all three variants.
+- [x] Run focused and full verification; record live-eval limits/results.
+
+## Review
+
+- Files changed: dashboard catalog/policy rendering; applicability, saved-config,
+  and reader-profile logic; GPT/proxy/config/dashboard tests; model-profile and
+  reader-capacity documentation; seven-dimension evaluation runner.
+- Behavior changed: the dashboard now exposes only GPT 5.6 Sol, Terra, and Luna.
+  A saved or runtime generic `gpt-5.6` scope is discarded, and no sibling
+  inherits another sibling's reader calibration. Terra and Luna image at 5×8;
+  Sol images with its exact-model JetBrains 6×11 profile.
+- Verification performed: focused variant tests 112/112 and proxy-path tests
+  92/92; full Vitest 1,053/1,053 (71 files); both TypeScript checks; build;
+  restart 4/4; HTTP, package, and release smokes; Worker dry-run;
+  `git diff --check`. The dry-run rendered all seven dimensions for all three
+  variants and recorded production GPT image-token economics. Three independent
+  subagent proxy readers then scored six fields at every dimension: Terra and
+  Luna proxies were 42/42 (100%); the Sol proxy was 35/42 (83.3%), consistently
+  lowercasing `tokenLedgerShard`. Every dimension tied at 17/18 (94.4%) across
+  the three proxies. Terra/Luna activation then passed focused tests 94/94,
+  both TypeScript checks, build, full Vitest 1,053/1,053, and `git diff --check`.
+- Sol follow-up evidence: three blind readers × two fresh fixtures × nine
+  profiles × six fields scored 324/324 (100%). Both Spleen 5×8 and the existing
+  JetBrains 6×11 profile passed; 6×11 was enabled without changing the renderer.
+  Focused reader/OpenAI/dashboard tests passed 94/94. The first full run exposed
+  two stale Sol passthrough fixtures (1,051/1,053); after correcting them, the
+  compatibility matrix passed 12/12 and the full suite passed 1,053/1,053.
+- Remaining risk/blocker: exact-provider readability was not measured because
+  `OPENAI_API_KEY` is unavailable. Terra/Luna activation relies on the approved
+  subagent-proxy method; exact-provider Sol still has earlier failed evidence.
+
+---
+
+# 2026-07-13 — Remove obsolete GPT references
+
+- [x] Remove obsolete model references from docs, examples, and tests.
+- [x] Confirm no tracked references remain and review the diff.
+- [x] Run the full repository check suite and record verification.
+
+## Review
+
+- Files changed: `CHANGELOG.md`, `README.md`, reader-capacity examples,
+  affected model fixtures/assertions, and task records.
+- Behavior changed: no production behavior; obsolete references were removed,
+  current fixtures use GPT 5.6 variants, and redundant assertions were deleted.
+- Verification performed: focused Vitest 137/137; full Vitest 1,051/1,051;
+  both TypeScript checks; build; restart 4/4; HTTP and package smokes; Worker
+  dry-run; release check; `git diff --check`; tracked stale-token scan returned
+  no matches.
+- Remaining risks: none known. The full suite and HTTP smoke required normal
+  host process/network permissions because the workspace sandbox blocks
+  `/bin/ps` and localhost binding.
+
+---
+
 # 2026-07-12 — Residual risk closure
 
 - [x] Make install-lock ownership robust to PID reuse.
@@ -265,7 +329,7 @@ Behavior changed:
 - `eval/opus-density/` was not modified.
 
 Verification performed:
-- `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.5 --dry-run --out /tmp/imgtokenx-reader-capacity-dry-run.json`: exit 0; parsed the explicit CLI model list; rendered 5x8/7x10/9x12 as 280/504/728 image tokens vs 1335 text tokens (79%/62%/45% saved); made no model calls.
+- `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.6-sol --dry-run --out /tmp/imgtokenx-reader-capacity-dry-run.json`: exit 0; parsed the explicit CLI model list; rendered 5x8/7x10/9x12 as 280/504/728 image tokens vs 1335 text tokens (79%/62%/45% saved); made no model calls.
 - `env -u ANTHROPIC_API_KEY node eval/reader-capacity/run.mjs --dry-run --out /tmp/imgtokenx-reader-capacity-default-dry-run.json`: exit 0; defaulted to `claude-opus-4-8,claude-fable-5`; rendered the same accounting; made no model calls.
 - `npm run typecheck`: exit 0 (`tsc --noEmit`; npm printed existing unknown-project-config warnings).
 - `npm test`: exit 0; 38 files, 686 tests passed.

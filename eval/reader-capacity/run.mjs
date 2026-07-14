@@ -10,6 +10,7 @@ import { tsImport } from 'tsx/esm/api';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const { renderTextToImages } = await tsImport('../../src/core/library.ts', import.meta.url);
+const { visionTokensForModel } = await tsImport('../../src/core/openai.ts', import.meta.url);
 
 const DEFAULT_MODELS = ['claude-opus-4-8', 'claude-fable-5'];
 
@@ -19,7 +20,7 @@ function usage() {
     '',
     'Examples:',
     '  node eval/reader-capacity/run.mjs --dry-run',
-    '  node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.5 --dry-run',
+    '  node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.6-sol --dry-run',
     '  ANTHROPIC_API_KEY=sk-ant-... node eval/reader-capacity/run.mjs claude-opus-4-8 --profiles-out /tmp/reader-profile.txt',
   ].join('\n');
 }
@@ -119,6 +120,10 @@ const VARIANTS = [
   { name: '5x8', style: { cellWBonus: 0, cellHBonus: 0, aa: true }, cols: colsFor(0) },
   { name: '7x10', style: { cellWBonus: 2, cellHBonus: 2, aa: true }, cols: colsFor(2) },
   { name: '9x12', style: { cellWBonus: 4, cellHBonus: 4, aa: true }, cols: colsFor(4) },
+  { name: '10x16', style: { cellWBonus: 5, cellHBonus: 8, aa: true }, cols: colsFor(5) },
+  { name: '11x18', style: { cellWBonus: 6, cellHBonus: 10, aa: true }, cols: colsFor(6) },
+  { name: '12x20', style: { cellWBonus: 7, cellHBonus: 12, aa: true }, cols: colsFor(7) },
+  { name: '20x32', style: { cellWBonus: 15, cellHBonus: 24, aa: true }, cols: colsFor(15) },
 ];
 
 const TEXT_TOKENS = Math.ceil(SESSION.length / 3.5); // rough Claude-Code-dense baseline
@@ -251,6 +256,12 @@ for (const v of VARIANTS) {
   const imageTokens = pages.reduce((n, p) => n + patchTokens(p.width, p.height), 0);
   const dataUrls = pages.map((p) => 'data:image/png;base64,' + Buffer.from(p.png).toString('base64'));
   const savingsPct = Math.round((1 - imageTokens / TEXT_TOKENS) * 100);
+  const gptEconomics = Object.fromEntries(args.models
+    .filter((model) => model.startsWith('gpt'))
+    .map((model) => {
+      const tokens = pages.reduce((n, p) => n + visionTokensForModel(model, p.width, p.height), 0);
+      return [model, { imageTokens: tokens, savingsPct: Math.round((1 - tokens / TEXT_TOKENS) * 100) }];
+    }));
   const row = {
     variant: v.name,
     style: v.style,
@@ -259,9 +270,13 @@ for (const v of VARIANTS) {
     dims: pages.map((p) => `${p.width}x${p.height}`),
     imageTokens,
     savingsPct,
+    gptEconomics,
     models: {},
   };
   console.log(`\n[${v.name}] ${pages.length} page(s) ${row.dims.join(',')} -> ${imageTokens} img tok vs ${TEXT_TOKENS} text (${savingsPct}% saved)`);
+  for (const [model, economics] of Object.entries(gptEconomics)) {
+    console.log(`  ${model} accounting: ${economics.imageTokens} img tok (${economics.savingsPct}% saved)`);
+  }
 
   if (live) {
     for (const model of args.models) {

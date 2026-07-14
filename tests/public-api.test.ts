@@ -91,25 +91,26 @@ describe('public library API', () => {
     }
   });
 
-  it('keeps GPT off by default and preserves exact Sol opt-in aliases', () => {
+  it('keeps GPT off by default and isolates exact variant opt-ins', () => {
     expect(getAllowedModelBases()).toEqual(['claude-fable-5']);
     expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.5-codex')).toBe(false);
     expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-terra')).toBe(false);
+    const variants = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+    for (const model of variants) expect(isImgtokenxSupportedGptModel(model)).toBe(false);
     expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
     expect(isImgtokenxSupportedGptModel('gpt-4o')).toBe(false);
 
-    process.env.IMGTOKENX_MODELS = 'gpt-5.6-sol';
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol[1m]')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-sol-codex[1m]')).toBe(true);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
-    expect(isImgtokenxSupportedGptModel('gpt-5.6-terra')).toBe(false);
+    for (const selected of variants) {
+      process.env.IMGTOKENX_MODELS = selected;
+      for (const candidate of variants) {
+        expect(isImgtokenxSupportedGptModel(candidate)).toBe(candidate === selected);
+      }
+      expect(isImgtokenxSupportedGptModel(`${selected}-codex[1m]`)).toBe(true);
+    }
+
+    process.env.IMGTOKENX_MODELS = 'gpt-5.6';
+    expect(getAllowedModelBases()).toEqual([]);
+    for (const model of variants) expect(isImgtokenxSupportedGptModel(model)).toBe(false);
   });
 
   it('honors the single IMGTOKENX_MODELS scope for GPT families', () => {
@@ -117,12 +118,11 @@ describe('public library API', () => {
     try {
       // Explicit Claude-only scope disables GPT imaging.
       process.env.IMGTOKENX_MODELS = 'claude-fable-5';
-      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
       expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(false);
 
       // Mixed CSV selects exactly those bases across families.
       process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-sol';
-      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-luna')).toBe(false);
       expect(isImgtokenxSupportedGptModel('gpt-5.6-sol')).toBe(true);
       expect(isImgtokenxSupportedModel('claude-fable-5')).toBe(true);
 

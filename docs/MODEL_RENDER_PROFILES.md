@@ -13,14 +13,25 @@ geometry, font, style, and billing from the exact model id.
 | `claude-sonnet-5` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
 | `claude-haiku-4-5` | image | Spleen + Unifont, 20x32 | 78 | 728 px |
 | other Claude models | text only until calibrated | Spleen + Unifont, 5x8 | 312 | 728 px |
-| generic `gpt-5.6` | image | Spleen + Unifont, 5x8 | 152 | 1932 px |
-| `gpt-5.6-sol` | **text only until calibrated** | JetBrains Mono 10 + Unifont fallback, 6x11 | 126 | 1932 px |
+| `gpt-5.6-sol` | image | JetBrains Mono 10 + Unifont fallback, 6x11 | 126 | 1932 px |
+| `gpt-5.6-terra` | image | Spleen + Unifont fallback, 5x8 | 152 | 1932 px |
+| `gpt-5.6-luna` | image | Spleen + Unifont fallback, 5x8 | 152 | 1932 px |
 | other GPT/o-series models | text only until calibrated | conservative 5x8 fallback | 152 | 1932 px |
 
 Model scope and reader safety are separate gates. `IMGTOKENX_MODELS` decides
 which model ids may reach the transformer. `IMGTOKENX_READER_PROFILES` decides
 whether an imaged profile is trusted. A model that fails either gate remains
 ordinary text.
+
+## GPT 5.6 Terra / Luna proxy evidence (2026-07-14)
+
+Three independent subscription-side subagents blindly read six scored fields
+at all seven production densities. The Terra and Luna proxy readers each scored
+42/42 (100%) and passed all seven densities; 5x8 wins as the smallest tied
+profile. The Sol proxy scored 35/42 (83.3%) by lowercasing the exact camelCase
+field at every density, which triggered the stricter follow-up documented below.
+These are assigned proxy-reader results, not provider-routed exact-model API
+measurements.
 
 ## Sonnet 5 / Haiku 4.5 evidence (2026-07-10)
 
@@ -35,8 +46,8 @@ were kept within 1568x728, matching what the proxy emits.
 
 ## GPT 5.6 Sol evidence
 
-The Sol renderer is exact-model-specific: sibling ids such as
-`gpt-5.6-terra` retain the generic profile. Its first paid raw-image pilot
+The Sol renderer is exact-model-specific: Terra and Luna retain the
+conservative fallback and do not inherit Sol tuning. Its first paid raw-image pilot
 failed the acceptance bar at both tested densities:
 
 | Profile | Exact | Confabulations | Gist | Guard |
@@ -44,16 +55,13 @@ failed the acceptance bar at both tested densities:
 | JetBrains 6x11 / 126 columns | 0/4 | 4 | pass | pass |
 | Spleen 5x8 / 152 columns | 0/4 | 4 | fail | pass |
 
-The renderer remains available for retuning, but Sol stays text-only by
-default. Receipts and the guarded evaluator live in
+The approved subscription-side proxy follow-up tightened the exact-case prompt,
+used two fresh fixtures, and added both JetBrains and Spleen candidates. Three
+blind readers scored 324/324 fields across nine profiles. The existing
+JetBrains 6x11 profile therefore became the built-in Sol reader without a
+renderer change. This proxy evidence does not erase the earlier exact-provider
+failure; receipts and the guarded evaluator remain in
 [`eval/sol-profile/`](../eval/sol-profile/).
-
-An operator accepting that risk must enable both gates explicitly:
-
-```bash
-IMGTOKENX_MODELS='claude-fable-5,gpt-5.6-sol'
-IMGTOKENX_READER_PROFILES='{"gpt-5.6-sol":{"safeToImage":true}}'
-```
 
 Lossless-exact blocks, factsheets, and `rec_*` recovery references remain
 active independently of the selected visual profile.

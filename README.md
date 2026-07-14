@@ -165,10 +165,11 @@ Set `MAX_REQUEST_BODY_BYTES` to lower the request cap.
   `IMGTOKENX_MODELS=claude-fable-5`. Additional Claude and GPT ids are opt-in
   via `IMGTOKENX_MODELS` or the dashboard chips, and reader safety remains an
   independent gate. Opus 4.x, Sonnet 5, and Haiku 4.5 use their calibrated
-  20x32 profile; GPT 5.5 and uncalibrated models remain text-only.
-  The exact `gpt-5.6-sol` renderer is available but remains text-only until a
-  reader override is explicitly supplied because its first raw-image pilot
-  failed exact recall. See [model render profiles](docs/MODEL_RENDER_PROFILES.md).
+  20x32 profile; uncalibrated models remain text-only.
+  GPT 5.6 Sol, Terra, and Luna are separate opt-in variants. Terra and Luna use
+  the blind proxy sweep's smallest perfect profile, 5x8; Sol uses its existing
+  JetBrains 6x11 profile after a three-reader follow-up scored 324/324 fields.
+  See [model render profiles](docs/MODEL_RENDER_PROFILES.md).
   `IMGTOKENX_MODELS=off` disables imaging. Everything else passes through
   byte-identical. On the GPT path, tool definitions stay native JSON and no
   Anthropic `cache_control` markers are used.
@@ -328,8 +329,8 @@ the model's output (it is the response, the proxy never touches it), sparse
 prose, and anything too small to win. The configured scope starts with Fable
 5 only; additional ids require the dashboard or `IMGTOKENX_MODELS`, and the
 independent reader profile can still force text passthrough. Opus 4.x, Sonnet
-5, and Haiku 4.5 use their calibrated 20x32 profile. GPT 5.6 Sol remains text-only unless explicitly
-overridden because its first raw-image pilot failed exact recall.
+5, and Haiku 4.5 use their calibrated 20x32 profile. GPT 5.6 Terra and Luna use
+their proxy-validated 5x8 profile; Sol uses proxy-validated JetBrains 6x11.
 
 The optional provider-neutral virtual-context modes add exact deduplication,
 preview-plus-retrieval, and validated state checkpoints before those image gates.

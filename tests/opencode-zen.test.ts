@@ -4,6 +4,7 @@ import { createProxy, resolveUpstreams } from '../src/core/proxy.js';
 const realFetch = globalThis.fetch;
 const BIG_CONTEXT = 'Stable coding context that is safe to image. '.repeat(1200);
 let priorModels: string | undefined;
+let priorReaderProfiles: string | undefined;
 
 interface CapturedRequest {
   url: string;
@@ -15,11 +16,15 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   if (priorModels === undefined) delete process.env.IMGTOKENX_MODELS;
   else process.env.IMGTOKENX_MODELS = priorModels;
+  if (priorReaderProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+  else process.env.IMGTOKENX_READER_PROFILES = priorReaderProfiles;
 });
 
 beforeEach(() => {
   priorModels = process.env.IMGTOKENX_MODELS;
-  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+  priorReaderProfiles = process.env.IMGTOKENX_READER_PROFILES;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-terra';
+  process.env.IMGTOKENX_READER_PROFILES = '{"gpt-5.6-terra":{"safeToImage":true}}';
 });
 
 function stubZen(calls: CapturedRequest[]): void {
@@ -122,12 +127,12 @@ describe('OpenCode Zen upstream', () => {
   it.each([
     {
       path: '/opencode/v1/responses',
-      body: { model: 'gpt-5.6', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
+      body: { model: 'gpt-5.6-terra', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
       imageType: 'input_image',
     },
     {
       path: '/opencode/v1/chat/completions',
-      body: { model: 'gpt-5.6', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
+      body: { model: 'gpt-5.6-terra', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
       imageType: 'image_url',
     },
     {

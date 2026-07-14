@@ -1,5 +1,16 @@
 # Lessons
 
+## Lesson: Keep Model Cleanup On The Current Family
+
+### Anti-Pattern
+Replacing a removed model fixture with another older model family that the user does not want represented.
+
+### Pattern
+For model-reference cleanup, reuse a current model variant that preserves the test's behavior, such as a current text-only profile for passthrough coverage.
+
+### Trigger
+Any request to remove a model version from code, tests, examples, or documentation.
+
 ## Lesson: Separate ChatGPT Auth From API Mode
 
 ### Anti-Pattern

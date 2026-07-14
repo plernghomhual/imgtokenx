@@ -26,10 +26,10 @@ behavioral changes, patch = fixes).
   cache rates by model id. Claude traffic on `/v1/responses` no longer inherits
   GPT geometry or pricing.
 - Added model-selectable font atlases and an exact `gpt-5.6-sol` JetBrains Mono
-  10 profile. Sol remains text-only until a reader override is explicitly set;
-  its first raw-image pilot failed exact recall.
-- Dashboard model choices include GPT 5.6 Sol and report its calibrated/text-only
-  reader state without enabling imaging implicitly.
+  10 profile. A blind three-reader follow-up scored 324/324 fields, enabling
+  Sol at 6x11; its earlier exact-provider raw-image pilot remains documented.
+- Dashboard model choices separate GPT 5.6 Sol, Terra, and Luna. Sol reports
+  image 6x11; Terra and Luna report image 5x8.
 
 ### Security / Correctness
 - Virtualized results stay native text and are never imaged a second time;
@@ -207,7 +207,7 @@ behavioral changes, patch = fixes).
 
 ### Fixed
 - **GPT autonomous agents no longer lose the live request to history imaging.**
-  Autonomous GPT agents (OpenCode/gpt-5.5) send one human request then a long run of
+  Autonomous GPT agents (OpenCode) send one human request then a long run of
   tool turns. The lone request is the oldest turn, so history collapse imaged it first
   and the model lost it — confabulating the request and drifting off-task (observed:
   editing a file instead of answering a compare question). Fix: the most-recent user
@@ -230,8 +230,9 @@ behavioral changes, patch = fixes).
 ### Fixed
 - **GPT history image cap.** A hard cap (16) on GPT history images. Long OpenCode
   sessions could otherwise render 80+ images — token-cheap but slow enough that
-  gpt-5.5 times out before first token. The cap images the oldest sections up to the
-  limit and leaves the rest as text; no context dropped, no live tool state orphaned.
+  some GPT variants time out before first token. The cap images the oldest
+  sections up to the limit and leaves the rest as text; no context dropped,
+  no live tool state orphaned.
   (`openai-history.ts`)
 - **GPT "live request" guard.** A `developer`-role note after the history image tells
   the model the image is prior context, not the current request — reinforcing the
@@ -310,8 +311,8 @@ prompt caching and tool-call behavior are preserved.
 
 ### Changed
 - **Default imaged scope is now `claude-fable-5` + `gpt-5.6`.** GPT-5.6 is
-  promoted from opt-in (0.4.0) to on by default. `gpt-5.5` and `claude-opus-4-8`
-  stay opt-in: they degrade reading dense imaged history (gist drift), so
+  promoted from opt-in (0.4.0) to on by default. Uncalibrated GPT models and
+  `claude-opus-4-8` stay opt-in: they degrade reading dense imaged history (gist drift), so
   silently imaging them by default is wrong. Promotion is gated on an OCR/recall
   threshold.
 - **Anthropic cache contract (`history.ts`).** Append-only per-chunk rendering;

@@ -158,7 +158,6 @@ describe('per-model pricing is applied correctly (Fable vs Opus vs GPT)', () => 
 
   it('uses Anthropic rates for Claude on Responses without changing other GPT fallbacks', () => {
     expect(openAICacheReadRate('gpt-5.6')).toBe(0.1);
-    expect(openAICacheReadRate('gpt-5.5')).toBe(0.1);
     expect(openAICacheReadRate('claude-opus-4-8')).toBe(CACHE_READ_RATE);
     expect(openAICacheReadRate('claude-sonnet-5')).toBe(CACHE_READ_RATE);
     expect(openAIOutputRate('claude-opus-4-8')).toBe(5);

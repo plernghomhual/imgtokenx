@@ -3,15 +3,19 @@ import { resolveReaderProfile, DEFAULT_READER_PROFILE } from '../src/core/reader
 import { transformRequest } from '../src/core/transform.js';
 
 describe('resolveReaderProfile (built-in table)', () => {
-  it('claude-fable-5 and gpt-5.6 are safe to image at the bare production cell (no bonus)', () => {
+  it('claude-fable-5 is safe to image at the bare production cell (no bonus)', () => {
     expect(resolveReaderProfile('claude-fable-5')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
     expect(resolveReaderProfile('claude-fable-5-high')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
-    expect(resolveReaderProfile('gpt-5.6')).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
   });
 
-  it('keeps the unvalidated GPT 5.6 Sol profile text-only by default', () => {
-    expect(resolveReaderProfile('gpt-5.6-sol')).toEqual(DEFAULT_READER_PROFILE);
-    expect(resolveReaderProfile('gpt-5.6-sol-codex[1m]')).toEqual(DEFAULT_READER_PROFILE);
+  it('enables every GPT 5.6 variant at its proxy-validated profile', () => {
+    for (const model of [
+      'gpt-5.6-sol', 'gpt-5.6-sol-codex[1m]',
+      'gpt-5.6-terra', 'gpt-5.6-terra-codex',
+      'gpt-5.6-luna', 'gpt-5.6-luna[1m]',
+    ]) {
+      expect(resolveReaderProfile(model)).toEqual({ safeToImage: true, cellWBonus: 0, cellHBonus: 0 });
+    }
   });
 
   it('claude-opus-4-* gets the recalibrated 12x20 cell (2026-07-13 keyless sweep)', () => {

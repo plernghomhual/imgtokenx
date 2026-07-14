@@ -20,7 +20,7 @@ describe('toTrackEvent', () => {
     const ev: ProxyEvent = {
       method: 'POST',
       path: '/v1/messages',
-      model: 'gpt-5.5',
+      model: 'gpt-5.6',
       status: 200,
       durationMs: 1234,
       firstByteMs: 200,
@@ -57,7 +57,7 @@ describe('toTrackEvent', () => {
     // snake_case names.
     expect(out.method).toBe('POST');
     expect(out.path).toBe('/v1/messages');
-    expect(out.model).toBe('gpt-5.5');
+    expect(out.model).toBe('gpt-5.6');
     expect(out.status).toBe(200);
     expect(out.duration_ms).toBe(1234);
     expect(out.first_byte_ms).toBe(200);

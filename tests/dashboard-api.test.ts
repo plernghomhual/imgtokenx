@@ -279,9 +279,10 @@ describe('serveFragment', () => {
       expect(on).not.toContain('Cloudflare gateway');
       expect(on).toContain('OpenAI scope');
       expect(on).not.toContain('style="display:none"');
-      // GPT profiles are visible, but no GPT model is silently enabled.
-      expect(on).toContain('GPT 5.6</span><span class="chip-mode">image 5×8');
-      expect(on).toContain('GPT 5.6 Sol</span><span class="chip-mode">text only');
+      // Exact GPT variants are visible with their proxy-validated readers.
+      expect(on).toContain('GPT 5.6 Sol</span><span class="chip-mode">image 6×11');
+      expect(on).toContain('GPT 5.6 Terra</span><span class="chip-mode">image 5×8');
+      expect(on).toContain('GPT 5.6 Luna</span><span class="chip-mode">image 5×8');
       // Calibrated 2026-07-10 (keyless sweep): Haiku 4.5 images at 20×32.
       // Recalibrated 2026-07-13 (keyless sweep): Opus 4.8 image at 12×20.
       // Sonnet 5 recalibrated further to 11×18 in the same-day follow-up sweep
@@ -291,13 +292,18 @@ describe('serveFragment', () => {
       expect(on).toContain('Haiku 4.5</span><span class="chip-mode">image 20×32');
       // Sonnet 4.6 calibrated 2026-07-13 at 12×20 (same as Opus 4.8).
       expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">image 12×20');
-      // Generic GPT 5.6, then its Sol profile.
-      expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.6 Sol'));
+      const sol = on.indexOf('GPT 5.6 Sol</span>');
+      const terra = on.indexOf('GPT 5.6 Terra</span>');
+      const luna = on.indexOf('GPT 5.6 Luna</span>');
+      expect(sol).toBeGreaterThan(-1);
+      expect(sol).toBeLessThan(terra);
+      expect(terra).toBeLessThan(luna);
+      expect(on).not.toContain('&quot;gpt-5.6&quot;');
       expect(getAllowedModelBases()).not.toContain('gpt-5.6');
 
       dash.handleModelsToggle('gpt-5.6-sol', true);
       const onBoth = await (await dash.serveFragment('models', url, 1234)).text();
-      expect(onBoth).toContain('GPT 5.6 Sol ✓</span><span class="chip-mode">text only');
+      expect(onBoth).toContain('GPT 5.6 Sol ✓</span><span class="chip-mode">image 6×11');
       expect(getAllowedModelBases()).toContain('gpt-5.6-sol');
 
       dash.handleModelsToggle('custom-"model', true);
@@ -324,17 +330,17 @@ describe('serveFragment', () => {
       undefined,
       (models) => saved.push([...models]),
     );
-    setAllowedModelBases(['gpt-5.6']);
+    setAllowedModelBases(['gpt-5.6-terra']);
     try {
-      persistentDash.handleModelsToggle('gpt-5.6-sol', true);
-      expect(saved).toEqual([['gpt-5.6', 'gpt-5.6-sol']]);
-      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.6-sol']);
+      persistentDash.handleModelsToggle('gpt-5.6-luna', true);
+      expect(saved).toEqual([['gpt-5.6-terra', 'gpt-5.6-luna']]);
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6-terra', 'gpt-5.6-luna']);
 
       const failingDash = new DashboardState(undefined, undefined, () => {
         throw new Error('disk full');
       });
       expect(() => failingDash.handleModelsToggle('claude-fable-5', true)).toThrow('disk full');
-      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.6-sol']);
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6-terra', 'gpt-5.6-luna']);
     } finally {
       setAllowedModelBases(null);
     }
@@ -342,14 +348,14 @@ describe('serveFragment', () => {
 
   it('renders header + recent + stats fragments from the same payloads as JSON', async () => {
     writeEvents(tmp, [
-      ev({ status: 200, model: 'gpt-5.5', compressed: true, orig_chars: 1000, image_bytes: 200 }),
+      ev({ status: 200, model: 'gpt-5.6', compressed: true, orig_chars: 1000, image_bytes: 200 }),
     ]);
     const header = await (await dash.serveFragment('header', url, 4711)).text();
     expect(header).toContain('4711');
     await dash.replay(tmp.eventsFile);
     const recent = await (await dash.serveFragment('recent', url, 4711)).text();
     expect(recent).toContain('<table');
-    expect(recent).toContain('gpt-5.5');
+    expect(recent).toContain('gpt-5.6');
     const stats = await (await dash.serveFragment('stats', url, 4711)).text();
     expect(stats).toContain('requests');
   });
@@ -386,7 +392,7 @@ describe('GPT savings split', () => {
   const gptUpdate = {
     method: 'POST',
     path: '/openai/responses',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6',
     status: 200,
     durationMs: 100,
     usage: { input_tokens: 10000, output_tokens: 200, cached_tokens: 2000 },
@@ -465,7 +471,7 @@ describe('GPT savings split', () => {
     writeEvents(tmp, [
       ev({
         path: '/openai/responses',
-        model: 'gpt-5.5',
+        model: 'gpt-5.6',
         compressed: true,
         input_tokens: 10000,
         output_tokens: 200,

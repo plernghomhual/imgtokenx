@@ -21,18 +21,19 @@ const dec = new TextDecoder();
 // ── Task 1: applicability gate ──────────────────────────────────────────────
 
 describe('isImgtokenxSupportedGptModel', () => {
-  it('keeps GPT off by default and honors an explicit generic 5.6 scope', () => {
+  it('keeps GPT off by default and honors an exact 5.6 variant scope', () => {
     const prev = process.env.IMGTOKENX_MODELS;
     try {
       delete process.env.IMGTOKENX_MODELS;
       expect(isImgtokenxSupportedGptModel('gpt-5')).toBe(false);
-      expect(isImgtokenxSupportedGptModel('gpt-5.5')).toBe(false);
       expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
 
-      process.env.IMGTOKENX_MODELS = 'gpt-5.6';
-      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(true);
-      expect(isImgtokenxSupportedGptModel('gpt-5.6-nano')).toBe(true);
-      expect(isImgtokenxSupportedGptModel('gpt-5.6[1m]')).toBe(true);
+      process.env.IMGTOKENX_MODELS = 'gpt-5.6-terra';
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-terra')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-terra-codex')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-terra[1m]')).toBe(true);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6-luna')).toBe(false);
+      expect(isImgtokenxSupportedGptModel('gpt-5.6')).toBe(false);
       expect(isImgtokenxSupportedGptModel('gpt-5-mini')).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.IMGTOKENX_MODELS;
@@ -692,7 +693,7 @@ describe('transformOpenAIChatCompletions — history collapse', () => {
   });
 });
 
-// Autonomous agent shape (OpenCode / gpt-5.5): ONE human request, then a long
+// Autonomous agent shape (OpenCode / GPT-5): ONE human request, then a long
 // run of assistant + tool turns and NO further user turns. The lone request is the
 // OLDEST turn, so without pinning it is the first thing imaged and the model loses
 // it ("I wonder what the user actually asked" → off-task drift). The pin keeps the
@@ -800,16 +801,15 @@ describe('GPT history collapse — pins the live request as text (autonomous sha
 });
 
 // ── Vision cost: gpt-5.x FLAGSHIP patch model (multiplier 1.0, original detail) ──
-// Per OpenAI docs (patch tokenization): flagship gpt-5.4/5.5/5.6 have NO listed
+// Per OpenAI docs (patch tokenization): flagship gpt-5.4/5.6 have NO listed
 // multiplier (= 1.0); the 1.62/2.46 values are mini/nano ONLY. And `detail:original`
-// (gpt-5.5's default) gives a 10,000-patch / 6000px budget vs `high`'s 2,500 / 2048px.
+// gives a 10,000-patch / 6000px budget vs `high`'s 2,500 / 2048px.
 // imgtokenx renders dense text, so it must use the LARGER budget or OpenAI downscales
 // the image and the text becomes unreadable.
 describe('openAIVisionTokens — gpt-5.x flagship patch model', () => {
   it('flagship multiplier is 1.0, not the mini 1.62', () => {
     // 768x1932 → patches = ceil(768/32)*ceil(1932/32) = 24*61 = 1464; ×1.0 = 1464.
     expect(openAIVisionTokens('gpt-5.6', 768, 1932)).toBe(1464);
-    expect(openAIVisionTokens('gpt-5.5', 768, 1932)).toBe(1464);
   });
 
   it('flagship patch budget is 10,000 (original detail), not 2,500', () => {
@@ -820,7 +820,6 @@ describe('openAIVisionTokens — gpt-5.x flagship patch model', () => {
 
   it('resolveVisionCost flagship = patch, multiplier 1, cap 10000; mini stays 1.62/1536', () => {
     expect(resolveVisionCost('gpt-5.6')).toMatchObject({ regime: 'patch', multiplier: 1, patchCap: 10000 });
-    expect(resolveVisionCost('gpt-5.5')).toMatchObject({ regime: 'patch', multiplier: 1, patchCap: 10000 });
     expect(resolveVisionCost('gpt-5.6-mini')).toMatchObject({ regime: 'patch', multiplier: 1.62, patchCap: 1536 });
     expect(resolveVisionCost('gpt-5.6-nano')).toMatchObject({ regime: 'patch', multiplier: 2.46, patchCap: 1536 });
     // mini at 768x1932: patches 1464 (<1536) × 1.62 = ceil(2371.68) = 2372 (unchanged).
@@ -879,7 +878,7 @@ describe('GPT 5.6 Sol render profile', () => {
       });
     }
 
-    for (const model of ['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-terra[1m]']) {
+    for (const model of ['gpt-5.6-terra', 'gpt-5.6-terra[1m]', 'gpt-5.6-luna']) {
       expect(resolveGptProfile(model)).toMatchObject({
         stripCols: 152,
         style: { font: 'spleen-5x8' },
@@ -887,18 +886,37 @@ describe('GPT 5.6 Sol render profile', () => {
     }
   });
 
-  it('keeps gpt-5.6-sol text-only (reader-profile gate, audit D7)', async () => {
-    const body = enc.encode(JSON.stringify({
-      model: 'gpt-5.6-sol',
-      instructions: BIG_INSTRUCTIONS,
-      input: [{ role: 'user', content: 'hello' }],
-    }));
-    const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
-    // reader-profiles.ts marks gpt-5.6-sol text-only until its raw-image profile
-    // clears the exact-recall bar — the public transformer must honor that gate
-    // (same as the proxy), so this is a true passthrough with no injected images.
-    expect(result.info.compressed).toBe(false);
-    expect(result.info.reason).toBe('reader_profile_unsafe');
+  it('images every exact 5.6 variant at its proxy-validated profile', async () => {
+    for (const model of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+      const body = enc.encode(JSON.stringify({
+        model,
+        instructions: BIG_INSTRUCTIONS,
+        input: [{ role: 'user', content: 'hello' }],
+      }));
+      const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
+      expect(result.info.compressed, model).toBe(true);
+      expect(result.info.imageCount, model).toBeGreaterThan(0);
+    }
+  });
+
+  it('exercises the imgtokenx image path independently for every explicit variant override', async () => {
+    const previous = process.env.IMGTOKENX_READER_PROFILES;
+    try {
+      for (const model of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+        process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({ [model]: { safeToImage: true } });
+        const body = enc.encode(JSON.stringify({
+          model,
+          instructions: BIG_INSTRUCTIONS,
+          input: [{ role: 'user', content: 'hello' }],
+        }));
+        const result = await transformOpenAIResponses(body, { charsPerToken: 1, minCompressChars: 1 });
+        expect(result.info.compressed, model).toBe(true);
+        expect(result.info.imageCount, model).toBeGreaterThan(0);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+      else process.env.IMGTOKENX_READER_PROFILES = previous;
+    }
   });
 
   it('merges IMGTOKENX_GPT_PROFILES style overrides with the Sol defaults', () => {

@@ -16,7 +16,7 @@ hand-edited after a human reviews a live sweep result.
 node eval/reader-capacity/run.mjs --dry-run
 
 # CLI model list: comma-separated, defaults to claude-opus-4-8,claude-fable-5.
-node eval/reader-capacity/run.mjs claude-opus-4-8,gpt-5.5 --dry-run
+node eval/reader-capacity/run.mjs gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna --dry-run
 
 # Live Anthropic run: scores the battery and writes results.json.
 ANTHROPIC_API_KEY=sk-ant-... node eval/reader-capacity/run.mjs claude-opus-4-8,claude-fable-5
@@ -37,11 +37,16 @@ caller.
 ## Variants
 
 Each variant keeps the <=1568x728 page cap so images stay in Anthropic's
-linear-billing window:
+linear-billing window. GPT model lists also report imgtokenx's production
+32-px patch accounting per exact model:
 
 - `5x8` - production density: `{ cellWBonus: 0, cellHBonus: 0 }`
 - `7x10` - larger cells: `{ cellWBonus: 2, cellHBonus: 2 }`
-- `9x12` - largest cells in this sweep: `{ cellWBonus: 4, cellHBonus: 4 }`
+- `9x12`: `{ cellWBonus: 4, cellHBonus: 4 }`
+- `10x16`: `{ cellWBonus: 5, cellHBonus: 8 }`
+- `11x18`: `{ cellWBonus: 6, cellHBonus: 10 }`
+- `12x20`: `{ cellWBonus: 7, cellHBonus: 12 }`
+- `20x32` - largest calibrated production cell: `{ cellWBonus: 15, cellHBonus: 24 }`
 
 ## Acceptance bar
 

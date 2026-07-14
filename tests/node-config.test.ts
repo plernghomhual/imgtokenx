@@ -24,14 +24,14 @@ function tempConfig(): string {
 describe('model config persistence', () => {
   it('reloads dashboard model choices in a fresh process environment', () => {
     const file = tempConfig();
-    persistModelsConfig(['claude-fable-5', 'gpt-5.5'], { IMGTOKENX_CONFIG: file });
+    persistModelsConfig(['claude-fable-5', 'gpt-5.6-sol'], { IMGTOKENX_CONFIG: file });
 
     const freshEnv = { IMGTOKENX_CONFIG: file };
     applyConfigFileDefaults(freshEnv);
 
     expect(freshEnv).toEqual({
       IMGTOKENX_CONFIG: file,
-      IMGTOKENX_MODELS: 'claude-fable-5,gpt-5.5',
+      IMGTOKENX_MODELS: 'claude-fable-5,gpt-5.6-sol',
     });
   });
 
@@ -49,19 +49,33 @@ describe('model config persistence', () => {
 
   it('keeps an explicit environment scope over saved config', () => {
     const file = tempConfig();
-    persistModelsConfig(['gpt-5.5'], { IMGTOKENX_CONFIG: file });
-    const env = { IMGTOKENX_CONFIG: file, IMGTOKENX_MODELS: 'gpt-5.6' };
+    persistModelsConfig(['gpt-5.6-sol'], { IMGTOKENX_CONFIG: file });
+    const env = { IMGTOKENX_CONFIG: file, IMGTOKENX_MODELS: 'gpt-5.6-luna' };
 
     applyConfigFileDefaults(env);
 
-    expect(env.IMGTOKENX_MODELS).toBe('gpt-5.6');
+    expect(env.IMGTOKENX_MODELS).toBe('gpt-5.6-luna');
+  });
+
+  it('drops the removed generic GPT scope from saved configuration', () => {
+    const file = tempConfig();
+    fs.writeFileSync(file, '{"models":["gpt-5.6","gpt-5.6-terra"]}\n');
+    const env: { IMGTOKENX_CONFIG: string; IMGTOKENX_MODELS?: string } = {
+      IMGTOKENX_CONFIG: file,
+    };
+
+    applyConfigFileDefaults(env);
+
+    expect(env.IMGTOKENX_MODELS).toBe('gpt-5.6-terra');
+    persistModelsConfig(['gpt-5.6'], env);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).models).toBe('off');
   });
 
   it('does not overwrite invalid config', () => {
     const file = tempConfig();
     fs.writeFileSync(file, 'not json\n');
 
-    expect(() => persistModelsConfig(['gpt-5.6'], { IMGTOKENX_CONFIG: file })).toThrow();
+    expect(() => persistModelsConfig(['gpt-5.6-luna'], { IMGTOKENX_CONFIG: file })).toThrow();
     expect(fs.readFileSync(file, 'utf8')).toBe('not json\n');
   });
 });

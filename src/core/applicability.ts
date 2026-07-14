@@ -36,6 +36,15 @@ function falsey(v: string): boolean {
   return /^(0|false|no|off|none)$/i.test(v.trim());
 }
 
+function normalizeModelBases(values: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    const model = value.trim();
+    if (model && model !== 'gpt-5.6' && !out.includes(model)) out.push(model);
+  }
+  return out;
+}
+
 /** IMGTOKENX_MODELS env / built-in default, ignoring the runtime override. One CSV
  *  controls every family (Claude + GPT). Resolution (read per-call so scope flips LIVE):
  *  - unset or empty        → built-in default (Fable 5 only)
@@ -48,7 +57,7 @@ function envOrDefaultBases(): string[] {
   const trimmed = raw.trim();
   if (!trimmed) return [...DEFAULT_MODEL_BASES];
   if (falsey(trimmed)) return [];
-  return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  return normalizeModelBases(trimmed.split(','));
 }
 
 function allowedModelBases(): string[] {
@@ -69,7 +78,7 @@ export function getConfiguredModelBases(): string[] {
 
 /** Set the dashboard runtime override. Empty array = compress nothing; null = clear override. Not persisted. */
 export function setAllowedModelBases(list: readonly string[] | null): void {
-  runtimeModelBases = list === null ? null : list.map((s) => s.trim()).filter(Boolean);
+  runtimeModelBases = list === null ? null : normalizeModelBases(list);
 }
 
 /** Membership test against the single allowed scope. Matches exact base or `-suffix`

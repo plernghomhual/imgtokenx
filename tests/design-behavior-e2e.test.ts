@@ -21,16 +21,21 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createProxy } from '../src/core/proxy.js';
 
-// These proxy contracts intentionally exercise the opt-in generic GPT path.
+// These proxy contracts exercise an exact GPT variant with a test-only reader override.
 // Preserve the developer shell while making the suite independent of it.
 let ambientImgtokenxModels: string | undefined;
+let ambientReaderProfiles: string | undefined;
 beforeAll(() => {
   ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
-  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+  ambientReaderProfiles = process.env.IMGTOKENX_READER_PROFILES;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-terra';
+  process.env.IMGTOKENX_READER_PROFILES = '{"gpt-5.6-terra":{"safeToImage":true}}';
 });
 afterAll(() => {
   if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
   else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+  if (ambientReaderProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+  else process.env.IMGTOKENX_READER_PROFILES = ambientReaderProfiles;
 });
 
 function fakeUpstream() {
@@ -202,7 +207,7 @@ describe('design: RECENT REQUEST stays legible (GPT)', () => {
     const out = await drive(
       '/v1/chat/completions',
       JSON.stringify({
-        model: 'gpt-5.6',
+        model: 'gpt-5.6-terra',
         messages: [{ role: 'system', content: 'SYS ' + big(60_000) }, ...turns],
       }),
     );

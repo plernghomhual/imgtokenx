@@ -36,13 +36,18 @@ async function settle(done: () => boolean, timeoutMs = 2000): Promise<void> {
 // The GPT cases intentionally exercise an opt-in model. Preserve the developer
 // shell while pinning this file's scope so CI and local runs behave identically.
 let ambientImgtokenxModels: string | undefined;
+let ambientReaderProfiles: string | undefined;
 beforeAll(() => {
   ambientImgtokenxModels = process.env.IMGTOKENX_MODELS;
-  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6';
+  ambientReaderProfiles = process.env.IMGTOKENX_READER_PROFILES;
+  process.env.IMGTOKENX_MODELS = 'claude-fable-5,gpt-5.6-terra';
+  process.env.IMGTOKENX_READER_PROFILES = '{"gpt-5.6-terra":{"safeToImage":true}}';
 });
 afterAll(() => {
   if (ambientImgtokenxModels === undefined) delete process.env.IMGTOKENX_MODELS;
   else process.env.IMGTOKENX_MODELS = ambientImgtokenxModels;
+  if (ambientReaderProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+  else process.env.IMGTOKENX_READER_PROFILES = ambientReaderProfiles;
 });
 
 const PROBE_TOKENS = 9999; // canned count_tokens result from the fake upstream
@@ -118,7 +123,7 @@ const slab = (n: number) =>
 
 const gptBody = (sysChars: number) =>
   JSON.stringify({
-    model: 'gpt-5.6',
+    model: 'gpt-5.6-terra',
     messages: [
       { role: 'system', content: slab(sysChars) },
       { role: 'user', content: 'hello' },

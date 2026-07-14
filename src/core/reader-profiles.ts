@@ -57,9 +57,8 @@ function isBaseOrAlias(m: string, base: string): boolean {
 /**
  * Built-in profiles, evaluated in order (first match wins).
  *
- * - claude-fable-5 / generic gpt-5.6: calibrated pipeline models. Proven safe at
- *   the bare 5×8 production cell (no bonus) — see docs/RENDER_SIZING.md /
- *   FINDINGS.md's Fable 5 measurements.
+ * - claude-fable-5: proven safe at the bare 5×8 production cell (no bonus) —
+ *   see docs/RENDER_SIZING.md / FINDINGS.md's Fable 5 measurements.
  * - claude-opus-4- (any Opus 4.x): FINDINGS.md 2026-06-16 sweep originally set 20×32
  *   (5+15 × 8+24). Recalibrated 2026-07-13 (keyless sweep, same method/fixture as
  *   sonnet-5 below): 12×20 (cellWBonus:7, cellHBonus:12) PASSED 4/4 clean runs, 6/6
@@ -87,7 +86,13 @@ function isBaseOrAlias(m: string, base: string): boolean {
  * - claude-sonnet-4-6: 2026-07-13 keyless calibration. 11×18 FAILED (1 of 2 runs
  *   confabulated the same extra hex digit as Opus). 12×20 (cellWBonus:7, cellHBonus:12)
  *   PASSED 3/3 clean runs, 6/6 each, zero confabulation.
- * - gpt-5.6-sol: text-only until its raw-image profile clears the exact-recall bar.
+ * - gpt-5.6-terra / luna: 2026-07-14 blind three-reader proxy sweep. Both
+ *   assigned readers passed 42/42 fields across 5×8 through 20×32, so the
+ *   smallest passing cell (5×8) wins.
+ * - gpt-5.6-sol: follow-up blind sweep fixed the underspecified case-preservation
+ *   prompt and used two fresh fixtures. Three readers passed 324/324 fields
+ *   across nine profiles. Keep Sol's existing exact-model JetBrains 6×11 render
+ *   profile; reader bonuses remain zero.
  * - everything else: DEFAULT_READER_PROFILE (never imaged; no measurement exists).
  */
 const BUILTIN_RULES: ProfileRule[] = [
@@ -97,10 +102,21 @@ const BUILTIN_RULES: ProfileRule[] = [
   },
   {
     test: (m) => isBaseOrAlias(m, 'gpt-5.6-sol'),
-    profile: DEFAULT_READER_PROFILE,
+    profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0 },
   },
   {
-    test: (m) => isBaseOrAlias(m, 'gpt-5.6'),
+    test: (m) => isBaseOrAlias(m, 'gpt-5.6-terra'),
+    profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0 },
+  },
+  {
+    test: (m) => isBaseOrAlias(m, 'gpt-5.6-luna'),
+    profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0 },
+  },
+  // Exact legacy id only: applicability.ts removes it from configured/runtime
+  // scope, but direct-transform API fixtures still exercise the shared GPT path.
+  // Do not use isBaseOrAlias here; variants must earn independent calibration.
+  {
+    test: (m) => m === 'gpt-5.6',
     profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0 },
   },
   // Prefix already dash-terminated, so `claude-opus-40` etc. cannot false-match.

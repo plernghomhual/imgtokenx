@@ -186,30 +186,30 @@ describe('client compatibility smoke matrix', () => {
       config: { openAIUpstream: 'http://openai.test', openAIApiKey: 'fake-openai-key', transform: FORCE_TRANSFORM },
       url: 'http://localhost/v1/responses',
       headers: { 'content-type': 'application/json' },
-      body: { model: 'gpt-5.6', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
+      body: { model: 'gpt-5.6-terra', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
       upstream: 'http://openai.test/v1/responses',
       kind: 'openai-responses' as const,
       expectImage: true,
     },
     {
-      name: 'Codex OpenAI Responses unvalidated Sol profile',
+      name: 'Codex OpenAI Responses calibrated Sol profile',
       config: { openAIUpstream: 'http://openai.test', openAIApiKey: 'fake-openai-key', transform: FORCE_TRANSFORM },
       url: 'http://localhost/v1/responses',
       headers: { 'content-type': 'application/json' },
       body: { model: 'gpt-5.6-sol', instructions: BIG_CONTEXT, input: [{ role: 'user', content: 'hi' }] },
       upstream: 'http://openai.test/v1/responses',
       kind: 'openai-responses' as const,
-      expectImage: false,
+      expectImage: true,
     },
     {
-      name: 'OpenCode OpenAI weak GPT',
+      name: 'OpenCode OpenAI calibrated Sol',
       config: { upstream: 'http://ocproxy.test', openAIUpstream: 'http://openai.test', transform: FORCE_TRANSFORM },
       url: 'http://localhost/openai/chat/completions',
       headers: { 'content-type': 'application/json', authorization: 'Bearer fake-local-token' },
-      body: { model: 'gpt-5.5', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
+      body: { model: 'gpt-5.6-sol', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
       upstream: 'http://ocproxy.test/openai/chat/completions',
       kind: 'openai-chat' as const,
-      expectImage: false,
+      expectImage: true,
     },
     {
       name: 'Cloudflare gateway OpenAI strong GPT',
@@ -220,7 +220,7 @@ describe('client compatibility smoke matrix', () => {
       },
       url: 'http://localhost/chat/completions',
       headers: { 'content-type': 'application/json', authorization: 'Bearer fake-openai-key' },
-      body: { model: 'gpt-5.6', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
+      body: { model: 'gpt-5.6-terra', messages: [{ role: 'system', content: BIG_CONTEXT }, { role: 'user', content: 'hi' }] },
       upstream: 'https://gateway.example.test/v1/acct/gw/openai/chat/completions',
       kind: 'openai-chat' as const,
       expectImage: true,
@@ -236,7 +236,11 @@ describe('client compatibility smoke matrix', () => {
     expectImage: boolean;
   }>)('$name routes with the expected image/pass-through decision', async ({ config, url, headers, body, upstream, kind, expectImage }) => {
     const prevModels = process.env.IMGTOKENX_MODELS;
+    const prevProfiles = process.env.IMGTOKENX_READER_PROFILES;
     process.env.IMGTOKENX_MODELS = String(body.model);
+    if (expectImage && String(body.model).startsWith('gpt')) {
+      process.env.IMGTOKENX_READER_PROFILES = JSON.stringify({ [String(body.model)]: { safeToImage: true } });
+    }
     const capture: FetchCapture = { calls: [], bodies: [] };
     stubFetch(capture);
     try {
@@ -258,6 +262,8 @@ describe('client compatibility smoke matrix', () => {
     } finally {
       if (prevModels === undefined) delete process.env.IMGTOKENX_MODELS;
       else process.env.IMGTOKENX_MODELS = prevModels;
+      if (prevProfiles === undefined) delete process.env.IMGTOKENX_READER_PROFILES;
+      else process.env.IMGTOKENX_READER_PROFILES = prevProfiles;
     }
   });
 });
