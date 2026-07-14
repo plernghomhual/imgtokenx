@@ -67,14 +67,20 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   Opus specifically — 3 clean runs then a 4th confabulated an extra hex digit
  *   (`a3f9c1e0eb7d2` vs the true `a3f9c1e0b7d2`) — so Opus stays at 12×20 even
  *   though Sonnet cleared 11×18 (see below).
- * - claude-haiku-4-5: 2026-07-10 keyless calibration (the eval/reader-capacity fixture
- *   rendered to PNGs by the production renderer, read by subscription-side subagents on
- *   each model; one agent per density so answers can't leak across variants). Scored
- *   6/6 exact+guard ONLY at 20×32; every smaller density (5×8, 7×10, 9×12) produced at
+ * - claude-haiku-4-5: 2026-07-10 keyless calibration first scored 6/6 exact+guard
+ *   ONLY at 20×32; every smaller density then tried (5×8, 7×10, 9×12) produced at
  *   least one CONFABULATED exact value (invented port, invented field name, wrong hex
- *   digit) — the failure mode this table exists to block. Caveat: agents consumed the
- *   PNGs via the harness Read tool, which may resample; pages were kept ≤1568×728 to
- *   stay under the API resample ceiling, matching what the proxy emits.
+ *   digit) — the failure mode this table exists to block. 20×32 shipped, but its
+ *   savings are strongly negative (net token LOSS vs plain text — the fixed per-page
+ *   image-token cost stays roughly constant across cell sizes while chars-per-page
+ *   shrinks, so bigger cells cost more per char). 2026-07-14 gap-fill sweep tried the
+ *   untested 9×12-to-20×32 range: 14×22 (cellWBonus:9, cellHBonus:14) PASSED 3/3 clean
+ *   runs, zero confabulation, and supersedes 20×32 (still net-negative savings but far
+ *   less so). 11×18 (cellWBonus:6, cellHBonus:10) was tried next and FAILED — 1 of 3
+ *   runs confabulated the same extra hex digit seen at Opus's and Sonnet-4-6's 11×18
+ *   failures — so 14×22 is Haiku's floor for now. Caveat: agents consumed the PNGs via
+ *   the harness Read tool, which may resample; pages were kept ≤1568×728 to stay under
+ *   the API resample ceiling, matching what the proxy emits.
  * - claude-sonnet-5: 2026-07-13 keyless recalibration, same method, intermediate
  *   densities. 10×16 (cellWBonus:5, cellHBonus:8) FAILED — 1 of 2 runs confabulated
  *   the hex digit. 12×20 (cellWBonus:7, cellHBonus:12) PASSED 3/3 clean runs, 6/6 each.
@@ -134,7 +140,7 @@ const BUILTIN_RULES: ProfileRule[] = [
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-haiku-4-5'),
-    profile: { safeToImage: true, cellWBonus: 15, cellHBonus: 24 },
+    profile: { safeToImage: true, cellWBonus: 9, cellHBonus: 14 },
   },
 ];
 

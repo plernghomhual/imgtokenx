@@ -23,10 +23,10 @@ describe('resolveReaderProfile (built-in table)', () => {
     expect(resolveReaderProfile('claude-opus-4-7')).toEqual({ safeToImage: true, cellWBonus: 7, cellHBonus: 12 });
   });
 
-  it('claude-haiku-4-5 gets the calibrated 20x32 cell (2026-07-10 keyless sweep)', () => {
-    const at20x32 = { safeToImage: true, cellWBonus: 15, cellHBonus: 24 };
-    expect(resolveReaderProfile('claude-haiku-4-5')).toEqual(at20x32);
-    expect(resolveReaderProfile('claude-haiku-4-5-20251001')).toEqual(at20x32);
+  it('claude-haiku-4-5 gets the recalibrated 14x22 cell (2026-07-14 gap-fill sweep)', () => {
+    const at14x22 = { safeToImage: true, cellWBonus: 9, cellHBonus: 14 };
+    expect(resolveReaderProfile('claude-haiku-4-5')).toEqual(at14x22);
+    expect(resolveReaderProfile('claude-haiku-4-5-20251001')).toEqual(at14x22);
     // Suffix-alias match must not catch unrelated future ids.
     expect(resolveReaderProfile('claude-haiku-4-50')).toEqual(DEFAULT_READER_PROFILE);
   });
