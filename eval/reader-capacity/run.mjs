@@ -30,6 +30,7 @@ function parseArgs(argv) {
   let out = join(here, 'results.json');
   let profilesOut = null;
   let dryRun = false;
+  let seed = null;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -48,6 +49,12 @@ function parseArgs(argv) {
       if (!profilesOut) throw new Error('--profiles-out requires a path');
     } else if (a.startsWith('--profiles-out=')) {
       profilesOut = a.slice('--profiles-out='.length);
+    } else if (a === '--seed') {
+      seed = Number(argv[++i]);
+      if (!Number.isFinite(seed)) throw new Error('--seed requires a number');
+    } else if (a.startsWith('--seed=')) {
+      seed = Number(a.slice('--seed='.length));
+      if (!Number.isFinite(seed)) throw new Error('--seed requires a number');
     } else if (a.startsWith('-')) {
       throw new Error(`unknown option: ${a}`);
     } else if (modelsArg === null) {
@@ -67,6 +74,9 @@ function parseArgs(argv) {
     out: out === '-' ? out : resolve(process.cwd(), out),
     profilesOut: profilesOut ? resolve(process.cwd(), profilesOut) : null,
     dryRun,
+    // No seed given -> a fresh random fixture every run, so acceptance can't
+    // overfit one fixed hex/camelCase/port shape. Pass --seed to reproduce.
+    seed: seed ?? (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0,
   };
 }
 
@@ -84,15 +94,48 @@ try {
 const patchTokens = (w, h) => Math.ceil(w / 28) * Math.ceil(h / 28);
 
 // --- Fixture: one synthetic session with embedded precision-critical tokens ---
-const TRUTH = {
-  hex: 'a3f9c1e0b7d2',
-  camel: 'tokenLedgerShard',
-  path: 'src/core/anthropic-vision.ts',
-  flag: '--max-visual-tokens',
-  port: '47821',
-  decisionKey: 'retry budget', // gist: a decision that survives lossy reads
-  decisionVal: '3 attempts',
-};
+// Values are seeded-random per run (see --seed) rather than fixed, so a passing
+// score can't be an artifact of one specific hex/camelCase/port glyph shape
+// rendering unambiguously — see the 2026-07-14 phantom-hex-digit finding.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const WORDS = ['token', 'ledger', 'cache', 'session', 'stream', 'proxy', 'engine',
+  'router', 'buffer', 'shard', 'worker', 'queue', 'vault', 'anchor', 'relay', 'atlas'];
+
+function pickWords(rng, n) {
+  const pool = [...WORDS];
+  const picked = [];
+  for (let i = 0; i < n; i++) picked.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  return picked;
+}
+
+function makeTruth(seed) {
+  const rng = mulberry32(seed);
+  const [w1, w2, w3, w4] = pickWords(rng, 4);
+  const cap = (s) => s[0].toUpperCase() + s.slice(1);
+  const hex = Array.from({ length: 12 }, () => Math.floor(rng() * 16).toString(16)).join('');
+  const port = String(10000 + Math.floor(rng() * 55000));
+  return {
+    hex,
+    camel: `${w1}${cap(w2)}Shard`,
+    path: `src/core/${w3}.ts`,
+    flag: `--max-${w4}-tokens`,
+    port,
+    decisionKey: 'retry budget', // gist: a decision that survives lossy reads
+    decisionVal: '3 attempts',
+  };
+}
+
+const TRUTH = makeTruth(args.seed);
+console.log(`Fixture seed: ${args.seed} (rerun with --seed ${args.seed} to reproduce)`);
 const SESSION = [
   '<user t="1">Wire up the retry path. Use a retry budget of 3 attempts, backing off 250ms.</user>',
   `<assistant t="2">Done. The token cache key is ${TRUTH.hex}. I renamed the field to ${TRUTH.camel}`,

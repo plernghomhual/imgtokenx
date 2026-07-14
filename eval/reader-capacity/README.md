@@ -29,6 +29,12 @@ Results default to `eval/reader-capacity/results.json`. Use `--out path` to
 write elsewhere, or `--out -` to print JSON to stdout. `--dry-run` forces local
 rendering/accounting only, even if `ANTHROPIC_API_KEY` is set.
 
+The fixture's exact-critical values (hex key, camelCase field, path, flag,
+port) are seeded-random per run, printed as `Fixture seed: N` — pass `--seed N`
+to reproduce a specific run. This exists so a pass can't be an artifact of one
+fixed hex/camelCase/port glyph shape happening to render unambiguously; run the
+sweep across a few different seeds before trusting a result.
+
 The live scorer intentionally keeps the `eval/opus-density/` Anthropic Messages
 call path. The CLI accepts any model id for accounting and output bookkeeping;
 only models accepted by that API path can be live-scored without extending the
