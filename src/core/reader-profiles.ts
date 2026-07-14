@@ -84,6 +84,9 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   9×12 (cellWBonus:4, cellHBonus:4) FAILED for both Sonnet and Opus — both models
  *   misread the port as `7821` instead of `47821` (dropped leading digit), so it was
  *   never adopted for either.
+ * - claude-sonnet-4-6: 2026-07-13 keyless calibration. 11×18 FAILED (1 of 2 runs
+ *   confabulated the same extra hex digit as Opus). 12×20 (cellWBonus:7, cellHBonus:12)
+ *   PASSED 3/3 clean runs, 6/6 each, zero confabulation.
  * - gpt-5.6-sol: text-only until its raw-image profile clears the exact-recall bar.
  * - everything else: DEFAULT_READER_PROFILE (never imaged; no measurement exists).
  */
@@ -108,6 +111,10 @@ const BUILTIN_RULES: ProfileRule[] = [
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-5'),
     profile: { safeToImage: true, cellWBonus: 6, cellHBonus: 10 },
+  },
+  {
+    test: (m) => isBaseOrAlias(m, 'claude-sonnet-4-6'),
+    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-haiku-4-5'),

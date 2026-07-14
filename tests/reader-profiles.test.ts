@@ -44,6 +44,14 @@ describe('resolveReaderProfile (built-in table)', () => {
     expect(resolveReaderProfile('claude-fable-50')).toEqual(DEFAULT_READER_PROFILE);
   });
 
+  it('claude-sonnet-4-6 gets the calibrated 12x20 cell (2026-07-13 keyless sweep)', () => {
+    const at12x20 = { safeToImage: true, cellWBonus: 7, cellHBonus: 12 };
+    expect(resolveReaderProfile('claude-sonnet-4-6')).toEqual(at12x20);
+    expect(resolveReaderProfile('claude-sonnet-4-6-20250722')).toEqual(at12x20);
+    // Must not catch unrelated future ids.
+    expect(resolveReaderProfile('claude-sonnet-4-60')).toEqual(DEFAULT_READER_PROFILE);
+  });
+
   it('unknown/uncalibrated models default to never-image (conservative fallback)', () => {
     expect(resolveReaderProfile('claude-sonnet-4-7')).toEqual(DEFAULT_READER_PROFILE);
     expect(resolveReaderProfile('claude-mythos-5')).toEqual(DEFAULT_READER_PROFILE);

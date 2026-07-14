@@ -289,8 +289,8 @@ describe('serveFragment', () => {
       expect(on).toContain('Opus 4.8</span><span class="chip-mode">image 12×20');
       expect(on).toContain('Sonnet 5</span><span class="chip-mode">image 11×18');
       expect(on).toContain('Haiku 4.5</span><span class="chip-mode">image 20×32');
-      // Sonnet 4.6 stays uncalibrated.
-      expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">text only');
+      // Sonnet 4.6 calibrated 2026-07-13 at 12×20 (same as Opus 4.8).
+      expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">image 12×20');
       // Generic GPT 5.6, then its Sol profile.
       expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.6 Sol'));
       expect(getAllowedModelBases()).not.toContain('gpt-5.6');
