@@ -40,7 +40,7 @@ const GPT_HISTORY_COLS = 152;
 
 // GPT vision latency grows with physical image count/bytes, not just billed tokens.
 // Long OpenCode sessions can otherwise turn old history into 80+ images: token-cheap
-// but slow enough that gpt-5.5 times out before first token. When this cap trips,
+// but slow enough that gpt-5.x times out before first token. When this cap trips,
 // callers leave the old history as text rather than dropping or de-prioritizing it.
 const GPT_HISTORY_MAX_IMAGES = 16;
 
@@ -91,7 +91,7 @@ export interface GptHistoryOptions {
   /** Hard cap on GPT history image count. This is a TRUE cap, not a threshold:
    *  collapse the oldest completed sections until the next section would exceed
    *  the cap, then leave the remaining history as ordinary text. Prevents 80+
-   *  image gpt-5.5 requests without dropping context or live tool state. */
+   *  image gpt-5.x requests without dropping context or live tool state. */
   maxImages: number;
   /** Reflow the transcript before rendering: pack soft-wrapped lines and mark
    *  every hard newline with the ↵ sentinel — same treatment as the static

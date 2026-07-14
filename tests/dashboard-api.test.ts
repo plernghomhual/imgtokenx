@@ -282,7 +282,6 @@ describe('serveFragment', () => {
       // GPT profiles are visible, but no GPT model is silently enabled.
       expect(on).toContain('GPT 5.6</span><span class="chip-mode">image 5×8');
       expect(on).toContain('GPT 5.6 Sol</span><span class="chip-mode">text only');
-      expect(on).toContain('GPT 5.5</span><span class="chip-mode">text only');
       // Calibrated 2026-07-10 (keyless sweep): Haiku 4.5 images at 20×32.
       // Recalibrated 2026-07-13 (keyless sweep): Sonnet 5 and Opus 4.8 image at 12×20.
       expect(on).toContain('Opus 4.8</span><span class="chip-mode">image 12×20');
@@ -290,18 +289,13 @@ describe('serveFragment', () => {
       expect(on).toContain('Haiku 4.5</span><span class="chip-mode">image 20×32');
       // Sonnet 4.6 stays uncalibrated.
       expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">text only');
-      // Generic GPT 5.6, its Sol profile, then GPT 5.5.
+      // Generic GPT 5.6, then its Sol profile.
       expect(on.indexOf('GPT 5.6')).toBeLessThan(on.indexOf('GPT 5.6 Sol'));
-      expect(on.indexOf('GPT 5.6 Sol')).toBeLessThan(on.indexOf('GPT 5.5'));
       expect(getAllowedModelBases()).not.toContain('gpt-5.6');
-      expect(getAllowedModelBases()).not.toContain('gpt-5.5');
 
       dash.handleModelsToggle('gpt-5.6-sol', true);
-      dash.handleModelsToggle('gpt-5.5', true);
       const onBoth = await (await dash.serveFragment('models', url, 1234)).text();
-      expect(onBoth).toContain('GPT 5.5 ✓</span><span class="chip-mode">text only');
       expect(onBoth).toContain('GPT 5.6 Sol ✓</span><span class="chip-mode">text only');
-      expect(getAllowedModelBases()).toContain('gpt-5.5');
       expect(getAllowedModelBases()).toContain('gpt-5.6-sol');
 
       dash.handleModelsToggle('custom-"model', true);
@@ -330,15 +324,15 @@ describe('serveFragment', () => {
     );
     setAllowedModelBases(['gpt-5.6']);
     try {
-      persistentDash.handleModelsToggle('gpt-5.5', true);
-      expect(saved).toEqual([['gpt-5.6', 'gpt-5.5']]);
-      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.5']);
+      persistentDash.handleModelsToggle('gpt-5.6-sol', true);
+      expect(saved).toEqual([['gpt-5.6', 'gpt-5.6-sol']]);
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.6-sol']);
 
       const failingDash = new DashboardState(undefined, undefined, () => {
         throw new Error('disk full');
       });
       expect(() => failingDash.handleModelsToggle('claude-fable-5', true)).toThrow('disk full');
-      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.5']);
+      expect(getAllowedModelBases()).toEqual(['gpt-5.6', 'gpt-5.6-sol']);
     } finally {
       setAllowedModelBases(null);
     }
