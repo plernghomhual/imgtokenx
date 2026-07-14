@@ -1801,6 +1801,7 @@ export async function transformRequest(
   const renderStyle: RenderStyle = {
     cellWBonus: readerProfile.cellWBonus,
     cellHBonus: readerProfile.cellHBonus,
+    font: readerProfile.font,
   };
   const { cellW, cellH } = cellDims(renderStyle);
 

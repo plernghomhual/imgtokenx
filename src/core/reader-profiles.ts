@@ -21,13 +21,19 @@
  *   IMGTOKENX_READER_PROFILES='{"claude-mythos-5":{"safeToImage":true}}'
  */
 
+import type { RenderFont } from './render.js';
+
 export interface ReaderProfile {
   /** False = transform.ts must not render images for this model; full text passthrough. */
   safeToImage: boolean;
-  /** Added to render.ts's ATLAS_CELL_W (5px) for this model's render cell. */
+  /** Added to this profile's atlas base cell width for this model's render cell.
+   *  Base is Spleen 5×8 unless `font` selects a different atlas. */
   cellWBonus: number;
-  /** Added to render.ts's ATLAS_CELL_H (8px) for this model's render cell. */
+  /** Added to this profile's atlas base cell height (see `cellWBonus`). */
   cellHBonus: number;
+  /** Atlas to render with. Unset = Spleen 5×8 base (bonuses add to 5×8).
+   *  `'jetbrains-mono-10'` selects the 6×11 JetBrains atlas (bonuses add to 6×11). */
+  font?: RenderFont;
 }
 
 /** Conservative fallback for unrecognized/uncalibrated models: never image. We have
@@ -61,37 +67,61 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   see docs/RENDER_SIZING.md / FINDINGS.md's Fable 5 measurements.
  * - claude-opus-4- (any Opus 4.x): FINDINGS.md 2026-06-16 sweep originally set 20×32
  *   (5+15 × 8+24). Recalibrated 2026-07-13 (keyless sweep, same method/fixture as
- *   sonnet-5 below): 12×20 (cellWBonus:7, cellHBonus:12) PASSED 4/4 clean runs, 6/6
- *   each, zero confabulation — supersedes the 2026-06-16 finding at this density.
- *   11×18 (cellWBonus:6, cellHBonus:10) was tried in the same sweep and FAILED for
- *   Opus specifically — 3 clean runs then a 4th confabulated an extra hex digit
- *   (`a3f9c1e0eb7d2` vs the true `a3f9c1e0b7d2`) — so Opus stays at 12×20 even
- *   though Sonnet cleared 11×18 (see below).
+ *   sonnet-5 below): 12×20 Spleen (cellWBonus:7, cellHBonus:12) PASSED 4/4 clean runs,
+ *   6/6 each, zero confabulation — supersedes the 2026-06-16 finding at this density.
+ *   11×18 Spleen (cellWBonus:6, cellHBonus:10) was tried in the same sweep and FAILED
+ *   for Opus specifically — 3 clean runs then a 4th confabulated an extra hex digit
+ *   (`a3f9c1e0eb7d2` vs the true `a3f9c1e0b7d2`).
+ *   2026-07-14 switched atlas to JetBrains Mono 10 (same atlas gpt-5.6-sol already
+ *   uses). Bare 6×11 (cellWBonus:0, cellHBonus:0) FAILED — one run flipped hex case
+ *   (`3dd2f1cdebea` → `3dd2F1cdebea`), a silent wrong exact value. One bump up, JB
+ *   7×13 (cellWBonus:1, cellHBonus:2), PASSED 3/3 clean runs (7/7 exact values each:
+ *   hex, camelCase field, path, CLI flag, port, retry/backoff quantity, guard held),
+ *   zero confabulation, and is far more compressive than 12×20 Spleen on the
+ *   calibration fixture (54% vs -9% "savings" — Spleen 12×20 actually costs more
+ *   tokens than plain text on this short fixture; JB 7×13 does not). Supersedes
+ *   12×20 Spleen.
  * - claude-haiku-4-5: 2026-07-10 keyless calibration first scored 6/6 exact+guard
- *   ONLY at 20×32; every smaller density then tried (5×8, 7×10, 9×12) produced at
- *   least one CONFABULATED exact value (invented port, invented field name, wrong hex
- *   digit) — the failure mode this table exists to block. 20×32 shipped, but its
- *   savings are strongly negative (net token LOSS vs plain text — the fixed per-page
- *   image-token cost stays roughly constant across cell sizes while chars-per-page
- *   shrinks, so bigger cells cost more per char). 2026-07-14 gap-fill sweep tried the
- *   untested 9×12-to-20×32 range: 14×22 (cellWBonus:9, cellHBonus:14) PASSED 3/3 clean
- *   runs, zero confabulation, and supersedes 20×32 (still net-negative savings but far
- *   less so). 11×18 (cellWBonus:6, cellHBonus:10) was tried next and FAILED — 1 of 3
- *   runs confabulated the same extra hex digit seen at Opus's and Sonnet-4-6's 11×18
- *   failures — so 14×22 is Haiku's floor for now. Caveat: agents consumed the PNGs via
- *   the harness Read tool, which may resample; pages were kept ≤1568×728 to stay under
- *   the API resample ceiling, matching what the proxy emits.
+ *   ONLY at Spleen 20×32; every smaller Spleen density then tried (5×8, 7×10, 9×12)
+ *   produced at least one CONFABULATED exact value (invented port, invented field
+ *   name, wrong hex digit) — the failure mode this table exists to block. 20×32
+ *   shipped, but its savings are strongly negative (net token LOSS vs plain text —
+ *   the fixed per-page image-token cost stays roughly constant across cell sizes
+ *   while chars-per-page shrinks, so bigger cells cost more per char). 2026-07-14
+ *   gap-fill sweep tried the untested 9×12-to-20×32 Spleen range: 14×22 Spleen
+ *   (cellWBonus:9, cellHBonus:14) PASSED 3/3 clean runs, zero confabulation, and
+ *   supersedes 20×32 (still net-negative savings but far less so). 11×18 Spleen
+ *   (cellWBonus:6, cellHBonus:10) was tried next and FAILED — 1 of 3 runs
+ *   confabulated the same extra hex digit seen at Opus's and Sonnet-4-6's 11×18
+ *   Spleen failures. Caveat: agents consumed the PNGs via the harness Read tool,
+ *   which may resample; pages were kept ≤1568×728 to stay under the API resample
+ *   ceiling, matching what the proxy emits.
+ *   2026-07-14 switched atlas to JetBrains Mono 10. Bare 6×11 FAILED — same hex
+ *   case-flip as Opus and Sonnet-4-6 saw at this cell. JB 7×13 (cellWBonus:1,
+ *   cellHBonus:2) PASSED 3/3 clean runs, zero confabulation, 54% savings on the
+ *   calibration fixture vs 14×22 Spleen's -47% (net token loss). Supersedes 14×22
+ *   Spleen.
  * - claude-sonnet-5: 2026-07-13 keyless recalibration, same method, intermediate
- *   densities. 10×16 (cellWBonus:5, cellHBonus:8) FAILED — 1 of 2 runs confabulated
- *   the hex digit. 12×20 (cellWBonus:7, cellHBonus:12) PASSED 3/3 clean runs, 6/6 each.
- *   11×18 (cellWBonus:6, cellHBonus:10) retried after 12×20 shipped and PASSED 3/3
- *   clean runs, 6/6 each, zero confabulation — supersedes 12×20 for Sonnet only.
- *   9×12 (cellWBonus:4, cellHBonus:4) FAILED for both Sonnet and Opus — both models
- *   misread the port as `7821` instead of `47821` (dropped leading digit), so it was
- *   never adopted for either.
- * - claude-sonnet-4-6: 2026-07-13 keyless calibration. 11×18 FAILED (1 of 2 runs
- *   confabulated the same extra hex digit as Opus). 12×20 (cellWBonus:7, cellHBonus:12)
- *   PASSED 3/3 clean runs, 6/6 each, zero confabulation.
+ *   densities. 10×16 Spleen (cellWBonus:5, cellHBonus:8) FAILED — 1 of 2 runs
+ *   confabulated the hex digit. 12×20 Spleen (cellWBonus:7, cellHBonus:12) PASSED
+ *   3/3 clean runs, 6/6 each. 11×18 Spleen (cellWBonus:6, cellHBonus:10) retried
+ *   after 12×20 shipped and PASSED 3/3 clean runs, 6/6 each, zero confabulation —
+ *   superseded 12×20 for Sonnet only. 9×12 Spleen (cellWBonus:4, cellHBonus:4)
+ *   FAILED for both Sonnet and Opus — both models misread the port as `7821`
+ *   instead of `47821` (dropped leading digit), so it was never adopted for either.
+ *   2026-07-14 switched atlas to JetBrains Mono 10. Bare 6×11 (cellWBonus:0,
+ *   cellHBonus:0) PASSED 3/3 clean runs, 7/7 exact values each, zero confabulation
+ *   — the ONLY Claude profile that clears the bare JB atlas cell with no bonus
+ *   (Opus/Sonnet-4-6/Haiku all flip a hex digit's case at 6×11 and need 7×13).
+ *   37% savings vs 11×18 Spleen's 3% on the calibration fixture. Supersedes 11×18
+ *   Spleen.
+ * - claude-sonnet-4-6: 2026-07-13 keyless calibration. 11×18 Spleen FAILED (1 of 2
+ *   runs confabulated the same extra hex digit as Opus). 12×20 Spleen (cellWBonus:7,
+ *   cellHBonus:12) PASSED 3/3 clean runs, 6/6 each, zero confabulation.
+ *   2026-07-14 switched atlas to JetBrains Mono 10. Bare 6×11 FAILED — same hex
+ *   case-flip as Opus and Haiku at this cell. JB 7×13 (cellWBonus:1, cellHBonus:2)
+ *   PASSED 3/3 clean runs, zero confabulation, 54% savings on the calibration
+ *   fixture vs 12×20 Spleen's -9% (net token loss). Supersedes 12×20 Spleen.
  * - gpt-5.6-terra / luna: 2026-07-14 blind three-reader proxy sweep. Both
  *   assigned readers passed 42/42 fields across 5×8 through 20×32, so the
  *   smallest passing cell (5×8) wins.
@@ -128,19 +158,19 @@ const BUILTIN_RULES: ProfileRule[] = [
   // Prefix already dash-terminated, so `claude-opus-40` etc. cannot false-match.
   {
     test: (m) => m.startsWith('claude-opus-4-'),
-    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
+    profile: { safeToImage: true, cellWBonus: 1, cellHBonus: 2, font: 'jetbrains-mono-10' },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-5'),
-    profile: { safeToImage: true, cellWBonus: 6, cellHBonus: 10 },
+    profile: { safeToImage: true, cellWBonus: 0, cellHBonus: 0, font: 'jetbrains-mono-10' },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-4-6'),
-    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
+    profile: { safeToImage: true, cellWBonus: 1, cellHBonus: 2, font: 'jetbrains-mono-10' },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-haiku-4-5'),
-    profile: { safeToImage: true, cellWBonus: 9, cellHBonus: 14 },
+    profile: { safeToImage: true, cellWBonus: 1, cellHBonus: 2, font: 'jetbrains-mono-10' },
   },
 ];
 
@@ -171,6 +201,10 @@ function nonNegInt(v: unknown, fallback: number): number {
   return Number.isFinite(v) && (v as number) >= 0 ? Math.floor(v as number) : fallback;
 }
 
+function renderFont(v: unknown, fallback: RenderFont | undefined): RenderFont | undefined {
+  return v === 'spleen-5x8' || v === 'jetbrains-mono-10' ? v : fallback;
+}
+
 function parseEnvProfiles(raw: string): Map<string, ReaderProfile> {
   const out = new Map<string, ReaderProfile>();
   if (!raw) return out;
@@ -190,6 +224,7 @@ function parseEnvProfiles(raw: string): Map<string, ReaderProfile> {
       safeToImage: bool(p.safeToImage, base.safeToImage),
       cellWBonus: nonNegInt(p.cellWBonus, base.cellWBonus),
       cellHBonus: nonNegInt(p.cellHBonus, base.cellHBonus),
+      font: renderFont(p.font, base.font),
     });
   }
   return out;

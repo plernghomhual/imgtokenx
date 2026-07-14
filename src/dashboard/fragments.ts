@@ -3,7 +3,6 @@
 
 import { HTMX_JS, ALPINE_JS } from './vendor.js';
 import { CACHE_CREATE_RATE, CACHE_READ_RATE } from '../core/baseline.js';
-import { ATLAS_CELL_H, ATLAS_CELL_W } from '../core/atlas.js';
 import { resolveGptProfile } from '../core/gpt-model-profiles.js';
 import { resolveReaderProfile } from '../core/reader-profiles.js';
 import { renderCellHeight, renderCellWidth } from '../core/render.js';
@@ -113,9 +112,10 @@ export function renderModelsFragment(
         label: `image ${renderCellWidth(profile.style)}×${renderCellHeight(profile.style)}`,
       };
     }
+    const style = { cellWBonus: reader.cellWBonus, cellHBonus: reader.cellHBonus, font: reader.font };
     return {
       safe: true,
-      label: `image ${ATLAS_CELL_W + reader.cellWBonus}×${ATLAS_CELL_H + reader.cellHBonus}`,
+      label: `image ${renderCellWidth(style)}×${renderCellHeight(style)}`,
     };
   };
   const policyBadge = (id: string, label: string): string => {
