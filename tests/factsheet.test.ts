@@ -105,6 +105,20 @@ describe('small semantic quantities ("3 attempts", "250ms")', () => {
     expect(toks.some((t) => t.includes('3'))).toBe(false);
   });
 
+  it('preserves signed quantities instead of silently dropping the sign', () => {
+    const toks = extractFactSheetTokens('Apply an offset of -3 seconds, then allow +2 retries.');
+    expect(toks).toContain('-3 seconds');
+    expect(toks).toContain('+2 retries');
+    expect(toks).not.toContain('3 seconds');
+    expect(toks).not.toContain('2 retries');
+  });
+
+  it('preserves grouped quantities instead of extracting a misleading suffix', () => {
+    const toks = extractFactSheetTokens('Set the timeout to 1,000 ms.');
+    expect(toks).toContain('1,000 ms');
+    expect(toks).not.toContain('000 ms');
+  });
+
   it('survives the priority-tier budget alongside a flood of long URLs', () => {
     const urls = Array.from({ length: 80 }, (_, i) =>
       `https://platform.claude.com/docs/en/build-with-claude/page-${String(i).padStart(2, '0')}-guide.md`);

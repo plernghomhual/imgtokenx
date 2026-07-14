@@ -59,7 +59,7 @@ const PATTERNS: readonly RegExp[] = [
 // away. Matched as a whitespace-crossing phrase against the whole scan text (not the
 // per-chunk loop below, which only ever sees single non-whitespace chunks).
 const QUANTITY_PATTERN =
-  /\b\d{1,4}(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)\b/gi;
+  /(?<![\w.,+-])[-+]?(?:\d{1,4}|\d{1,3}(?:,\d{3})+)(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)\b/gi;
 
 const MIN_LEN = 3;
 const MAX_LEN = 120;
@@ -93,7 +93,7 @@ const SHAPE_JWT = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/
 const SHAPE_BASE64 = /^(?=[A-Za-z0-9+/]{20,120}\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9+/]{18,118}[A-Za-z0-9]={0,2}$/;
 const SHAPE_VERSION_PIN = /^[\^~]v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?$/; // ^2.0.0-beta.1 / ~1.4.2
 const SHAPE_QUANTITY =
-  /^\d{1,4}(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)$/i;
+  /^[-+]?(?:\d{1,4}|\d{1,3}(?:,\d{3})+)(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)$/i;
 const WORDISH = /[\w$]/;
 
 /** Lower tier = higher keep-priority. Pure function of the token → deterministic. */
