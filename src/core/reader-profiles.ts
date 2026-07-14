@@ -64,6 +64,10 @@ function isBaseOrAlias(m: string, base: string): boolean {
  *   (5+15 × 8+24). Recalibrated 2026-07-13 (keyless sweep, same method/fixture as
  *   sonnet-5 below): 12×20 (cellWBonus:7, cellHBonus:12) PASSED 4/4 clean runs, 6/6
  *   each, zero confabulation — supersedes the 2026-06-16 finding at this density.
+ *   11×18 (cellWBonus:6, cellHBonus:10) was tried in the same sweep and FAILED for
+ *   Opus specifically — 3 clean runs then a 4th confabulated an extra hex digit
+ *   (`a3f9c1e0eb7d2` vs the true `a3f9c1e0b7d2`) — so Opus stays at 12×20 even
+ *   though Sonnet cleared 11×18 (see below).
  * - claude-haiku-4-5: 2026-07-10 keyless calibration (the eval/reader-capacity fixture
  *   rendered to PNGs by the production renderer, read by subscription-side subagents on
  *   each model; one agent per density so answers can't leak across variants). Scored
@@ -75,8 +79,11 @@ function isBaseOrAlias(m: string, base: string): boolean {
  * - claude-sonnet-5: 2026-07-13 keyless recalibration, same method, intermediate
  *   densities. 10×16 (cellWBonus:5, cellHBonus:8) FAILED — 1 of 2 runs confabulated
  *   the hex digit. 12×20 (cellWBonus:7, cellHBonus:12) PASSED 3/3 clean runs, 6/6 each.
- *   Note 12×20 is a smaller cell — and therefore a smaller/more-profitable image —
- *   than the earlier 20×32 finding below; the earlier sweep never tried this density.
+ *   11×18 (cellWBonus:6, cellHBonus:10) retried after 12×20 shipped and PASSED 3/3
+ *   clean runs, 6/6 each, zero confabulation — supersedes 12×20 for Sonnet only.
+ *   9×12 (cellWBonus:4, cellHBonus:4) FAILED for both Sonnet and Opus — both models
+ *   misread the port as `7821` instead of `47821` (dropped leading digit), so it was
+ *   never adopted for either.
  * - gpt-5.6-sol: text-only until its raw-image profile clears the exact-recall bar.
  * - everything else: DEFAULT_READER_PROFILE (never imaged; no measurement exists).
  */
@@ -100,7 +107,7 @@ const BUILTIN_RULES: ProfileRule[] = [
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-sonnet-5'),
-    profile: { safeToImage: true, cellWBonus: 7, cellHBonus: 12 },
+    profile: { safeToImage: true, cellWBonus: 6, cellHBonus: 10 },
   },
   {
     test: (m) => isBaseOrAlias(m, 'claude-haiku-4-5'),

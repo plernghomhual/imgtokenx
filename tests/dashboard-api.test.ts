@@ -283,9 +283,11 @@ describe('serveFragment', () => {
       expect(on).toContain('GPT 5.6</span><span class="chip-mode">image 5×8');
       expect(on).toContain('GPT 5.6 Sol</span><span class="chip-mode">text only');
       // Calibrated 2026-07-10 (keyless sweep): Haiku 4.5 images at 20×32.
-      // Recalibrated 2026-07-13 (keyless sweep): Sonnet 5 and Opus 4.8 image at 12×20.
+      // Recalibrated 2026-07-13 (keyless sweep): Opus 4.8 image at 12×20.
+      // Sonnet 5 recalibrated further to 11×18 in the same-day follow-up sweep
+      // (Opus stayed at 12×20 — its 11×18 attempt confabulated a hex digit).
       expect(on).toContain('Opus 4.8</span><span class="chip-mode">image 12×20');
-      expect(on).toContain('Sonnet 5</span><span class="chip-mode">image 12×20');
+      expect(on).toContain('Sonnet 5</span><span class="chip-mode">image 11×18');
       expect(on).toContain('Haiku 4.5</span><span class="chip-mode">image 20×32');
       // Sonnet 4.6 stays uncalibrated.
       expect(on).toContain('Sonnet 4.6</span><span class="chip-mode">text only');
