@@ -3,7 +3,8 @@
  *
  * When imgtokenx renders a block (system slab, history, tool_result, reminder) to a PNG,
  * the precision-critical, hard-to-OCR strings inside it — file paths, URLs, SHAs/UUIDs,
- * version numbers, CLI flags, large numbers, CONST_IDS — are exactly what a model is
+ * version numbers, CLI flags, large numbers, CONST_IDS, small semantic quantities
+ * ("3 attempts", "250ms") — are exactly what a model is
  * most likely to misread off the image yet most likely to need quoted verbatim. This
  * module extracts those tokens so they ride next to the image as plain text: the model
  * quotes them without re-reading the PNG, and they stay in the cached prefix.
@@ -50,6 +51,16 @@ const PATTERNS: readonly RegExp[] = [
   /\b(?=[A-Z0-9-]{0,119}\d)[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b/g,
 ];
 
+// Small semantic quantities ("3 attempts", "250ms", "2 replicas") are a distinct risk
+// class from the identifier PATTERNS above: each half is individually too short/common
+// to protect (a bare "3" is below MIN_LEN; "attempts" is an ordinary word), yet the pair
+// is exactly the kind of small-glyph count a low-density render is most likely to drop or
+// duplicate a digit on, and it usually carries a decision the model must not paraphrase
+// away. Matched as a whitespace-crossing phrase against the whole scan text (not the
+// per-chunk loop below, which only ever sees single non-whitespace chunks).
+const QUANTITY_PATTERN =
+  /\b\d{1,4}(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)\b/gi;
+
 const MIN_LEN = 3;
 const MAX_LEN = 120;
 /** Budget cap: highest-priority tokens kept first. Exported so consumers can report drops. */
@@ -81,6 +92,8 @@ const SHAPE_QUERY = /^\?[^\s]+=.+/; // URL query string (?key=value...)
 const SHAPE_JWT = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/; // dot-separated JWT
 const SHAPE_BASE64 = /^(?=[A-Za-z0-9+/]{20,120}\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9+/]{18,118}[A-Za-z0-9]={0,2}$/;
 const SHAPE_VERSION_PIN = /^[\^~]v?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?$/; // ^2.0.0-beta.1 / ~1.4.2
+const SHAPE_QUANTITY =
+  /^\d{1,4}(?:\.\d+)?\s?(?:ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|attempt|attempts|retry|retries|try|tries|replica|replicas|worker|workers|thread|threads|shard|shards|byte|bytes|kb|mb|gb|px|percent|%)$/i;
 const WORDISH = /[\w$]/;
 
 /** Lower tier = higher keep-priority. Pure function of the token → deterministic. */
@@ -97,6 +110,7 @@ function priorityTier(tok: string): 0 | 1 | 2 {
     SHAPE_QUERY.test(tok) ||
     SHAPE_JWT.test(tok) ||
     SHAPE_VERSION_PIN.test(tok) ||
+    SHAPE_QUANTITY.test(tok) ||
     (SHAPE_BASE64.test(tok) && !SHAPE_CAMEL.test(tok)) ||
     (SHAPE_OPAQUE.test(tok) && !SHAPE_CAMEL.test(tok))
   ) {
@@ -168,6 +182,20 @@ export function extractFactSheetEntries(text: string, maxTokens: number = MAX_TO
       }
     }
     if (counts.size >= MAX_SEEN) break;
+  }
+  // Quantity phrases ("3 attempts", "250ms") cross whitespace, so they're invisible to
+  // the per-chunk loop above — scanned separately against the whole text.
+  if (counts.size < MAX_SEEN) {
+    const quantitySeen = new Set<string>();
+    for (const m of scan.matchAll(QUANTITY_PATTERN)) {
+      const tok = m[0].replace(/\s+/g, ' ').trim();
+      if (tok.length < MIN_LEN || tok.length > MAX_LEN) continue;
+      const key = `${m.index ?? 0}\x00${tok}`;
+      if (quantitySeen.has(key)) continue;
+      quantitySeen.add(key);
+      counts.set(tok, (counts.get(tok) ?? 0) + 1);
+      if (counts.size >= MAX_SEEN) break;
+    }
   }
   // Phase 1 — substring collapse (length-desc): keep the most-specific form, folding e.g.
   // a URL's path-portion into the full URL. Cross-tier on purpose. Total order (length,

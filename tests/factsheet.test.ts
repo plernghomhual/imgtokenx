@@ -90,6 +90,38 @@ describe('factsheet extraction', () => {
   });
 });
 
+describe('small semantic quantities ("3 attempts", "250ms")', () => {
+  it('captures a number+unit phrase that crosses whitespace', () => {
+    const toks = extractFactSheetTokens('Use a retry budget of 3 attempts, backing off 250ms.');
+    expect(toks).toContain('3 attempts');
+    expect(toks).toContain('250ms');
+  });
+
+  it('does not fire on a bare number or an ordinary word alone', () => {
+    // Neither half is individually protected: "3" is below MIN_LEN, "attempts" carries
+    // no exact-value risk on its own — only the pair together is a protected fact.
+    const toks = extractFactSheetTokens('I tried 3 different things and it still failed');
+    expect(toks).not.toContain('3');
+    expect(toks.some((t) => t.includes('3'))).toBe(false);
+  });
+
+  it('survives the priority-tier budget alongside a flood of long URLs', () => {
+    const urls = Array.from({ length: 80 }, (_, i) =>
+      `https://platform.claude.com/docs/en/build-with-claude/page-${String(i).padStart(2, '0')}-guide.md`);
+    const text = [...urls.slice(0, 40), 'retry budget of 3 attempts', ...urls.slice(40)].join('\n');
+    const toks = extractFactSheetTokens(text);
+    expect(toks).toContain('3 attempts');
+    expect(toks.length).toBeLessThanOrEqual(64);
+  });
+
+  it('is deterministic and appears in the rendered fact-sheet text', () => {
+    const text = 'retry budget of 3 attempts, backing off 250ms';
+    expect(factSheetText(text)).toBe(factSheetText(text));
+    expect(factSheetText(text)).toContain('3 attempts');
+    expect(factSheetText(text)).toContain('250ms');
+  });
+});
+
 describe('ticket-style codes and occurrence counts', () => {
   it('captures uppercase hyphenated codes that contain a digit', () => {
     const toks = extractFactSheetTokens(
