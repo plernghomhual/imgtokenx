@@ -672,7 +672,8 @@ function isOpenCodePath(pathname: string): boolean {
 function stripOpenCodePrefix(pathname: string): string {
   if (pathname === '/opencode') return '/';
   const stripped = pathname.slice('/opencode'.length);
-  return stripped.startsWith('/') ? stripped : `/${stripped}`;
+  const out = stripped.startsWith('/') ? stripped : `/${stripped}`;
+  return out === '/chat/completions' ? '/v1/chat/completions' : out;
 }
 
 function isOpenAIChatPath(pathname: string): boolean {
@@ -1304,6 +1305,21 @@ export function createProxy(config: ProxyConfig = {}) {
       const detail = redactErrorBody(
         ((e as Error).message ?? 'client disconnected') + (cause ? ` (cause: ${String(cause)})` : ''),
       );
+      // A destroyed HTTP/2 session poisons undici's pooled global fetch
+      // dispatcher: every subsequent request to this upstream fails the same
+      // way in-process (observed 2026-07-14), with no public API to evict the
+      // dead session. Ask for a graceful restart via the existing SIGTERM path
+      // (node.ts) instead of serving 502s until someone restarts manually —
+      // launchd/systemd KeepAlive brings the process back in ~1-2s. No-op
+      // outside Node (Worker has no process.kill).
+      const causeCode = (cause as { code?: string } | undefined)?.code;
+      if (
+        causeCode === 'ERR_HTTP2_INVALID_SESSION'
+        && typeof process !== 'undefined'
+        && typeof process.kill === 'function'
+      ) {
+        process.kill(process.pid, 'SIGTERM');
+      }
       fire(502, info, aborted ? `upstream_aborted: ${detail}` : `upstream_error: ${detail}`);
       return new Response(
         JSON.stringify({

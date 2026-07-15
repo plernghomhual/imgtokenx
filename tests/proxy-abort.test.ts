@@ -166,6 +166,46 @@ describe('E3 abort/timeout propagation (proxy)', () => {
     restore();
   });
 
+  it('self-restarts (SIGTERM) when a destroyed HTTP/2 session poisons the fetch pool', async () => {
+    // 2026-07-14 incident: undici's global fetch dispatcher wedges permanently
+    // after ERR_HTTP2_INVALID_SESSION — every future request fails the same
+    // way in-process with no public API to evict the dead session. The proxy
+    // asks for a graceful restart (existing SIGTERM path in node.ts; launchd
+    // KeepAlive respawns it) rather than serving 502s forever. Must NOT
+    // actually kill this test process — stub process.kill.
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const cause = Object.assign(new Error('The session has been destroyed'), {
+      code: 'ERR_HTTP2_INVALID_SESSION',
+    });
+    const { restore } = instrumentFetch({
+      forward: () => Promise.reject(new TypeError('fetch failed', { cause })),
+    });
+    const proxy = createProxy({ transform: {}, onRequest: () => {} });
+    const res = await proxy(buildMessagesRequest());
+    // Client-facing behavior is unchanged — still a plain upstream-unreachable 502.
+    expect(res.status).toBe(502);
+    const body = await res.json() as { error?: string };
+    expect(body.error).toBe('imgtokenx upstream unreachable');
+    expect(killSpy).toHaveBeenCalledTimes(1);
+    expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    restore();
+  });
+
+  it('does not self-restart on ordinary upstream failures (guard against over-triggering)', async () => {
+    // Only the exact poisoned-pool signature should trigger a restart — a
+    // plain ECONNREFUSED/TypeError must not cause the whole process to cycle.
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const cause = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    const { restore } = instrumentFetch({
+      forward: () => Promise.reject(new TypeError('fetch failed', { cause })),
+    });
+    const proxy = createProxy({ transform: {}, onRequest: () => {} });
+    const res = await proxy(buildMessagesRequest());
+    expect(res.status).toBe(502);
+    expect(killSpy).not.toHaveBeenCalled();
+    restore();
+  });
+
   it(
     'caps the probe at the default 5 s deadline even without a caller signal',
     { timeout: 12_000 }, // Vitest 4 form: options second, fn third

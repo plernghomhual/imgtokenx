@@ -72,6 +72,7 @@ describe('OpenCode Zen upstream', () => {
   });
 
   it.each([
+    ['/opencode/chat/completions', '/v1/chat/completions'],
     ['/opencode/v1/responses', '/v1/responses'],
     ['/opencode/v1/chat/completions', '/v1/chat/completions'],
     ['/opencode/v1/messages', '/v1/messages'],
