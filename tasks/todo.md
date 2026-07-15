@@ -1,3 +1,43 @@
+# 2026-07-14 — Calibrate OpenCode free models
+
+- [x] Resolve the exact Zen IDs for Hy3 Free, North Mini Code Free, Nemotron 3 Ultra Free, DeepSeek V4 Flash Free, MiMo V2.5 Free, and Big Pickle.
+- [x] Prove an authenticated, image-capable local invocation path for each model.
+- [x] Sweep every supported font/dimension for the sole image-capable model and calculate paired provider-reported savings.
+- [x] Enable only each model's smallest profitable zero-confabulation profile (none qualified; all remain text-only).
+- [x] Add the repeatable evaluator and results documentation; run focused and full verification.
+- [x] Record final evidence and remaining risks.
+
+Blocker/re-plan: the first runner attempt hung before reaching Zen because
+`opencode run --dir <isolated-temp>` did not finish initialization, and killing
+the CLI parent left its child alive. No calibration result was counted. Removed
+the unnecessary directory override and made timeout cleanup terminate the whole
+OpenCode process group before retrying.
+
+Verification note: the first sandboxed full Vitest run passed 1,061/1,062;
+the sole failure was the existing live-PID install-lock test because sandboxed
+`/bin/ps` could not resolve the current process start token. Re-run that test
+and the full suite with normal host process visibility before completion.
+
+## Review
+
+- Files changed for this calibration: `eval/opencode-reader-capacity/run.mjs`,
+  `eval/opencode-reader-capacity/RESULTS.md`, `tasks/lessons.md`, and this task
+  record. The pre-existing OpenCode route fix in `src/core/proxy.ts` and
+  `tests/opencode-zen.test.ts` was preserved.
+- Behavior changed: no production behavior. Hy3 Free, North Mini Code Free,
+  Nemotron 3 Ultra Free, DeepSeek V4 Flash Free, and Big Pickle reject image
+  input. MiMo V2.5 Free accepts images but passed 0/11 reader profiles, with
+  9/44 exact fields and 29 confabulations. All six therefore retain the
+  existing safe text-passthrough behavior.
+- Verification performed: six live OpenCode PNG capability smokes; MiMo sweep
+  across eleven Spleen/JetBrains profiles at production OpenAI geometry; paired
+  provider input-token usage; evaluator syntax/help/all-model dry-run; direct
+  TypeScript checks; isolated installer test 24/24; full Vitest 1,062/1,062;
+  build and version smoke; `git diff --check`.
+- Remaining risks: Zen may remap free aliases later; recalibrate before enabling
+  any changed revision. Provider usage is OpenCode-reported and exact token
+  accounting may change with the backing model.
+
 # 2026-07-13 — Split GPT 5.6 variants
 
 - [x] Replace the generic dashboard entry with Sol, Terra, and Luna siblings.
