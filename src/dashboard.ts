@@ -590,6 +590,149 @@ export class DashboardState {
     return ids;
   }
 
+  /** Shared totals/session/measurement accumulation. Single source of truth
+   *  for both update() (live requests) and replay() (rehydrate from JSONL on
+   *  restart) so the two paths can't drift on which counters get bumped. */
+  private applyTotals(row: {
+    compressed: boolean;
+    haveUsage: boolean;
+    creditSaving: boolean;
+    actualInputEff: number;
+    baselineInputEff: number;
+    outputEquiv: number;
+    rawActual: number;
+    rawBaseline: number;
+    out: number;
+    sid: string | undefined;
+    counters: {
+      artifactCandidates: number;
+      artifactWrites: number;
+      sourceCharsVirtualized: number;
+      virtualizedCharsRemoved: number;
+      duplicateCharsRemoved: number;
+      previewCharsSent: number;
+      deltaArtifacts: number;
+      deltaCharsSent: number;
+      deltaCharsRemoved: number;
+      checkpointApplied: boolean;
+      stateCharsRemoved: number;
+      checkpointRejected: boolean;
+      virtualContextFailOpen: boolean;
+      contextToolCalls: number;
+      contextToolSuccesses: number;
+      contextResultChars: number;
+      workspaceInspectCalls: number;
+    };
+    measurement?: {
+      textChars: number;
+      thinkingChars: number;
+      toolUseChars: number;
+      redactedBlockCount: number;
+    };
+  }): void {
+    const {
+      compressed, haveUsage, creditSaving, actualInputEff, baselineInputEff,
+      outputEquiv, rawActual, rawBaseline, out, sid, counters, measurement,
+    } = row;
+
+    this.totals.requests += 1;
+    if (compressed) this.totals.compressedRequests += 1;
+    this.totals.artifactCandidates += counters.artifactCandidates;
+    this.totals.artifactWrites += counters.artifactWrites;
+    this.totals.sourceCharsVirtualized += counters.sourceCharsVirtualized;
+    this.totals.virtualizedCharsRemoved += counters.virtualizedCharsRemoved;
+    this.totals.duplicateCharsRemoved += counters.duplicateCharsRemoved;
+    this.totals.previewCharsSent += counters.previewCharsSent;
+    this.totals.deltaArtifacts += counters.deltaArtifacts;
+    this.totals.deltaCharsSent += counters.deltaCharsSent;
+    this.totals.deltaCharsRemoved += counters.deltaCharsRemoved;
+    if (counters.checkpointApplied) this.totals.checkpointsApplied += 1;
+    this.totals.stateCharsRemoved += counters.stateCharsRemoved;
+    if (counters.checkpointRejected) this.totals.checkpointRejections += 1;
+    if (counters.virtualContextFailOpen) this.totals.virtualContextFailOpen += 1;
+    this.totals.contextToolCalls += counters.contextToolCalls;
+    this.totals.contextToolSuccesses += counters.contextToolSuccesses;
+    this.totals.contextResultChars += counters.contextResultChars;
+    this.totals.workspaceInspectCalls += counters.workspaceInspectCalls;
+
+    // Measured headline: only compressed rows with a usable probe. An
+    // uncompressed row contributes zero saved (baseline === actual), so
+    // including it here would only dilute the "saved on rows we moved" %.
+    if (creditSaving) {
+      this.totals.baselineInputWeighted += baselineInputEff;
+      this.totals.actualInputWeighted += actualInputEff;
+      this.totals.outputWeighted += outputEquiv;
+    }
+    // All-rows COUNTERFACTUAL spend, ungated on the probe — the honest
+    // denominator for "did imgtokenx move my real bill". baselineInputEff
+    // already folds the uncompressed/probe-failed fallback to actualInputEff,
+    // so passthrough rows contribute zero saved here.
+    if (haveUsage) {
+      this.totals.allBaselineEquivalentWeighted += baselineInputEff;
+      this.totals.allActualInputWeighted += actualInputEff;
+      this.totals.allOutputWeighted += outputEquiv;
+      this.totals.allUsageRequests += 1;
+      if (compressed) {
+        this.totals.compressedPaidRequests += 1;
+        this.totals.compressedActualInputWeighted += actualInputEff;
+        this.totals.compressedOutputWeighted += outputEquiv;
+      } else {
+        this.totals.passthroughPaidRequests += 1;
+        this.totals.passthroughActualInputWeighted += actualInputEff;
+        this.totals.passthroughOutputWeighted += outputEquiv;
+      }
+    }
+
+    // Per-session aggregation, partitioned by firstUserSha8 so the "current
+    // session" panel shows what's happening RIGHT NOW instead of stale
+    // lifetime numbers. Untagged rows (no sid) are skipped rather than
+    // bucketed into a synthetic "unknown" session.
+    if (typeof sid === 'string' && sid.length > 0) {
+      this.currentSessionId = sid;
+      let s = this.sessions.get(sid);
+      if (!s) {
+        s = {
+          sessionId: sid,
+          baselineInputWeighted: 0,
+          actualInputWeighted: 0,
+          baselineMeasuredCount: 0,
+          allActualInputWeighted: 0,
+          allOutputWeighted: 0,
+          rawActualTokens: 0,
+          rawBaselineTokens: 0,
+          rawOutputTokens: 0,
+        };
+        this.sessions.set(sid, s);
+        if (this.sessions.size > DashboardState.SESSION_CAP) {
+          const firstKey = this.sessions.keys().next().value;
+          if (firstKey !== undefined) this.sessions.delete(firstKey);
+        }
+      }
+      if (creditSaving) {
+        s.baselineInputWeighted += baselineInputEff;
+        s.actualInputWeighted += actualInputEff;
+        s.baselineMeasuredCount += 1;
+        s.rawActualTokens += rawActual;
+        s.rawBaselineTokens += rawBaseline;
+        s.rawOutputTokens += out;
+      }
+      if (haveUsage) {
+        s.allActualInputWeighted += actualInputEff;
+        s.allOutputWeighted += outputEquiv;
+      }
+    }
+
+    // Measurement totals are independent of usage/baseline gating — they
+    // accumulate whenever the scanner produced numbers.
+    if (measurement) {
+      this.totals.textCharsMeasured += measurement.textChars;
+      this.totals.thinkingCharsMeasured += measurement.thinkingChars;
+      this.totals.toolUseCharsMeasured += measurement.toolUseChars;
+      this.totals.redactedBlockCountMeasured += measurement.redactedBlockCount;
+      this.totals.eventsWithMeasurement += 1;
+    }
+  }
+
   /** Fold one event into the running totals + ring buffer.
    *
    *  Savings math is gated on a per-request `baseline_tokens` measurement
@@ -783,135 +926,45 @@ export class DashboardState {
       }
     }
 
-    this.totals.requests += 1;
-    if (compressed) this.totals.compressedRequests += 1;
-    this.totals.artifactCandidates += info?.artifactCandidates ?? 0;
-    this.totals.artifactWrites += info?.artifactWrites ?? 0;
-    this.totals.sourceCharsVirtualized += info?.sourceCharsVirtualized ?? 0;
-    this.totals.virtualizedCharsRemoved += info?.virtualizedCharsRemoved ?? 0;
-    this.totals.duplicateCharsRemoved += info?.duplicateCharsRemoved ?? 0;
-    this.totals.previewCharsSent += info?.previewCharsSent ?? 0;
-    this.totals.deltaArtifacts += info?.deltaArtifacts ?? 0;
-    this.totals.deltaCharsSent += info?.deltaCharsSent ?? 0;
-    this.totals.deltaCharsRemoved += info?.deltaCharsRemoved ?? 0;
-    if (info?.checkpointApplied) this.totals.checkpointsApplied += 1;
-    this.totals.stateCharsRemoved += info?.stateCharsRemoved ?? 0;
-    if (info?.checkpointRejected) this.totals.checkpointRejections += 1;
-    if (info?.virtualContextFailOpen) this.totals.virtualContextFailOpen += 1;
-    this.totals.contextToolCalls += info?.contextToolCalls ?? 0;
-    this.totals.contextToolSuccesses += info?.contextToolSuccesses ?? 0;
-    this.totals.contextResultChars += info?.contextResultChars ?? 0;
-    this.totals.workspaceInspectCalls += info?.workspaceInspectCalls ?? 0;
-
-    // Measured headline: only compressed rows with a usable probe. An
-    // uncompressed row contributes zero saved (baseline === actual), so
-    // including it here would only dilute the "saved on rows we moved" %.
-    if (creditSaving) {
-      this.totals.baselineInputWeighted += baselineInputEff;
-      this.totals.actualInputWeighted += actualInputEff;
-      this.totals.outputWeighted += outputEquiv;
-    }
-    // All-rows COUNTERFACTUAL spend, ungated on the probe — the honest
-    // denominator for "did imgtokenx move my real bill". Measured rows
-    // contribute their cache-aware baseline (what the unproxied path
-    // would have billed); unmeasured/probe-failed/passthrough rows
-    // contribute their actual input (imgtokenx either didn't run or we
-    // can't measure the counterfactual, so actual ≈ baseline). This
-    // keeps the ratio bounded at 100% — you can't save more than you
-    // would have paid.
-    if (haveUsage) {
-      // baselineInputEff already folds the uncompressed/probe-failed fallback
-      // to actualInputEff, so passthrough rows contribute zero saved here.
-      this.totals.allBaselineEquivalentWeighted += baselineInputEff;
-      this.totals.allActualInputWeighted += actualInputEff;
-      this.totals.allOutputWeighted += outputEquiv;
-      this.totals.allUsageRequests += 1;
-      // Direct observed compressed-vs-passthrough split. No counterfactual,
-      // no probe gating — just partition the paid-rows set by which path
-      // actually ran this turn. Headline answers "is the compressed path
-      // cheaper per request on real traffic". Selection bias (the gate
-      // routes each turn) is real; sample counts go to the UI so the
-      // operator can judge sufficiency.
-      if (compressed) {
-        this.totals.compressedPaidRequests += 1;
-        this.totals.compressedActualInputWeighted += actualInputEff;
-        this.totals.compressedOutputWeighted += outputEquiv;
-      } else {
-        this.totals.passthroughPaidRequests += 1;
-        this.totals.passthroughActualInputWeighted += actualInputEff;
-        this.totals.passthroughOutputWeighted += outputEquiv;
-      }
-    }
-
-    // Per-session aggregation. Uses the SAME baseline/actual/output math as
-    // the global accumulators above, partitioned by `info.firstUserSha8`
-    // so the dashboard's "current session" panel can show what's happening
-    // RIGHT NOW instead of stale lifetime numbers. Untagged events (no
-    // firstUserSha8 — cold start, passthrough probe failures) are skipped
-    // rather than bucketed into a synthetic "unknown" session.
-    const sid = info?.firstUserSha8;
-    if (typeof sid === 'string' && sid.length > 0) {
-      this.currentSessionId = sid;
-      let s = this.sessions.get(sid);
-      if (!s) {
-        s = {
-          sessionId: sid,
-          baselineInputWeighted: 0,
-          actualInputWeighted: 0,
-          baselineMeasuredCount: 0,
-          allActualInputWeighted: 0,
-          allOutputWeighted: 0,
-          rawActualTokens: 0,
-          rawBaselineTokens: 0,
-          rawOutputTokens: 0,
-        };
-        this.sessions.set(sid, s);
-        // Cap memory — drop the first (oldest by insertion order) session
-        // when over budget. We no longer track lastSeen privately on the
-        // class — insertion order is a fine proxy because `currentSessionId`
-        // (set above on every update) is what the serve path uses to pick
-        // the most-recent session, not a scan of `this.sessions`.
-        if (this.sessions.size > DashboardState.SESSION_CAP) {
-          const firstKey = this.sessions.keys().next().value;
-          if (firstKey !== undefined) this.sessions.delete(firstKey);
-        }
-      }
-      // Reuse the same haveUsage / haveBaseline guards + the
-      // baselineInputEff / actualInputEff locals computed earlier in
-      // update() so the lifetime totals block (above) and the per-session
-      // block (here) read the same values. Re-deriving them here would
-      // duplicate the cache-aware-baseline math and invite drift.
-      if (creditSaving) {
-        s.baselineInputWeighted += baselineInputEff;
-        s.actualInputWeighted += actualInputEff;
-        s.baselineMeasuredCount += 1;
-        // RAW, rate-free compression: real tokens sent vs the same body as text.
-        s.rawActualTokens += rawActual;
-        s.rawBaselineTokens += rawBaseline;
-        s.rawOutputTokens += out; // not compressed; added to BOTH sides for the honest total
-      }
-      // ALL-rows session bill — mirrors the global `if (haveUsage)` block
-      // above (allActualInputWeighted / allOutputWeighted). Used as the
-      // honest denominator for the session's saved-% so caching wins on
-      // unmeasured requests still count toward "what you actually paid".
-      if (haveUsage) {
-        s.allActualInputWeighted += actualInputEff;
-        s.allOutputWeighted += outputEquiv;
-      }
-    }
-
-    // Measurement totals are independent of usage/baseline gating — they
-    // accumulate whenever the scanner produced numbers. The scanner sets
-    // measurement to undefined on 5xx (no body to scan) and on unknown
-    // content-types; we count an event as "measured" when it has any.
-    const m = ev.measurement;
-    if (m) {
-      this.totals.textCharsMeasured += m.textChars;
-      this.totals.thinkingCharsMeasured += m.thinkingChars;
-      this.totals.toolUseCharsMeasured += m.toolUseChars;
-      this.totals.redactedBlockCountMeasured += m.redactedBlockCount;
-      this.totals.eventsWithMeasurement += 1;
-    }
+    this.applyTotals({
+      compressed,
+      haveUsage,
+      creditSaving,
+      actualInputEff,
+      baselineInputEff,
+      outputEquiv,
+      rawActual,
+      rawBaseline,
+      out,
+      sid: info?.firstUserSha8,
+      counters: {
+        artifactCandidates: info?.artifactCandidates ?? 0,
+        artifactWrites: info?.artifactWrites ?? 0,
+        sourceCharsVirtualized: info?.sourceCharsVirtualized ?? 0,
+        virtualizedCharsRemoved: info?.virtualizedCharsRemoved ?? 0,
+        duplicateCharsRemoved: info?.duplicateCharsRemoved ?? 0,
+        previewCharsSent: info?.previewCharsSent ?? 0,
+        deltaArtifacts: info?.deltaArtifacts ?? 0,
+        deltaCharsSent: info?.deltaCharsSent ?? 0,
+        deltaCharsRemoved: info?.deltaCharsRemoved ?? 0,
+        checkpointApplied: !!info?.checkpointApplied,
+        stateCharsRemoved: info?.stateCharsRemoved ?? 0,
+        checkpointRejected: !!info?.checkpointRejected,
+        virtualContextFailOpen: !!info?.virtualContextFailOpen,
+        contextToolCalls: info?.contextToolCalls ?? 0,
+        contextToolSuccesses: info?.contextToolSuccesses ?? 0,
+        contextResultChars: info?.contextResultChars ?? 0,
+        workspaceInspectCalls: info?.workspaceInspectCalls ?? 0,
+      },
+      measurement: ev.measurement
+        ? {
+            textChars: ev.measurement.textChars,
+            thinkingChars: ev.measurement.thinkingChars,
+            toolUseChars: ev.measurement.toolUseChars,
+            redactedBlockCount: ev.measurement.redactedBlockCount,
+          }
+        : undefined,
+    });
 
     const row: RecentRow = {
       ts: Date.now() / 1000,
@@ -976,6 +1029,7 @@ export class DashboardState {
       let creditSaving: boolean;
       let actualInputEff: number;
       let baselineInputEff: number;
+      let outputEquiv: number;
       let rawActual: number;
       let rawBaseline: number;
       let baselineForRow: number;
@@ -998,6 +1052,7 @@ export class DashboardState {
         creditSaving = e.creditSaving;
         actualInputEff = e.actualInputEff;
         baselineInputEff = e.baselineInputEff;
+        outputEquiv = e.outputEquiv;
         rawActual = e.rawActual;
         rawBaseline = e.rawBaseline;
         baselineForRow = e.rawBaseline;
@@ -1059,6 +1114,7 @@ export class DashboardState {
             if (firstKey !== undefined) this.baselineWarmth.delete(firstKey);
           }
         }
+        outputEquiv = haveUsage ? out * OUTPUT_TOKEN_RATE : 0;
         rawActual = inp + cc + cr;
         rawBaseline = baseline ?? 0;
         baselineForRow = baseline ?? 0;
@@ -1094,6 +1150,57 @@ export class DashboardState {
           this.contextHistory.splice(0, this.contextHistory.length - RECENT_CAP);
         }
       }
+
+      // Restore this row into the lifetime/session totals too — without this,
+      // /proxy-stats always reads zero after a restart no matter how much
+      // history is on disk. `counters` reads the persisted snake_case fields
+      // (see TrackEvent); measurement fields are only written when > 0
+      // (toTrackEvent), so an all-zero measured row is indistinguishable
+      // from an unmeasured one here — a minor, acceptable gap in a diagnostic count only.
+      this.applyTotals({
+        compressed,
+        haveUsage,
+        creditSaving,
+        actualInputEff,
+        baselineInputEff,
+        outputEquiv,
+        rawActual,
+        rawBaseline,
+        out,
+        sid: (t as { first_user_sha8?: string }).first_user_sha8,
+        counters: {
+          artifactCandidates: t.artifact_candidates ?? 0,
+          artifactWrites: t.artifact_writes ?? 0,
+          sourceCharsVirtualized: t.source_chars_virtualized ?? 0,
+          virtualizedCharsRemoved: t.virtualized_chars_removed ?? 0,
+          duplicateCharsRemoved: t.duplicate_chars_removed ?? 0,
+          previewCharsSent: t.preview_chars_sent ?? 0,
+          deltaArtifacts: t.delta_artifacts ?? 0,
+          deltaCharsSent: t.delta_chars_sent ?? 0,
+          deltaCharsRemoved: t.delta_chars_removed ?? 0,
+          checkpointApplied: !!t.checkpoint_applied,
+          stateCharsRemoved: t.state_chars_removed ?? 0,
+          checkpointRejected: !!t.checkpoint_rejected,
+          virtualContextFailOpen: !!t.virtual_context_fail_open,
+          contextToolCalls: t.context_tool_calls ?? 0,
+          contextToolSuccesses: t.context_tool_successes ?? 0,
+          contextResultChars: t.context_result_chars ?? 0,
+          workspaceInspectCalls: t.workspace_inspect_calls ?? 0,
+        },
+        measurement:
+          t.text_chars_measured !== undefined
+            || t.thinking_chars_measured !== undefined
+            || t.tool_use_chars_measured !== undefined
+            || t.redacted_block_count_measured !== undefined
+            ? {
+                textChars: t.text_chars_measured ?? 0,
+                thinkingChars: t.thinking_chars_measured ?? 0,
+                toolUseChars: t.tool_use_chars_measured ?? 0,
+                redactedBlockCount: t.redacted_block_count_measured ?? 0,
+              }
+            : undefined,
+      });
+
       const row: RecentRow = {
         ts: Date.parse(t.ts) / 1000,
         method: t.method,

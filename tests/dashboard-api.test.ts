@@ -489,6 +489,107 @@ describe('GPT savings split', () => {
     expect(row.actual_input).toBe(8200);
     expect(row.session_saved_so_far_delta).toBe(4200);
   });
+
+  it('replay() restores lifetime stats totals to match the live update() path, not just recent rows', async () => {
+    writeEvents(tmp, [
+      ev({
+        path: '/openai/responses',
+        model: 'gpt-5.6',
+        compressed: true,
+        input_tokens: 10000,
+        output_tokens: 200,
+        cached_tokens: 2000,
+        image_tokens: 8000,
+        baseline_imaged_tokens: 50000,
+        image_count: 1,
+        first_user_sha8: 'gptsess1',
+      }),
+    ]);
+
+    const live = new DashboardState(tmp, async () => new Map());
+    live.update(structuredClone(gptUpdate) as never);
+    const liveStats = (await live.serveStats().json()) as StatsPayload;
+
+    await dash.replay(tmp.eventsFile);
+    const replayedStats = (await dash.serveStats().json()) as StatsPayload;
+
+    expect(replayedStats.requests).toBe(1);
+    expect(replayedStats.requests).toBe(liveStats.requests);
+    expect(replayedStats.actual_input_weighted).toBe(liveStats.actual_input_weighted);
+    expect(replayedStats.baseline_input_weighted).toBe(liveStats.baseline_input_weighted);
+    expect(replayedStats.saved_input_tokens).toBe(liveStats.saved_input_tokens);
+    expect(replayedStats.output_weighted).toBe(liveStats.output_weighted);
+    expect(replayedStats.output_weighted).toBeGreaterThan(0);
+  });
+});
+
+describe('replay() restores totals (not just recent rows)', () => {
+  it('matches live update() lifetime + session + artifact + measurement totals for a compressed Anthropic row', async () => {
+    const live = new DashboardState(tmp, async () => new Map());
+    const proxyEv = {
+      method: 'POST',
+      path: '/v1/messages',
+      model: 'claude-opus-4',
+      status: 200,
+      durationMs: 100,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 20000,
+        cache_read_input_tokens: 0,
+      },
+      info: {
+        compressed: true,
+        firstUserSha8: 'anthsess1',
+        systemSha8: 'stable-system',
+        baselineProbeStatus: 'ok',
+        baselineTokens: 30000,
+        baselineCacheableTokens: 20000,
+        artifactCandidates: 3,
+        artifactWrites: 1,
+        contextToolCalls: 2,
+      },
+      measurement: { textChars: 500, thinkingChars: 10, toolUseChars: 20, redactedBlockCount: 0 },
+    };
+    live.update(structuredClone(proxyEv) as never);
+    const liveStats = (await live.serveStats().json()) as StatsPayload;
+
+    writeEvents(tmp, [
+      ev({
+        model: 'claude-opus-4',
+        compressed: true,
+        first_user_sha8: 'anthsess1',
+        system_sha8: 'stable-system',
+        baseline_probe_status: 'ok',
+        baseline_tokens: 30000,
+        baseline_cacheable_tokens: 20000,
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_create_tokens: 20000,
+        cache_read_tokens: 0,
+        artifact_candidates: 3,
+        artifact_writes: 1,
+        context_tool_calls: 2,
+        text_chars_measured: 500,
+        thinking_chars_measured: 10,
+        tool_use_chars_measured: 20,
+      }),
+    ]);
+    await dash.replay(tmp.eventsFile);
+    const replayedStats = (await dash.serveStats().json()) as StatsPayload;
+
+    expect(replayedStats.requests).toBe(1);
+    expect(replayedStats.actual_input_weighted).toBe(liveStats.actual_input_weighted);
+    expect(replayedStats.baseline_input_weighted).toBe(liveStats.baseline_input_weighted);
+    expect(replayedStats.saved_input_tokens).toBe(liveStats.saved_input_tokens);
+    expect(replayedStats.saved_input_tokens).toBeGreaterThan(0);
+    expect(replayedStats.artifact_candidates).toBe(3);
+    expect(replayedStats.artifact_writes).toBe(1);
+    expect(replayedStats.context_tool_calls).toBe(2);
+    expect(replayedStats.measured_text_chars).toBe(500);
+    expect(replayedStats.events_with_measurement).toBe(1);
+    expect(replayedStats.events_with_measurement).toBe(liveStats.events_with_measurement);
+  });
 });
 
 describe('server-observed warmth: text follows actual cache_read', () => {
